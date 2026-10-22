@@ -1,0 +1,61 @@
+extends SceneTree
+
+const Simulation = preload("res://scripts/simulation.gd")
+const Traffic = preload("res://scripts/traffic_system.gd")
+var failures: int = 0
+
+func check(condition: bool, message: String) -> void:
+	if not condition:
+		push_error(message)
+		failures += 1
+
+func _initialize() -> void:
+	call_deferred("run")
+
+func run() -> void:
+	var game := Simulation.new()
+	game.save_path = "user://review_regression_test.json"
+	game.budget = 5000
+	game.leak_fixed = true
+	game.signal_fixed = true
+	game.build(9, "cafe")
+	game.place_stop(0)
+	game.place_stop(4)
+	check(game.start_transit(), "Route starts")
+	var traffic := Traffic.new()
+	root.add_child(traffic)
+	traffic.build()
+	traffic.intersections.clear()
+	traffic.set_active_count(0)
+	game.transit.tick(3.1, traffic)
+	check(not game.transit.turning_out, "Initial boarding must not skip the first destination")
+	check(is_equal_approx(game.transit.target_z, game.transit.ROW_Z[4]), "First target is the second stop")
+	for step in range(500):
+		game.transit.tick(0.05, traffic)
+		if game.transit.trips > 0:
+			break
+	check(game.transit.trips == 1 and is_equal_approx(game.transit.coordinate, game.transit.ROW_Z[4]), "First trip stops at the destination before turning")
+	# Предпросмотр старого участка учитывает жителей расширенной территории.
+	for cell in [Vector2i(12, 19), Vector2i(13, 19), Vector2i(14, 19), Vector2i(14, 20), Vector2i(14, 21), Vector2i(14, 22), Vector2i(15, 21), Vector2i(16, 21), Vector2i(15, 22), Vector2i(16, 22)]:
+		check(game.clear_grid_cell(cell.x, cell.y), "Clear expansion")
+	for cell in [Vector2i(12, 19), Vector2i(13, 19), Vector2i(14, 19), Vector2i(14, 20), Vector2i(14, 21), Vector2i(14, 22)]:
+		check(game.build_grid_road(cell.x, cell.y), "Connect expansion")
+	check(game.build_grid_house(15, 21), "Build expansion home")
+	var before := game.population()
+	var predicted: Dictionary = game.project_change(0)
+	check(predicted.population == before + 4, "Upgrade preview retains expansion residents")
+	check(game.upgrade(0), "Apply predicted upgrade")
+	check(predicted == game.metrics(), "Preview and actual metrics agree after expansion")
+	check(game.demolish(0), "Demolish legacy home")
+	check(not game.territory.buildings.any(func(entry): return entry.get("legacy_plot", -1) == 0), "Demolition releases legacy footprint in territory")
+	check(game.build(0, "cafe"), "Rebuild legacy lot as cafe")
+	check(game.territory.buildings.any(func(entry): return entry.get("legacy_plot", -1) == 0 and entry.type_id == "cafe"), "Rebuilt type is synchronized with territory")
+	var loaded := Simulation.new()
+	loaded.save_path = game.save_path
+	check(loaded.load_game() and loaded.buildings[0] == "cafe", "Rebuilt district reloads")
+	check(loaded.territory.buildings.size() == game.territory.buildings.size(), "Synchronization does not duplicate building anchors")
+	traffic.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(game.save_path)
+	print("REVIEW REGRESSIONS: ", "PASS" if failures == 0 else "FAIL")
+	quit(0 if failures == 0 else 1)

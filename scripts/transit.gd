@@ -86,9 +86,10 @@ func tick(delta: float, traffic: Node3D) -> void:
 	if dwell > 0:
 		dwell = maxf(0, dwell - delta)
 		if dwell <= 0:
-			turning_out = true
 			var terminal: float = ROW_Z[stops[1] if direction == 1 else stops[0]]
-			target_z = terminal + direction * TURN_EXTENSION
+			# Начальная посадка не означает прибытие на противоположную конечную.
+			turning_out = is_equal_approx(coordinate, target_z)
+			target_z = terminal + direction * TURN_EXTENSION if turning_out else terminal
 	else:
 		var distance: float = traffic.travel_distance(bus, delta)
 		delay += maxf(0, delta - distance / traffic.SPEED)

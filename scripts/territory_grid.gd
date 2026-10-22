@@ -48,6 +48,22 @@ func migrate_legacy(legacy_buildings: Array) -> void:
 func in_bounds(col: int, row: int) -> bool:
 	return col >= 0 and col < WIDTH and row >= 0 and row < HEIGHT
 
+func sync_legacy(legacy_buildings: Array) -> void:
+	# Снос/застройка старого квартала должны обновлять и новую сетку.
+	if legacy_buildings.size() != 24:
+		return
+	for building in buildings:
+		if not building.has("legacy_plot"):
+			continue
+		for dy in range(2):
+			for dx in range(2):
+				var col: int = building.col + dx
+				var row: int = building.row + dy
+				if in_bounds(col, row) and cells[row][col] == "occupied":
+					cells[row][col] = "free"
+	buildings = buildings.filter(func(entry): return not entry.has("legacy_plot"))
+	migrate_legacy(legacy_buildings)
+
 func cell_world(col: int, row: int) -> Vector3:
 	return ORIGIN + Vector3(col * CELL_SIZE, 0, row * CELL_SIZE)
 

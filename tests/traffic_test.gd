@@ -109,6 +109,13 @@ func run() -> void:
 	var released: Dictionary = traffic.vehicles[0]
 	check(traffic.travel_distance(released, 0.5) > 2.2, "Traffic resumes after the service van leaves")
 	# Полный сценарий с тем же дорожным контроллером, который вызывает main.
+	# Изолированные проверки выше меняли полосы и удаляли перекрёстки.
+	traffic.queue_free()
+	await process_frame
+	traffic = Traffic.new()
+	root.add_child(traffic)
+	traffic.build()
+	check(traffic.intersections.size() == 49, "Integrated scenario retains all intersections")
 	traffic.set_active_count(8)
 	traffic.clock = 0
 	var game := Simulation.new()

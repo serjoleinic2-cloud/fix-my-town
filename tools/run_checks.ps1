@@ -1,4 +1,4 @@
-﻿param([string]$GodotPath = 'godot')
+param([string]$GodotPath = 'godot')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
@@ -21,4 +21,5 @@ Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--scr
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/building_levels_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/completion_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/territory_grid_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/review_regression_test.gd')
 Write-Host 'Все проверки пройдены.'

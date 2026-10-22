@@ -276,6 +276,7 @@ func check_complete() -> void:
 	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
 
 func save_game() -> void:
+	territory.sync_legacy(buildings)
 	var points: Array = []
 	for point: Vector3 in route:
 		points.append([point.x, point.y, point.z])
@@ -359,6 +360,7 @@ func load_game() -> bool:
 			return false
 	else:
 		loaded_territory = TerritoryGrid.new(stored)
+	loaded_territory.sync_legacy(stored)
 	transit = loaded_transit
 	territory = loaded_territory
 	budget = clampi(int(data.budget), 0, 1000000)
@@ -440,6 +442,7 @@ func project_change(index: int, demolition: bool = false) -> Dictionary:
 	var projected = get_script().new()
 	projected.buildings = buildings.duplicate()
 	projected.levels = levels.duplicate()
+	projected.territory.restore(territory.data())
 	projected.leak_fixed = leak_fixed
 	projected.signal_fixed = signal_fixed
 	projected.transit.restore(transit.data())

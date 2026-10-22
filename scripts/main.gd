@@ -5,6 +5,7 @@ const Catalog = preload("res://scripts/asset_catalog.gd")
 const AudioManager = preload("res://scripts/audio_manager.gd")
 const Simulation = preload("res://scripts/simulation.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
+const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 const Art = preload("res://scripts/art.gd")
 const INK = Color("252c38")
 const BLUE = Color("258ed2")
@@ -16,6 +17,7 @@ var camera: Camera3D
 var world: Node3D
 var scenery: Node3D
 var plots: Node3D
+var territory_visuals: Node3D
 var car: Node3D
 var signal_object: Node3D
 var leak_effect: Node3D
@@ -78,6 +80,10 @@ var transit_signature: String = ""
 var transit_stats: Label
 var stop_candidate: int = 0
 var placing_stop: bool = false
+var moving_stop_index: int = -1
+var territory_tool: String = "clear"
+var territory_cell := Vector2i(-1, -1)
+var territory_signature: String = ""
 var last_quality: float = -1
 var quality_trend: String = "→"
 const QUALITY_COLORS = [Color("df6356"), Color("e9994f"), Color("d8bd57"), Color("9fc76e"), Color("59a675")]
@@ -274,6 +280,7 @@ func build_ui() -> void:
 	state_button = button(tools, "", toggle_quality)
 	state_button.add_theme_font_size_override("font_size", 18)
 	transit_button = button(tools, "BUS", open_transit)
+	button(tools, tr_text("Земля", "Land"), open_territory)
 	quality_legend = card(screen)
 	var legend_column := VBoxContainer.new()
 	quality_legend.add_child(legend_column)
@@ -443,6 +450,9 @@ func build_world() -> void:
 			Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f"))
 	plots = Node3D.new()
 	world.add_child(plots)
+	territory_visuals = Node3D.new()
+	territory_visuals.name = "ExpansionTerritory"
+	world.add_child(territory_visuals)
 	signal_object = scenery.traffic_controller.get_problem_signal()
 	leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
 	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
@@ -489,9 +499,36 @@ func redraw_plots() -> void:
 		var base := object.get_node("PlotBase") as MeshInstance3D
 		base.material_override = Art.material(quality_color(game.house_quality(i).score) if quality_mode and kind == "house" else (Color("91a66f") if kind != "empty" else Color("9cab7a")))
 		object.set_language(game.language)
+	redraw_territory()
+
+func redraw_territory() -> void:
+	var signature := JSON.stringify(game.territory.data())
+	if signature == territory_signature:
+		return
+	territory_signature = signature
+	clear_children(territory_visuals)
+	var tile_visuals := Node3D.new()
+	tile_visuals.name = "GridCells"
+	territory_visuals.add_child(tile_visuals)
+	for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+		for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
+			var state: String = game.territory.state_at(col, row)
+			var center: Vector3 = game.territory.cell_world(col, row)
+			var color := Color("607e4c") if state == "forest" else (Color("9fbd77") if state in ["free", "occupied"] else Color("666e72"))
+			Art.box(tile_visuals, center + Vector3(0, 0.045, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.08, 0.09, TerritoryGrid.CELL_SIZE - 0.08), color)
+			if state == "forest":
+				Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9, true, row * 53 + col)
+			elif state == "road":
+				Art.box(tile_visuals, center + Vector3(0, 0.1, 0), Vector3(0.16, 0.025, 1.0), Color("d1d1c5"))
+	for entry: Dictionary in game.territory.buildings:
+		if entry.row < TerritoryGrid.EXPANSION_ROWS.x or entry.row > TerritoryGrid.EXPANSION_ROWS.y:
+			continue
+		var position: Vector3 = game.territory.cell_world(entry.col, entry.row) + Vector3(TerritoryGrid.CELL_SIZE / 2, 0, TerritoryGrid.CELL_SIZE / 2)
+		create_object(territory_visuals, entry.type_id, "district_%s_%s_%s" % [entry.type_id, entry.col, entry.row], position)
+	Art.batch(tile_visuals)
 
 func set_camera_focus(point: Vector3) -> void:
-	focus_point = Vector3(clampf(point.x, -35, 32), 0, clampf(point.z, -52, 52))
+	focus_point = Vector3(clampf(point.x, -55, 65), 0, clampf(point.z, -80, 105))
 	camera.position = focus_point + Vector3(70, 88, 70)
 	camera.look_at(focus_point)
 
@@ -567,6 +604,13 @@ func map_input(event: InputEvent) -> void:
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
 		return
+	if selection_kind == "territory":
+		var col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
+		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
+		if col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+			territory_cell = Vector2i(col, row)
+			apply_territory_tool()
+		return
 	if placing_stop:
 		var nearest := INF
 		for row in range(6):
@@ -581,15 +625,31 @@ func map_input(event: InputEvent) -> void:
 		if location.distance_to(hit) < 2.2:
 			select_problem(kind)
 			return
+	# Pick the dedicated object volume so a tap on a roof still selects its plot.
+	var ray_from: Vector3 = camera.project_ray_origin(point)
+	var query := PhysicsRayQueryParameters3D.create(ray_from, ray_from + camera.project_ray_normal(point) * 240.0, 1)
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	var collider: Object = world.get_world_3d().direct_space_state.intersect_ray(query).get("collider")
+	if collider is Area3D and collider.name == "InteractionArea":
+		var object: Node = collider.get_parent()
+		if object != null and object.name.begins_with("plot_"):
+			select_plot(int(object.name.trim_prefix("plot_")))
+			return
 	for i in range(24):
 		var location := map_position(game.plot_position(i))
 		if absf(location.x - hit.x) <= 4.6 and absf(location.z - hit.z) <= 4.6:
-			selected = i
-			selection_kind = "plot"
-			active_tab = "build_tab" if game.buildings[i] == "empty" else "district"
-			audio.play_ui("select")
-			refresh()
+			select_plot(i)
 			return
+
+func select_plot(index: int) -> void:
+	if index < 0 or index >= game.buildings.size():
+		return
+	selected = index
+	selection_kind = "plot"
+	active_tab = "build_tab" if game.buildings[index] == "empty" else "district"
+	audio.play_ui("select")
+	refresh()
 
 func select_problem(kind: String) -> void:
 	selection_kind = kind
@@ -627,6 +687,49 @@ func close_sheet() -> void:
 	selection_kind = ""
 	selected = -1
 	active_tab = "district"
+	refresh()
+
+func open_territory() -> void:
+	selection_kind = "territory"
+	selected = -1
+	territory_tool = "clear"
+	set_camera_focus(game.territory.cell_world(12, 22) + Vector3(5, 0, 12))
+	refresh()
+
+func build_territory_sheet() -> void:
+	action_height = 370
+	header(tr_text("Освоение территории", "Expand the city"))
+	for tool in ["clear", "road", "house"]:
+		var title := tr_text("Расчистить", "Clear") if tool == "clear" else (tr_text("Дорога", "Road") if tool == "road" else tr_text("Дом", "House"))
+		var choice := button(mode_switcher, title, set_territory_tool.bind(tool))
+		choice.custom_minimum_size.y = 72
+		choice.add_theme_font_size_override("font_size", 19)
+		if territory_tool == tool:
+			choice.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
+	var note := label(20, sheet_column, tr_text("Расчистка: 5 монет за клетку. Дорога: 12. Дом занимает 2×2 клетки и стоит 80.", "Clear: 5 coins per cell. Road: 12. A house occupies 2×2 cells and costs 80."))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var cell_text := tr_text("Клетка %d, %d · %s" % [territory_cell.x, territory_cell.y, game.territory.state_at(territory_cell.x, territory_cell.y)], "Cell %d, %d · %s" % [territory_cell.x, territory_cell.y, game.territory.state_at(territory_cell.x, territory_cell.y)]) if territory_cell.x >= 0 else tr_text("Выберите клетку на северной границе леса.", "Select a cell at the northern forest edge.")
+	label(19, sheet_column, cell_text)
+	var done := button(sheet_column, tr_text("Готово", "Done"), close_sheet)
+	done.custom_minimum_size.y = 72
+
+func set_territory_tool(tool: String) -> void:
+	territory_tool = tool
+	refresh()
+
+func apply_territory_tool() -> void:
+	var success := false
+	if territory_tool == "clear":
+		success = game.clear_grid_cell(territory_cell.x, territory_cell.y)
+	elif territory_tool == "road":
+		success = game.build_grid_road(territory_cell.x, territory_cell.y)
+	else:
+		success = game.build_grid_house(territory_cell.x, territory_cell.y)
+	if success:
+		audio.play_ui("success")
+		territory_signature = ""
+	else:
+		audio.play_ui("deny")
 	refresh()
 
 func switch_language() -> void:
@@ -709,6 +812,8 @@ func build_sheet() -> void:
 		build_upgrade_sheet()
 	elif selection_kind == "district_status":
 		build_district_sheet()
+	elif selection_kind == "territory":
+		build_territory_sheet()
 	elif selection_kind == "transit":
 		build_transit_sheet()
 	elif selection_kind in ["signal", "leak"]:
@@ -1197,6 +1302,7 @@ func open_transit() -> void:
 	selection_kind = "transit"
 	selected = -1
 	placing_stop = false
+	moving_stop_index = -1
 	refresh()
 
 func build_transit_sheet() -> void:
@@ -1218,12 +1324,17 @@ func build_transit_sheet() -> void:
 			button(row, "‹", change_stop_candidate.bind(-1))
 			label(22, row, tr_text("Место ", "Site ") + str(stop_candidate + 1))
 			button(row, "›", change_stop_candidate.bind(1))
-			var confirm := button(sheet_column, tr_text("Поставить остановку · 40", "Place stop · 40"), confirm_stop, true)
-			confirm.disabled = stop_candidate in game.transit.stops or game.budget < 40
+			var moving := moving_stop_index >= 0
+			var confirm := button(sheet_column, tr_text("Перенести сюда", "Move stop here") if moving else tr_text("Поставить остановку · 40", "Place stop · 40"), confirm_stop, true)
+			confirm.disabled = (stop_candidate in game.transit.stops and (not moving or game.transit.stops[moving_stop_index] != stop_candidate)) or (not moving and game.budget < 40)
 			button(sheet_column, t("cancel"), open_transit)
 		else:
 			button(sheet_column, tr_text("Разместить остановку · 40", "Place a stop · 40"), begin_stop_placement, true)
 	else:
+		for index in range(game.transit.stops.size()):
+			var stop_row := hbox(sheet_column)
+			label(19, stop_row, tr_text("Остановка %d · место %d" % [index + 1, game.transit.stops[index] + 1], "Stop %d · site %d" % [index + 1, game.transit.stops[index] + 1]))
+			button(stop_row, tr_text("Перенести", "Move"), begin_move_stop.bind(index))
 		var launch := button(sheet_column, tr_text("Маршрут работает", "Route running") if game.transit.active else tr_text("Запустить автобус · 60", "Start bus · 60"), launch_transit, true)
 		launch.disabled = game.transit.active or game.budget < 60
 	if placing_stop:
@@ -1233,7 +1344,17 @@ func build_transit_sheet() -> void:
 
 func begin_stop_placement() -> void:
 	placing_stop = true
+	moving_stop_index = -1
 	stop_candidate = 0 if game.transit.stops.is_empty() else 4
+	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
+	refresh()
+
+func begin_move_stop(index: int) -> void:
+	if index < 0 or index >= game.transit.stops.size():
+		return
+	placing_stop = true
+	moving_stop_index = index
+	stop_candidate = game.transit.stops[index]
 	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
 	refresh()
 
@@ -1243,8 +1364,10 @@ func change_stop_candidate(delta: int) -> void:
 	refresh()
 
 func confirm_stop() -> void:
-	if game.place_stop(stop_candidate):
+	var success: bool = game.move_stop(moving_stop_index, stop_candidate) if moving_stop_index >= 0 else game.place_stop(stop_candidate)
+	if success:
 		placing_stop = false
+		moving_stop_index = -1
 		audio.play_ui("success")
 	else:
 		audio.play_ui("deny")

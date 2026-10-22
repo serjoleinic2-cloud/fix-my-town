@@ -20,4 +20,5 @@ Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--scr
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/transit_quality_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/building_levels_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/completion_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/territory_grid_test.gd')
 Write-Host 'Все проверки пройдены.'

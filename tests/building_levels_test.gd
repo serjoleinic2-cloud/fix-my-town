@@ -115,9 +115,13 @@ func run() -> void:
 				var visual = object.visual_root.get_child(0)
 				if kind == "park":
 					var benches: Array = visual.find_children("ParkBench*", "Node3D", true, false)
-					var fountain := visual.find_child("FountainWater0", true, false) as Sprite3D
 					check(benches.size() == 2 and benches.all(func(item): return item.scale.x < 0.8 and absf(item.position.x) > 1.1 and absf(item.position.z) > 1.1), "Park benches are smaller and outside both paths")
-					check(fountain != null and fountain.billboard == BaseMaterial3D.BILLBOARD_ENABLED, "Fountain water uses camera-facing 2D sprites")
+					check(visual.find_children("*", "Sprite3D", true, false).is_empty(), "Park does not use the removed 2D fountain animation")
+					var tap := InputEventMouseButton.new()
+					tap.button_index = MOUSE_BUTTON_LEFT
+					tap.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(16) + Vector3(0, 0.5, 0))) * scene.viewport_container.stretch_shrink
+					scene.map_input(tap)
+					check(scene.selection_kind == "plot" and scene.selected == 16, "A tap on the built park selects its plot")
 				money = scene.game.budget
 				scene.begin_upgrade()
 				for i in range(12):

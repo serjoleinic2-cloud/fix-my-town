@@ -6,6 +6,7 @@ const STOP_COST: int = 40
 const BUS_COST: int = 60
 const UPKEEP: int = 3
 const CAPACITY: int = 32
+const TURN_EXTENSION: float = 28.8
 const ROW_Z = [-36.0, -21.6, -7.2, 7.2, 21.6, 36.0]
 var stops: Array = []
 var active: bool = false
@@ -13,6 +14,8 @@ var funded: bool = true
 var coordinate: float = -36
 var direction: int = 1
 var visual_direction: int = 1
+var target_z: float = -21.6
+var turning_out: bool = false
 var dwell: float = 0
 var delay: float = 0
 var last_delay: float = 0
@@ -26,7 +29,7 @@ func in_range(point: Vector3, row: int) -> bool:
 	return absf(point.x - stop.x) + absf(point.z - stop.z) <= WALK_RADIUS
 
 func data() -> Dictionary:
-	return {"type_id": "city_bus", "stops": stops, "active": active, "funded": funded, "coordinate": coordinate, "direction": direction, "visual_direction": visual_direction, "dwell": dwell, "delay": delay, "last_delay": last_delay, "trips": trips}
+	return {"type_id": "city_bus", "stops": stops, "active": active, "funded": funded, "coordinate": coordinate, "direction": direction, "visual_direction": visual_direction, "target_z": target_z, "turning_out": turning_out, "dwell": dwell, "delay": delay, "last_delay": last_delay, "trips": trips}
 
 func restore(value: Variant) -> bool:
 	if not value is Dictionary or value.get("type_id", "city_bus") != "city_bus":
@@ -46,15 +49,21 @@ func restore(value: Variant) -> bool:
 			return false
 	if value.has("visual_direction") and (not (value.visual_direction is float or value.visual_direction is int) or not is_finite(float(value.visual_direction)) or absf(float(value.visual_direction)) != 1.0):
 		return false
+	if typeof(value.get("turning_out", false)) != TYPE_BOOL:
+		return false
+	if value.has("target_z") and (not (value.target_z is float or value.target_z is int) or not is_finite(float(value.target_z)) or absf(float(value.target_z)) > 100):
+		return false
 	stops.clear()
 	for row in rows:
 		stops.append(int(row))
 	stops.sort()
 	active = value.get("active", false)
 	funded = value.get("funded", true)
-	coordinate = clampf(float(value.get("coordinate", -36)), ROW_Z[stops[0]] if stops.size() == 2 else -36, ROW_Z[stops[1]] if stops.size() == 2 else 36)
+	coordinate = clampf(float(value.get("coordinate", -36)), ROW_Z[stops[0]] - TURN_EXTENSION if stops.size() == 2 else -70, ROW_Z[stops[1]] + TURN_EXTENSION if stops.size() == 2 else 70)
 	direction = -1 if value.get("direction", 1) < 0 else 1
 	visual_direction = -1 if value.get("visual_direction", direction) < 0 else 1
+	target_z = float(value.get("target_z", ROW_Z[stops[1] if direction == 1 else stops[0]] if stops.size() == 2 else -21.6))
+	turning_out = value.get("turning_out", false)
 	dwell = clampf(float(value.get("dwell", 0)), 0, 3)
 	delay = clampf(float(value.get("delay", 0)), 0, 3600)
 	last_delay = clampf(float(value.get("last_delay", 0)), 0, 3600)
@@ -77,22 +86,24 @@ func tick(delta: float, traffic: Node3D) -> void:
 	if dwell > 0:
 		dwell = maxf(0, dwell - delta)
 		if dwell <= 0:
-			visual_direction = direction
+			turning_out = true
+			var terminal: float = ROW_Z[stops[1] if direction == 1 else stops[0]]
+			target_z = terminal + direction * TURN_EXTENSION
 	else:
-		var target: float = ROW_Z[stops[1] if direction == 1 else stops[0]]
 		var distance: float = traffic.travel_distance(bus, delta)
 		delay += maxf(0, delta - distance / traffic.SPEED)
-		coordinate = move_toward(coordinate, target, distance)
-		if is_equal_approx(coordinate, target):
-			trips += 1
-			last_delay = delay
-			delay = 0
-			dwell = 3
-			direction *= -1
+		coordinate = move_toward(coordinate, target_z, distance)
+		if is_equal_approx(coordinate, target_z):
+			if turning_out:
+				direction *= -1
+				visual_direction = direction
+				turning_out = false
+				target_z = ROW_Z[stops[1] if direction == 1 else stops[0]]
+			else:
+				trips += 1
+				last_delay = delay
+				delay = 0
+				dwell = 3
 	bus.coordinate = coordinate
-	# На конечной автобус плавно перестраивается на встречную полосу во время стоянки.
 	bus.direction = visual_direction
 	traffic.place_vehicle(bus)
-	if dwell > 0:
-		var progress: float = 1.0 - dwell / 3.0
-		bus.node.position.x = lerpf(ROAD_X - visual_direction, ROAD_X - direction, progress)

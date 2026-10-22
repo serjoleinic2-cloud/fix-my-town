@@ -44,6 +44,11 @@ func run() -> void:
 	check(not game.house_transit(16), "Stops alone do not provide service")
 	check(game.start_transit(), "One bus route launches")
 	check(not game.start_transit(), "No duplicate buses or charge")
+	var relocated_target: float = game.transit.target_z
+	check(game.move_stop(1, 5) and game.transit.stops == [0, 5], "A route stop can be relocated and stays ordered")
+	check(not game.move_stop(0, 5) and not game.move_stop(1, 5), "Duplicate and unchanged stop moves are rejected")
+	game.move_stop(1, 4)
+	check(is_equal_approx(game.transit.target_z, relocated_target), "Moving a stop during travel does not teleport or retarget the current leg")
 	check(game.transit_metrics().served > 0 and game.house_transit(16), "Route connects residents to workplace/cafe")
 	check(game.district_quality() > before, "Useful transit improves quality")
 	check(game.happiness() != roundi(game.district_quality()), "Mayor rating is independent")
@@ -72,24 +77,23 @@ func run() -> void:
 	game.transit.coordinate = 21.5
 	game.transit.direction = 1
 	game.transit.visual_direction = 1
+	game.transit.target_z = 21.6
+	game.transit.turning_out = false
 	game.transit.dwell = 0
 	traffic.place_vehicle(bus)
 	game.transit.tick(0.05, traffic)
-	check(is_equal_approx(game.transit.coordinate, 21.6) and game.transit.direction == -1 and game.transit.visual_direction == 1, "Bus begins a turnaround at the terminal without changing lanes instantly")
-	var previous_bus_x: float = bus.node.position.x
-	var largest_lane_step: float = 0
-	for i in range(20):
+	check(is_equal_approx(game.transit.coordinate, 21.6) and game.transit.direction == 1 and game.transit.dwell > 0, "Bus stops at the terminal before continuing beyond the district")
+	for i in range(61):
 		game.transit.tick(0.05, traffic)
-		largest_lane_step = maxf(largest_lane_step, absf(bus.node.position.x - previous_bus_x))
-		previous_bus_x = bus.node.position.x
-	check(largest_lane_step <= 0.04 and bus.node.position.x > -15.4 and bus.node.position.x < -13.4, "Bus changes lanes gradually while dwelling at a terminal")
-	for i in range(45):
+	check(game.transit.turning_out and game.transit.direction == 1 and bus.node.position.x < -15, "Bus keeps its lane and drives beyond the terminal")
+	for i in range(180):
 		game.transit.tick(0.05, traffic)
-	check(is_equal_approx(bus.node.position.x, -13.4) and game.transit.visual_direction == game.transit.direction, "Bus finishes its terminal turn in the return lane")
+	check(not game.transit.turning_out and game.transit.direction == -1 and game.transit.coordinate > 21.6 and bus.node.position.x > -14.4, "Bus turns beyond the visible district and returns on the opposite lane")
 	traffic.intersections = saved_intersections
 	game.transit.coordinate = -4.0
 	game.transit.direction = 1
 	game.transit.visual_direction = 1
+	game.transit.target_z = 0.0
 	game.transit.dwell = 0
 	traffic.clock = 0
 	game.transit.tick(0.1, traffic)
@@ -102,7 +106,7 @@ func run() -> void:
 	loaded.save_path = game.save_path
 	check(loaded.load_game(), "Transit save loads")
 	check(loaded.transit.stops == game.transit.stops and loaded.transit.active and loaded.transit.direction == game.transit.direction and loaded.transit.trips == game.transit.trips, "Stops, route and direction persist")
-	check(is_equal_approx(loaded.transit.coordinate, game.transit.coordinate) and is_equal_approx(loaded.transit.delay, game.transit.delay) and is_equal_approx(loaded.transit.dwell, game.transit.dwell), "Bus position, delay and dwell persist")
+	check(is_equal_approx(loaded.transit.coordinate, game.transit.coordinate) and is_equal_approx(loaded.transit.delay, game.transit.delay) and is_equal_approx(loaded.transit.dwell, game.transit.dwell) and is_equal_approx(loaded.transit.target_z, game.transit.target_z), "Bus position, target, delay and dwell persist")
 	check(is_equal_approx(loaded.district_quality(), game.district_quality()), "Quality recalculated after load")
 	for band in range(5):
 		check(Simulation.quality_band(band * 20) == band and Simulation.quality_band(band * 20 + 19) == band, "Band boundaries")

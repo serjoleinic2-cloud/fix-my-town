@@ -132,10 +132,27 @@ func run() -> void:
 	check(scene.selected == 7, "Map picking")
 	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-9, 0, 6))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
+	print("DEBUG leak map selection=", scene.selection_kind, " selected=", scene.selected)
 	check(scene.selection_kind == "leak", "Leak on map opens action panel")
 	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-6.3, 0, 0))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
+	print("DEBUG signal map selection=", scene.selection_kind, " selected=", scene.selected)
 	check(scene.selection_kind == "signal", "Signal on map opens action panel")
+	# Tap projected roof positions (not ground centers) across the full row set.
+	for index in range(24):
+		if scene.game.buildings[index] != "house":
+			continue
+		var roof_tap := InputEventMouseButton.new()
+		roof_tap.button_index = MOUSE_BUTTON_LEFT
+		roof_tap.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(index) + Vector3(0, 4.7, 0))) * scene.viewport_container.stretch_shrink
+		scene.map_input(roof_tap)
+		check(scene.selected == index and scene.selection_kind == "plot", "Tap on each house roof opens its building card: " + str(index))
+		var upgrade: Button = scene.sheet.find_child("UpgradeButton", true, false)
+		check(upgrade != null and not upgrade.disabled, "Each house exposes its improvement action: " + str(index))
+		if upgrade != null:
+			upgrade.pressed.emit()
+			check(scene.selection_kind == "upgrade", "House upgrade action opens its confirmation preview: " + str(index))
+			scene.cancel_upgrade()
 	for path in [staged.save_path, game.save_path, slow.save_path, fast.save_path, poor.save_path, scene.game.save_path]:
 		DirAccess.remove_absolute(path)
 	scene.set_process(false)

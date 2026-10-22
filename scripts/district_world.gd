@@ -55,6 +55,9 @@ func build() -> void:
 	for i in range(170):
 		var x := rng.randf_range(-65, 32)
 		var z := rng.randf_range(-78, 78)
+		# Северная кромка отдана расширяемой сетке территории.
+		if x >= -21.6 and x <= 26.4 and z >= 45.6 and z <= 88.8:
+			continue
 		if x > -64 and absf(z) < 49:
 			continue
 		Art.tree(self, Vector3(x, 0, z), rng.randf_range(1.1, 1.9), true, i)

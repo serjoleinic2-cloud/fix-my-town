@@ -1,7 +1,9 @@
 extends RefCounted
 
 const Transit = preload("res://scripts/transit.gd")
+const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 var transit = Transit.new()
+var territory = TerritoryGrid.new()
 const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
 
@@ -29,6 +31,7 @@ func _init() -> void:
 		levels.append(1)
 		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
 	buildings[2] = "depot"
+	territory = TerritoryGrid.new(buildings)
 
 func plot_position(index: int) -> Vector3:
 	return Vector3(-9 + (index % 4) * 6, 0, -7.5 + (index / 4) * 3)
@@ -60,6 +63,9 @@ func population() -> int:
 	var total := 0
 	for index in range(24):
 		total += house_residents(index)
+	for building in territory.buildings:
+		if building.type_id == "house" and not building.has("legacy_plot"):
+			total += 8
 	return total
 
 func has_water(index: int) -> bool:
@@ -107,6 +113,18 @@ func place_stop(row: int) -> bool:
 	save_game()
 	return true
 
+func move_stop(index: int, row: int) -> bool:
+	if not completed or index < 0 or index >= transit.stops.size() or row < 0 or row > 5:
+		return false
+	if row in transit.stops and transit.stops[index] != row or transit.stops[index] == row:
+		return false
+	transit.stops[index] = row
+	transit.stops.sort()
+	if transit.active and transit.dwell > 0:
+		transit.target_z = Transit.ROW_Z[transit.stops[1] if transit.direction == 1 else transit.stops[0]]
+	save_game()
+	return true
+
 func start_transit() -> bool:
 	if not completed or transit.active or transit.stops.size() != 2 or budget < Transit.BUS_COST:
 		return false
@@ -115,6 +133,8 @@ func start_transit() -> bool:
 	transit.funded = true
 	transit.coordinate = Transit.ROW_Z[transit.stops[0]]
 	transit.direction = 1
+	transit.visual_direction = 1
+	transit.target_z = Transit.ROW_Z[transit.stops[1]]
 	transit.dwell = 3
 	save_game()
 	return true
@@ -149,7 +169,31 @@ func income() -> int:
 	var total := 0
 	for i in range(24):
 		total += building_income(i)
+	for building in territory.buildings:
+		if building.type_id == "house" and not building.has("legacy_plot"):
+			total += 1
 	return maxi(4, total)
+
+func clear_grid_cell(col: int, row: int) -> bool:
+	if budget < 5 or not territory.clear_cell(col, row):
+		return false
+	budget -= 5
+	save_game()
+	return true
+
+func build_grid_road(col: int, row: int) -> bool:
+	if budget < 12 or not territory.place_road(col, row):
+		return false
+	budget -= 12
+	save_game()
+	return true
+
+func build_grid_house(col: int, row: int) -> bool:
+	if budget < Catalog.cost("house") or not territory.build_house(col, row):
+		return false
+	budget -= Catalog.cost("house")
+	save_game()
+	return true
 
 func build(index: int, kind: String) -> bool:
 	if index < 0 or index >= 24 or buildings[index] != "empty" or kind not in ["house", "cafe", "park"]:
@@ -235,7 +279,7 @@ func save_game() -> void:
 	var points: Array = []
 	for point: Vector3 in route:
 		points.append([point.x, point.y, point.z])
-	var data := {"version": 2, "levels": levels, "completed": completed, "vehicle_type_id": "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
+	var data := {"version": 3, "levels": levels, "completed": completed, "city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
 		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data()}
@@ -253,7 +297,7 @@ func load_game() -> bool:
 	if file == null:
 		return false
 	var data = JSON.parse_string(file.get_as_text())
-	if not data is Dictionary or (data.get("version") != 1 and data.get("version") != 2):
+	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3]:
 		return false
 	var stored = data.get("buildings", [])
 	if not stored is Array or stored.size() != 24:
@@ -308,7 +352,15 @@ func load_game() -> bool:
 	var loaded_transit := Transit.new()
 	if not loaded_transit.restore(data.get("transit", {})):
 		return false
+	var loaded_territory := TerritoryGrid.new()
+	var district_data: Variant = data.get("districts", {}).get("pine_district") if data.get("districts", {}) is Dictionary else null
+	if district_data != null:
+		if not loaded_territory.restore(district_data):
+			return false
+	else:
+		loaded_territory = TerritoryGrid.new(stored)
 	transit = loaded_transit
+	territory = loaded_territory
 	budget = clampi(int(data.budget), 0, 1000000)
 	language = "en" if data.get("language") == "en" else "ru"
 	leak_fixed = data.leak_fixed

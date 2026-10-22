@@ -3,34 +3,69 @@ extends Node3D
 const GameObjectScene = preload("res://scenes/objects/game_object.tscn")
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const AudioManager = preload("res://scripts/audio_manager.gd")
-var audio: Node
-var audio_button: Button
-var ui_theme: Theme
-var signal_object: Node3D
-
 const Simulation = preload("res://scripts/simulation.gd")
+const DistrictWorld = preload("res://scripts/district_world.gd")
+const Art = preload("res://scripts/art.gd")
+const INK = Color("252c38")
+const BLUE = Color("258ed2")
+const PAPER = Color("fbf9f4")
+const SETTINGS_PATH = "user://graphics_settings.json"
 var game = Simulation.new()
+var audio: Node
 var camera: Camera3D
 var world: Node3D
+var scenery: Node3D
 var plots: Node3D
 var car: Node3D
+var signal_object: Node3D
 var leak_effect: Node3D
-var stats: Label
+var sunlight: DirectionalLight3D
+var viewport_container: SubViewportContainer
+var screen: Control
+var hud: MarginContainer
+var navbar: PanelContainer
+var sheet: PanelContainer
+var sheet_column: VBoxContainer
+var mission: PanelContainer
 var objective: Label
+var stats: Label
 var details: Label
 var status: Label
-var action_box: HBoxContainer
+var action_box: VBoxContainer
+var budget_label: Label
+var rating_label: Label
+var district_label: Label
 var language_button: Button
+var audio_button: Button
+var reset_button: Button
 var signal_button: Button
 var leak_button: Button
-var reset_button: Button
-var viewport_container: SubViewportContainer
+var progress_bar: ProgressBar
+var ui_theme: Theme
+var nav_buttons: Dictionary = {}
 var selected: int = -1
-var selection_kind: String = "signal"
-var save_clock: float = 0.0
-var elapsed: float = 0.0
-
-
+var selection_kind: String = ""
+var preview_kind: String = "cafe"
+var active_tab: String = "district"
+var preview: Node3D
+var highlights: Node3D
+var quality: String = "high"
+var settings_path: String = SETTINGS_PATH
+var focus_point := Vector3(-15, 0, 27)
+var save_clock: float = 0
+var elapsed: float = 0
+var drag_start := Vector2.ZERO
+var drag_previous := Vector2.ZERO
+var dragging: bool = false
+var drag_moved: bool = false
+var safe_override := Vector4.ZERO
+var safe_top: float = 16
+var safe_bottom: float = 12
+var action_height: float = 390
+var updating_layout: bool = false
+var mode_switcher: HBoxContainer
+var render_scale: float = 1.0
+var diagnostic_clock: float = 0.0
 const TEXT = {
 	"title": ["FIX MY TOWN · Мэрия", "FIX MY TOWN · City Hall"],
 	"goal": ["1. Почините светофор и протечку\n2. Постройте кафе или парк", "1. Repair the signal and water leak\n2. Build a café or park"],
@@ -52,6 +87,26 @@ const TEXT = {
 	"audio_done": ["Готово", "Done"], "audio": ["Звук", "Sound"], "Ambience": ["Окружение", "Ambience"],
 	"Effects": ["Эффекты", "Effects"], "Interface": ["Интерфейс", "Interface"], "Music": ["Музыка", "Music"],
 	"music_note": ["Музыка пока не добавлена. Можно играть без звука.", "Music is not added yet. All cues are also visual."]
+,
+ "district": ["Район", "District"], "district_name": ["Сосновый район", "Pine District"],
+ "build_tab": ["Строить", "Build"], "services": ["Службы", "Services"], "rating": ["Рейтинг %d", "Rating %d"],
+ "leak_title": ["Прорыв трубы", "Burst water pipe"], "signal_title": ["Сломан светофор", "Broken traffic signal"],
+ "leak_subtitle": ["Без воды: 3 дома", "3 homes without water"], "signal_subtitle": ["Перекрёсток задерживает службы", "Intersection delays service vehicles"],
+ "permanent_repair": ["Восстановить обслуживание", "Restore the service"], "cost": ["Стоимость", "Cost"],
+ "comfort": ["Комфорт", "Comfort"], "preview_title": ["Построить %s", "Build a %s"],
+ "dispatch": ["Отправить бригаду", "Dispatch crew"], "crew_available": ["Свободно бригад: 1", "Crews available: 1"],
+ "crew_unavailable": ["Бригада выполняет поручение", "Crew is on an assignment"],
+ "mission_water": ["Верните воду в 3 дома", "Restore water to 3 homes"],
+ "mission_signal": ["Восстановите перекрёсток", "Restore the intersection"],
+ "mission_build": ["Постройте кафе или парк", "Build a café or a park"],
+ "mission_done": ["Квартал снова живёт!", "The district is thriving!"],
+ "build_confirm": ["Построить", "Build"], "nearby_bonus": ["Влияние на соседние дома", "Nearby homes benefit"],
+ "residents": ["Жители: %d   •   Доход: +%d", "Residents: %d   •   Income: +%d"],
+ "construction_mode": ["Строительство", "Construction"],
+ "route_title": ["Маршрут службы", "Service route"],
+ "route_delayed": ["Сломанный светофор задерживает машину", "The broken signal delays the vehicle"],
+ "route_clear": ["Перекрёсток исправен: путь свободен", "Signal repaired: the route is clear"],
+ "repair_duration": ["Работы на месте: 4 сек.", "On-site work: 4 sec"]
 }
 
 func t(key: String) -> String:
@@ -59,197 +114,317 @@ func t(key: String) -> String:
 
 func _ready() -> void:
 	game.load_game()
+	load_graphics()
 	build_ui()
 	build_world()
 	audio = AudioManager.new()
 	add_child(audio)
 	audio.setup(world)
+	apply_quality()
 	refresh()
 	get_tree().auto_accept_quit = false
 
-func label(size: int, parent: Node) -> Label:
+func style(color: Color, radius: int = 14, border: Color = Color.TRANSPARENT) -> StyleBoxFlat:
+	var value := StyleBoxFlat.new()
+	value.bg_color = color
+	value.set_corner_radius_all(radius)
+	value.set_border_width_all(1 if border.a > 0 else 0)
+	value.border_color = border
+	value.content_margin_left = 16
+	value.content_margin_right = 16
+	value.content_margin_top = 12
+	value.content_margin_bottom = 12
+	return value
+
+func label(size_value: int, parent: Node, text_value: String = "", bold: bool = false) -> Label:
 	var item := Label.new()
-	item.add_theme_font_size_override("font_size", size)
-	item.add_theme_color_override("font_color", Color("243d44"))
+	item.text = text_value
+	item.add_theme_font_size_override("font_size", size_value)
+	item.add_theme_color_override("font_color", INK)
+	if bold:
+		var font := FontVariation.new()
+		font.base_font = ThemeDB.fallback_font
+		font.variation_embolden = 0.5
+		item.add_theme_font_override("font", font)
+	item.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(item)
 	return item
 
-func button(parent: Node, text_value: String, callback: Callable) -> Button:
+func button(parent: Node, text_value: String, callback: Callable, primary: bool = false) -> Button:
 	var item := Button.new()
 	item.text = text_value
-	item.custom_minimum_size.y = 50
+	item.custom_minimum_size.y = 72
 	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item.add_theme_font_size_override("font_size", 26)
+	var font := FontVariation.new()
+	font.base_font = ThemeDB.fallback_font
+	font.variation_embolden = 0.35
+	item.add_theme_font_override("font", font)
+	item.add_theme_stylebox_override("normal", style(BLUE if primary else Color("f2f2ee"), 12, Color.TRANSPARENT if primary else Color("dddcd6")))
+	item.add_theme_stylebox_override("hover", style(Color("3c9cda") if primary else Color("e3eff7")))
+	item.add_theme_stylebox_override("pressed", style(Color("187bb9") if primary else Color("d5e8f5")))
+	item.add_theme_stylebox_override("disabled", style(Color("dbddd9")))
+	for property_name in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		item.add_theme_color_override(property_name, Color.WHITE if primary else INK)
+	item.add_theme_color_override("font_disabled_color", Color("89949b"))
 	item.pressed.connect(func():
 		if audio != null:
-			audio.play_ui("click"))
-	item.gui_input.connect(func(event: InputEvent):
-		if item.disabled and event is InputEventMouseButton and event.pressed and audio != null:
-			audio.play_ui("deny"))
+			audio.play_ui())
 	item.pressed.connect(callback)
+	parent.add_child(item)
+	return item
+
+func icon(parent: Node, key: String, size_value: int = 32) -> TextureRect:
+	var item := TextureRect.new()
+	item.texture = load("res://assets/icons/ui_" + key + ".svg")
+	item.custom_minimum_size = Vector2(size_value, size_value)
+	item.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	item.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	item.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(item)
+	return item
+
+func hbox(parent: Node, separation: int = 12) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", separation)
+	parent.add_child(row)
+	return row
+
+func card(parent: Node, color: Color = PAPER) -> PanelContainer:
+	var item := PanelContainer.new()
+	item.add_theme_stylebox_override("panel", style(color))
 	parent.add_child(item)
 	return item
 
 func build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	var background := ColorRect.new()
-	background.color = Color("edf2eb")
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.add_child(background)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	layer.add_child(margin)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
-	var theme := Theme.new()
-	ui_theme = theme
-	theme.default_font_size = 19
-	theme.set_color("font_color", "Label", Color("243d44"))
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("d6e5d9")
-	style.set_corner_radius_all(12)
-	style.content_margin_left = 10
-	style.content_margin_right = 10
-	style.content_margin_top = 5
-	style.content_margin_bottom = 5
-	theme.set_stylebox("normal", "Button", style)
-	var panel_style := style.duplicate() as StyleBoxFlat
-	panel_style.bg_color = Color("edf2eb")
-	theme.set_stylebox("panel", "AcceptDialog", panel_style)
-	theme.set_stylebox("panel", "ConfirmationDialog", panel_style)
-	var hover := style.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("b8d5c2")
-	theme.set_stylebox("hover", "Button", hover)
-	theme.set_stylebox("pressed", "Button", hover)
-	for property_name in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-		theme.set_color(property_name, "Button", Color("243d44"))
-	column.theme = theme
-	var heading := HBoxContainer.new()
-	column.add_child(heading)
-	var title := label(23, heading)
-	title.name = "Title"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	language_button = button(heading, "EN", switch_language)
-	language_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-	stats = label(22, column)
-	objective = label(18, column)
+	screen = Control.new()
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(screen)
+	ui_theme = Theme.new()
+	ui_theme.default_font_size = 22
+	ui_theme.set_color("font_color", "Label", INK)
+	ui_theme.set_color("font_color", "Button", INK)
+	ui_theme.set_stylebox("panel", "AcceptDialog", style(PAPER))
+	ui_theme.set_stylebox("panel", "ConfirmationDialog", style(PAPER))
+	screen.theme = ui_theme
 	viewport_container = SubViewportContainer.new()
 	viewport_container.stretch = true
-	viewport_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	viewport_container.custom_minimum_size.y = 300
-	column.add_child(viewport_container)
+	viewport_container.position = Vector2.ZERO
+	screen.add_child(viewport_container)
 	var viewport := SubViewport.new()
-	viewport.size = Vector2i(508, 450)
+	viewport.size = Vector2i(540, 1200)
 	viewport.audio_listener_enable_3d = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	viewport_container.add_child(viewport)
 	world = Node3D.new()
 	viewport.add_child(world)
-	viewport_container.gui_input.connect(map_input)
-	var zoom_row := HBoxContainer.new()
-	column.add_child(zoom_row)
-	var zoom_label := label(16, zoom_row)
-	zoom_label.name = "ZoomLabel"
-	var zoom := HSlider.new()
-	zoom.min_value = 25
-	zoom.max_value = 39
-	zoom.value = 33
-	zoom.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	zoom_row.add_child(zoom)
-	zoom.value_changed.connect(func(value: float): camera.size = value)
-	var problems := HBoxContainer.new()
-	column.add_child(problems)
-	signal_button = button(problems, "", select_problem.bind("signal"))
-	leak_button = button(problems, "", select_problem.bind("leak"))
-	details = label(18, column)
-	details.custom_minimum_size.y = 56
-	details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	action_box = HBoxContainer.new()
-	action_box.custom_minimum_size.y = 62
-	column.add_child(action_box)
-	status = label(17, column)
-	var footer := HBoxContainer.new()
-	column.add_child(footer)
-	var save_label := label(12, footer)
-	save_label.name = "SaveLabel"
-	save_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	audio_button = button(footer, "", open_audio_settings)
-	audio_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-	audio_button.custom_minimum_size.y = 36
-	reset_button = button(footer, "", confirm_reset)
-	reset_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-	reset_button.custom_minimum_size.y = 36
+	viewport_container.gui_input.connect(handle_map_gesture)
+	mode_switcher = HBoxContainer.new()
+	mode_switcher.add_theme_constant_override("separation", 8)
+	screen.add_child(mode_switcher)
+	hud = MarginContainer.new()
+	screen.add_child(hud)
+	var top_row := hbox(hud, 8)
+	var name_card := card(top_row)
+	name_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	district_label = label(20, name_card, "", true)
+	district_label.clip_text = true
+	district_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var budget_card := card(top_row)
+	var budget_row := hbox(budget_card, 5)
+	icon(budget_row, "coin", 25)
+	budget_label = label(22, budget_row, "", true)
+	var rating_card := card(top_row)
+	var rating_row := hbox(rating_card, 5)
+	icon(rating_row, "star", 26)
+	rating_label = label(18, rating_row, "", true)
+	var tools := VBoxContainer.new()
+	tools.name = "MapTools"
+	tools.add_theme_constant_override("separation", 4)
+	screen.add_child(tools)
+	language_button = button(tools, "EN", switch_language)
+	language_button.hide()
+	audio_button = button(tools, "☷", open_settings)
+	button(tools, "+", change_zoom.bind(-7.0)).hide()
+	button(tools, "−", change_zoom.bind(7.0)).hide()
+	button(tools, "⌖", focus_problem).hide()
+	for child in tools.get_children():
+		child.custom_minimum_size = Vector2(72, 72)
+		child.add_theme_font_size_override("font_size", 25)
+		child.add_theme_stylebox_override("normal", style(Color(0.98, 0.97, 0.94, 0.93), 14))
+	mission = card(screen)
+	var mission_row := hbox(mission, 14)
+	var tile := card(mission_row, Color("dceefa"))
+	icon(tile, "drop", 38)
+	var mission_column := VBoxContainer.new()
+	mission_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mission_row.add_child(mission_column)
+	var goal_row := hbox(mission_column)
+	objective = label(23, goal_row, "", true)
+	objective.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var counter := label(21, goal_row, "", true)
+	counter.name = "MissionCounter"
+	progress_bar = ProgressBar.new()
+	progress_bar.custom_minimum_size.y = 12
+	progress_bar.show_percentage = false
+	progress_bar.max_value = 3
+	progress_bar.add_theme_stylebox_override("background", style(Color("dbddd9"), 6))
+	progress_bar.add_theme_stylebox_override("fill", style(Color("3c9ed8"), 6))
+	mission_column.add_child(progress_bar)
+	sheet = card(screen)
+	sheet.resized.connect(func():
+		if not updating_layout:
+			call_deferred("update_layout"))
+	sheet_column = VBoxContainer.new()
+	sheet_column.add_theme_constant_override("separation", 10)
+	sheet.add_child(sheet_column)
+	navbar = card(screen)
+	var navigation := hbox(navbar, 8)
+	for key in ["district", "build_tab", "services"]:
+		var item := button(navigation, "", select_tab.bind(key))
+		item.custom_minimum_size.y = 90
+		var content := VBoxContainer.new()
+		content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		content.offset_top = 7
+		content.offset_bottom = -7
+		content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		item.add_child(content)
+		icon(content, {"district": "pin", "build_tab": "hammer", "services": "people"}[key], 32)
+		var caption := label(24, content, "", true)
+		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		caption.name = "Caption"
+		nav_buttons[key] = item
+	stats = label(20, screen)
+	stats.hide()
+	screen.resized.connect(update_layout)
+	update_layout()
 
-func box(parent: Node3D, position_value: Vector3, size_value: Vector3, color: Color) -> MeshInstance3D:
-	var mesh := MeshInstance3D.new()
-	var shape := BoxMesh.new()
-	shape.size = size_value
-	mesh.mesh = shape
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.85
-	mesh.material_override = material
-	mesh.position = position_value
-	parent.add_child(mesh)
-	return mesh
+func update_layout() -> void:
+	if updating_layout or navbar == null:
+		return
+	updating_layout = true
+	var size_value := screen.size
+	var physical_width: float = get_viewport().get_texture().get_width()
+	render_scale = clampf(physical_width / maxf(1, size_value.x), 1.0, 2.0) if quality == "high" else 1.0
+	viewport_container.scale = Vector2.ONE / render_scale
+	viewport_container.size = size_value * render_scale
+	safe_top = maxf(16, safe_override.y)
+	safe_bottom = maxf(12, safe_override.w)
+	var safe_left := maxf(16, safe_override.x)
+	var safe_right := maxf(16, safe_override.z)
+	if OS.has_feature("android") or OS.has_feature("ios"):
+		var safe := DisplayServer.get_display_safe_area()
+		var physical := DisplayServer.window_get_size()
+		if safe.size.x > 0 and physical.x > 0:
+			var ratio := size_value.x / physical.x
+			safe_top = maxf(safe_top, safe.position.y * ratio + 8)
+			safe_bottom = maxf(safe_bottom, (physical.y - safe.end.y) * ratio + 8)
+			safe_left = maxf(safe_left, safe.position.x * ratio + 8)
+			safe_right = maxf(safe_right, (physical.x - safe.end.x) * ratio + 8)
+	hud.position = Vector2(safe_left, safe_top + 10)
+	hud.size = Vector2(size_value.x - safe_left - safe_right, 56)
+	var tools := screen.get_node("MapTools") as Control
+	tools.position = Vector2(size_value.x - safe_right - 72, safe_top + 84)
+	navbar.position = Vector2(0, size_value.y - safe_bottom - 114)
+	navbar.size = Vector2(size_value.x, 114 + safe_bottom)
+	var nav_style := style(PAPER, 0)
+	nav_style.content_margin_left = safe_left
+	nav_style.content_margin_right = safe_right
+	nav_style.content_margin_bottom = safe_bottom
+	navbar.add_theme_stylebox_override("panel", nav_style)
+	mission.position = Vector2(safe_left, navbar.position.y - 108)
+	mission.size = Vector2(size_value.x - safe_left - safe_right, 88)
+	var service_mode: bool = selection_kind in ["signal", "leak"]
+	navbar.visible = not service_mode
+	if service_mode:
+		sheet.position = Vector2(0, size_value.y - safe_bottom - action_height)
+		sheet.size = Vector2(size_value.x, action_height + safe_bottom)
+		var service_style := style(PAPER, 22)
+		service_style.content_margin_left = safe_left
+		service_style.content_margin_right = safe_right
+		service_style.content_margin_bottom = safe_bottom
+		sheet.add_theme_stylebox_override("panel", service_style)
+		var required := maxf(action_height + safe_bottom, sheet.get_combined_minimum_size().y)
+		sheet.size.y = required
+		sheet.position.y = size_value.y - required
+	else:
+		sheet.position = Vector2(safe_left, navbar.position.y - action_height - 12)
+		sheet.size = Vector2(size_value.x - safe_left - safe_right, maxf(action_height, sheet.get_combined_minimum_size().y))
+		sheet.position.y = navbar.position.y - sheet.size.y - 12
+	mode_switcher.position = Vector2(safe_left, safe_top + 92)
+	mode_switcher.size = Vector2(minf(360, size_value.x - 150), 72)
+	updating_layout = false
 
-func marker(parent: Node3D, pos: Vector3, text_value: String, color: Color) -> void:
-	var item := Label3D.new()
-	item.text = text_value
-	item.position = pos
-	item.font_size = 64
-	item.pixel_size = 0.02
-	item.outline_size = 2
-	item.no_depth_test = true
-	item.modulate = color
-	item.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	parent.add_child(item)
+func map_position(point: Vector3) -> Vector3:
+	return DistrictWorld.world_position(point)
 
 func build_world() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 33
-	camera.position = Vector3(21, 29, 27)
+	camera.size = 76
+	camera.far = 400
 	world.add_child(camera)
-	camera.look_at(Vector3.ZERO)
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-55, -30, 0)
-	light.light_energy = 1.15
-	world.add_child(light)
+	set_camera_focus(focus_point)
+	sunlight = DirectionalLight3D.new()
+	sunlight.rotation_degrees = Vector3(-48, -33, 0)
+	sunlight.light_color = Color("fff9ec")
+	sunlight.light_energy = 0.65
+	sunlight.shadow_enabled = true
+	sunlight.shadow_opacity = 0.65
+	sunlight.directional_shadow_max_distance = 190
+	world.add_child(sunlight)
 	var environment := WorldEnvironment.new()
 	environment.environment = Environment.new()
 	environment.environment.background_mode = Environment.BG_COLOR
-	environment.environment.background_color = Color("cdded9")
+	environment.environment.background_color = Color("8eaa69")
 	environment.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.environment.ambient_light_color = Color("ffffff")
-	environment.environment.ambient_light_energy = 0.65
+	environment.environment.ambient_light_color = Color("d9e4e2")
+	environment.environment.ambient_light_energy = 0.8
+	environment.environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	world.add_child(environment)
-	box(world, Vector3(0, -0.35, 0), Vector3(26, 0.6, 21), Color("8fb69a"))
-	for z in [-9, -6, -3, 0, 3, 6, 9]:
-		box(world, Vector3(0, 0, z), Vector3(25, 0.08, 1.15), Color("647578"))
-		for x in range(-11, 12, 3):
-			box(world, Vector3(x, 0.055, z), Vector3(0.8, 0.02, 0.07), Color("c8cebc"))
-	box(world, Vector3(-7, 0.015, 0), Vector3(1.1, 0.1, 19), Color("647578"))
-	signal_object = create_object(world, "traffic_signal", "intersection_0", Vector3(-6.3, 0, 0))
-	marker(world, Vector3(-6.3, 3.2, 0), "!", Color("ffe6a6"))
-	world.get_child(world.get_child_count() - 1).name = "SignalMarker"
+	scenery = DistrictWorld.new()
+	world.add_child(scenery)
+	scenery.build()
+	var backdrop := Node3D.new()
+	backdrop.name = "NeighborhoodBackdrop"
+	world.add_child(backdrop)
+	for x in [-50.4, -36]:
+		for z in [-36, -21.6, -7.2, 7.2, 21.6, 36]:
+			var kind := "park" if x == -36 and z == -7.2 else "house"
+			var object := create_object(backdrop, kind, "backdrop_%s_%s" % [x, z], Vector3(x, 0, z))
+			object.interaction_area.collision_layer = 0
+			object.set_serviced(true)
+			Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f"))
 	plots = Node3D.new()
 	world.add_child(plots)
-	car = create_object(world, "repair_van", "crew_0", game.vehicle)
-	marker(world, Vector3(-9, 3.0, 6), "!", Color("63d8ff"))
-	world.get_child(world.get_child_count() - 1).name = "LeakMarker"
-	leak_effect = create_object(world, "water_leak", "leak_0", Vector3(-9, 0, 6))
+	signal_object = scenery.traffic_controller.get_problem_signal()
+	leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
+	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
+	make_marker("SignalMarker", Vector3(-14.4, 5, 0))
+	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
+	highlights = Node3D.new()
+	world.add_child(highlights)
 
-func create_object(parent: Node3D, type_id: String, persistent_id: String, pos: Vector3) -> Node3D:
+func create_object(parent: Node3D, type_id: String, persistent_id: String, point: Vector3) -> Node3D:
 	var object := GameObjectScene.instantiate()
 	object.name = persistent_id
 	parent.add_child(object)
 	object.setup(type_id, persistent_id)
-	object.position = pos
+	object.position = point
 	return object
+
+func make_marker(marker_name: String, point: Vector3) -> void:
+	var marker := Sprite3D.new()
+	marker.name = marker_name
+	marker.texture = load("res://assets/icons/problem_marker.svg")
+	marker.pixel_size = 0.035
+	marker.position = point
+	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	marker.no_depth_test = true
+	world.add_child(marker)
 
 func redraw_plots() -> void:
 	for i in range(24):
@@ -260,61 +435,139 @@ func redraw_plots() -> void:
 			object.queue_free()
 			object = null
 		if object == null:
-			object = create_object(plots, kind, "plot_" + str(i), game.plot_position(i))
-			var base := box(object, Vector3(0, 0.05, 0), Vector3(4.5, 0.12, 1.65), Color("a9c7a1"))
+			object = create_object(plots, kind, "plot_" + str(i), map_position(game.plot_position(i)))
+			var base := Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f") if kind != "empty" else Color("9cab7a"))
 			base.name = "PlotBase"
-			if kind == "empty":
-				marker(object, Vector3(0, 0.4, 0), "+", Color("eef4df"))
-			elif Catalog.TYPES[kind].has("icon"):
-				var icon := Sprite3D.new()
-				icon.texture = load(Catalog.TYPES[kind].icon)
-				icon.position = Vector3(0, 2.8, 0)
-				icon.pixel_size = 0.014
-				icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-				icon.no_depth_test = true
-				object.add_child(icon)
-		object.get_node("PlotBase").material_override.albedo_color = Color("f3d59b") if selected == i else Color("a9c7a1")
 		object.set_serviced(game.leak_fixed)
+		object.set_language(game.language)
+
+func set_camera_focus(point: Vector3) -> void:
+	focus_point = Vector3(clampf(point.x, -35, 32), 0, clampf(point.z, -52, 52))
+	camera.position = focus_point + Vector3(70, 88, 70)
+	camera.look_at(focus_point)
+
+func focus_problem() -> void:
+	var point := map_position(Vector3(-9, 0, 6)) if not game.leak_fixed else Vector3(-14.4, 0, 0)
+	set_camera_focus(point + Vector3(5, 0, 5))
+
+func change_zoom(amount: float) -> void:
+	camera.size = clampf(camera.size + amount, 45, 110)
+
+func handle_map_gesture(event: InputEvent) -> void:
+	if event is InputEventScreenTouch:
+		if event.index != 0:
+			drag_moved = true
+			return
+		if event.pressed:
+			dragging = true
+			drag_moved = false
+			drag_start = event.position
+			drag_previous = event.position
+		else:
+			if dragging and not drag_moved:
+				map_input(event)
+			dragging = false
+		return
+	if event is InputEventScreenDrag:
+		var motion := InputEventMouseMotion.new()
+		motion.position = event.position
+		_handle_mouse_gesture(motion)
+		return
+	# Android присылает исходное касание и эмулированную мышь. Карта обрабатывает один поток.
+	if OS.has_feature("android"):
+		return
+	_handle_mouse_gesture(event)
+
+func _handle_mouse_gesture(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and event.pressed:
+			change_zoom(-5 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 5)
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				dragging = true
+				drag_moved = false
+				drag_start = event.position
+				drag_previous = event.position
+			else:
+				if dragging and not drag_moved:
+					map_input(event)
+				dragging = false
+	elif event is InputEventMouseMotion and dragging:
+		if event.position.distance_to(drag_start) > 9 * render_scale:
+			drag_moved = true
+		if drag_moved:
+			var plane := Plane(Vector3.UP, 0)
+			var previous = plane.intersects_ray(camera.project_ray_origin(drag_previous / viewport_container.stretch_shrink), camera.project_ray_normal(drag_previous / viewport_container.stretch_shrink))
+			var current = plane.intersects_ray(camera.project_ray_origin(event.position / viewport_container.stretch_shrink), camera.project_ray_normal(event.position / viewport_container.stretch_shrink))
+			if previous != null and current != null:
+				set_camera_focus(focus_point + previous - current)
+		drag_previous = event.position
+	elif event is InputEventMagnifyGesture:
+		camera.size = clampf(camera.size / event.factor, 45, 110)
 
 func map_input(event: InputEvent) -> void:
-	var click: bool = event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed
-	var touch: bool = event is InputEventScreenTouch and event.pressed
-	if not click and not touch:
+	if not event is InputEventMouseButton and not event is InputEventScreenTouch:
 		return
-	var point: Vector2 = event.position
-	for kind in ["signal", "leak"]:
-		var fixed: bool = game.signal_fixed if kind == "signal" else game.leak_fixed
-		var marker_position := Vector3(-6.3, 3.2, 0) if kind == "signal" else Vector3(-9, 3, 6)
-		if not fixed and camera.unproject_position(marker_position).distance_to(point) < 22:
+	var point: Vector2 = event.position / viewport_container.stretch_shrink
+	for kind in ["leak", "signal"]:
+		var fixed: bool = game.leak_fixed if kind == "leak" else game.signal_fixed
+		var marker := world.get_node("LeakMarker" if kind == "leak" else "SignalMarker") as Node3D
+		if not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
 			select_problem(kind)
 			return
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
 		return
-	if Vector2(hit.x + 6.3, hit.z).length() < 1.5:
-		select_problem("signal")
-		return
-	if Vector2(hit.x + 9, hit.z - 6).length() < 1.2:
-		select_problem("leak")
-		return
-	var closest := -1
-	var distance := 2.8
+	for kind in ["leak", "signal"]:
+		var location := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
+		if location.distance_to(hit) < 2.2:
+			select_problem(kind)
+			return
 	for i in range(24):
-		var current: float = game.plot_position(i).distance_to(hit)
-		if current < distance:
-			distance = current
-			closest = i
-	if closest >= 0:
-		audio.play_ui("select")
-		selected = closest
-		selection_kind = "plot"
-		refresh()
+		var location := map_position(game.plot_position(i))
+		if absf(location.x - hit.x) <= 4.6 and absf(location.z - hit.z) <= 4.6:
+			selected = i
+			selection_kind = "plot"
+			active_tab = "build_tab" if game.buildings[i] == "empty" else "district"
+			audio.play_ui("select")
+			refresh()
+			return
 
 func select_problem(kind: String) -> void:
 	selection_kind = kind
 	selected = -1
+	active_tab = "services"
 	if audio != null:
 		audio.play_ui("select")
+	var point := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
+	set_camera_focus(point + Vector3(7, 0, 7))
+	refresh()
+
+func select_tab(key: String) -> void:
+	active_tab = key
+	if key == "services":
+		select_problem("leak" if not game.leak_fixed else "signal")
+		return
+	if key == "build_tab":
+		if selected < 0 or game.buildings[selected] != "empty":
+			var nearest := INF
+			for i in range(24):
+				var distance: float = map_position(game.plot_position(i)).distance_to(focus_point)
+				if game.buildings[i] == "empty" and distance < nearest:
+					selected = i
+					nearest = distance
+		if selected >= 0:
+			selection_kind = "plot"
+			set_camera_focus(map_position(game.plot_position(selected)) + Vector3(6, 0, 6))
+	else:
+		selection_kind = ""
+		selected = -1
+	refresh()
+
+func close_sheet() -> void:
+	selection_kind = ""
+	selected = -1
+	active_tab = "district"
 	refresh()
 
 func switch_language() -> void:
@@ -322,42 +575,169 @@ func switch_language() -> void:
 	game.save_game()
 	refresh()
 
-func refresh() -> void:
-	find_child("Title", true, false).text = t("title")
-	find_child("ZoomLabel", true, false).text = t("zoom")
-	find_child("SaveLabel", true, false).text = t("saving")
-	language_button.text = "EN" if game.language == "ru" else "RU"
-	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.income()]
-	objective.text = t("done") if game.completed else t("goal")
-	signal_button.text = ("✓ " if game.signal_fixed else "! ") + t("signal")
-	leak_button.text = ("✓ " if game.leak_fixed else "! ") + t("leak")
-	reset_button.text = t("reset")
-	audio_button.text = t("audio")
-	update_crew_status()
-	for child in action_box.get_children():
-		action_box.remove_child(child)
+func clear_children(parent: Node) -> void:
+	for child in parent.get_children():
+		parent.remove_child(child)
 		child.queue_free()
-	if selection_kind in ["signal", "leak"]:
-		var fixed: bool = game.signal_fixed if selection_kind == "signal" else game.leak_fixed
-		details.text = t("fixed") if fixed else t(selection_kind + "_info") % Catalog.cost("traffic_signal" if selection_kind == "signal" else "water_leak")
-		if not fixed:
-			var dispatch_button := button(action_box, t("repair"), dispatch)
-			dispatch_button.disabled = game.job != "" or game.budget < Catalog.cost("traffic_signal" if selection_kind == "signal" else "water_leak")
-	elif selected >= 0:
-		var kind: String = game.buildings[selected]
-		if kind == "empty":
-			details.text = t("empty") % (selected + 1)
-			for build_kind in ["cafe", "park"]:
-				var cost := Catalog.cost(build_kind)
-				var build_button := button(action_box, t("build") % [t(build_kind), cost, Catalog.TYPES[build_kind].mood + game.placement_bonus(selected, build_kind)], construct.bind(build_kind))
-				build_button.disabled = game.budget < cost
-		else:
-			details.text = t("occupied") % [t(kind), selected + 1]
+
+func refresh() -> void:
+	if world == null or camera == null:
+		return
+	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.income()]
+	district_label.text = t("district_name")
+	budget_label.text = str(game.budget)
+	rating_label.text = t("rating") % game.happiness()
+	language_button.text = "EN" if game.language == "ru" else "RU"
+	for key in nav_buttons:
+		var item: Button = nav_buttons[key]
+		item.find_child("Caption", true, false).text = t(key)
+		item.add_theme_stylebox_override("normal", style(Color("d6eafa") if active_tab == key else PAPER, 12, Color("aad2ee") if active_tab == key else Color("e6e1d7")))
+	var completed_steps := int(game.leak_fixed) + int(game.signal_fixed) + int(game.buildings.has("cafe") or game.buildings.has("park"))
+	objective.text = t("mission_done") if game.completed else (t("mission_water") if not game.leak_fixed else (t("mission_signal") if not game.signal_fixed else t("mission_build")))
+	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
+	progress_bar.value = completed_steps
 	redraw_plots()
-	signal_object.set_serviced(game.signal_fixed)
+	scenery.traffic_controller.signal_fixed = game.signal_fixed
+	scenery.traffic_controller.update_lights()
 	leak_effect.visible = not game.leak_fixed
 	world.get_node("LeakMarker").visible = not game.leak_fixed
 	world.get_node("SignalMarker").visible = not game.signal_fixed
+	build_sheet()
+	update_preview()
+	update_layout()
+
+func header(title_value: String, icon_key: String = "") -> void:
+	var row := hbox(sheet_column)
+	if icon_key != "":
+		var tile := card(row, Color("e68a3c"))
+		icon(tile, icon_key, 42)
+	var title := label(30, row, title_value, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var close := button(row, "×", close_sheet)
+	close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	close.custom_minimum_size = Vector2(72, 72)
+	close.add_theme_stylebox_override("normal", style(PAPER))
+
+func build_sheet() -> void:
+	clear_children(sheet_column)
+	clear_children(mode_switcher)
+	sheet.add_theme_stylebox_override("panel", style(PAPER, 22))
+	sheet.visible = selection_kind != ""
+	mission.visible = not sheet.visible
+	status = null
+	if not sheet.visible:
+		return
+	if selection_kind in ["signal", "leak"]:
+		action_height = 500
+		header(t("leak_title") if selection_kind == "leak" else t("signal_title"), "pipe_white")
+		var sub := hbox(sheet_column)
+		details = label(23, sub, t("leak_subtitle") if selection_kind == "leak" else t("signal_subtitle"))
+		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var chips := mode_switcher
+		leak_button = button(chips, t("leak"), select_problem.bind("leak"))
+		signal_button = button(chips, t("signal"), select_problem.bind("signal"))
+		for chip in [leak_button, signal_button]:
+			chip.custom_minimum_size.y = 72
+			chip.add_theme_font_size_override("font_size", 22)
+		var fixed: bool = game.leak_fixed if selection_kind == "leak" else game.signal_fixed
+		var repair_card := card(sheet_column, Color("ebf3fa"))
+		var row := hbox(repair_card)
+		icon(row, "hammer", 30)
+		var content := VBoxContainer.new()
+		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(content)
+		label(23, content, t("fixed") if fixed else t("permanent_repair"), true)
+		label(21, content, t("cost") + ": " + str(Catalog.cost("water_leak" if selection_kind == "leak" else "traffic_signal")))
+		var route_card := card(sheet_column, Color("f0f0ed"))
+		var route_row := hbox(route_card)
+		icon(route_row, "pin", 32)
+		var route_column := VBoxContainer.new()
+		route_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		route_row.add_child(route_column)
+		label(23, route_column, t("route_title"), true)
+		var route_description := label(20, route_column, t("route_clear") if game.signal_fixed else t("route_delayed"))
+		route_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label(19, route_column, t("repair_duration"))
+		action_box = VBoxContainer.new()
+		sheet_column.add_child(action_box)
+		var dispatch_button := button(action_box, t("fixed") if fixed else t("dispatch"), dispatch, true)
+		dispatch_button.disabled = fixed or game.job != "" or game.budget < Catalog.cost("water_leak" if selection_kind == "leak" else "traffic_signal")
+		status = label(19, sheet_column)
+		status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		update_crew_status()
+	elif selected >= 0 and game.buildings[selected] == "empty":
+		action_height = 410
+		header(t("preview_title") % t(preview_kind).to_lower())
+		var choices := mode_switcher
+		for kind in ["cafe", "park"]:
+			var choose := button(choices, t(kind), choose_preview.bind(kind))
+			choose.custom_minimum_size.y = 72
+			if kind == preview_kind:
+				choose.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
+		var cost_row := hbox(card(sheet_column, Color("eeefec")))
+		icon(cost_row, "coin", 26)
+		var cost_name := label(23, cost_row, t("cost"), true)
+		cost_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label(24, cost_row, str(Catalog.cost(preview_kind)), true)
+		var effect_row := hbox(card(sheet_column, Color("eeefec")))
+		icon(effect_row, "people", 26)
+		var effect_name := label(23, effect_row, t("comfort"), true)
+		effect_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var bonus: int = mini(Catalog.TYPES[preview_kind].mood + game.placement_bonus(selected, preview_kind), 100 - game.happiness())
+		var benefit := label(24, effect_row, "+%d" % bonus, true)
+		benefit.add_theme_color_override("font_color", Color("58a56b"))
+		action_box = VBoxContainer.new()
+		action_box.add_theme_constant_override("separation", 8)
+		sheet_column.add_child(action_box)
+		var build_button := button(action_box, t("build_confirm"), construct.bind(preview_kind), true)
+		build_button.disabled = game.budget < Catalog.cost(preview_kind)
+		var cancel := button(action_box, t("cancel"), close_sheet)
+		cancel.custom_minimum_size.y = 72
+	elif selected >= 0:
+		action_height = 190
+		header(t(game.buildings[selected]))
+		details = label(23, sheet_column, t("occupied") % [t(game.buildings[selected]), selected + 1])
+		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label(21, sheet_column, t("residents") % [game.population(), game.income()])
+
+func choose_preview(kind: String) -> void:
+	preview_kind = kind
+	refresh()
+
+func outline(point: Vector3, color: Color) -> void:
+	for z in [-4.5, 4.5]:
+		Art.box(highlights, point + Vector3(0, 0.26, z), Vector3(9.1, 0.08, 0.13), color)
+	for x in [-4.5, 4.5]:
+		Art.box(highlights, point + Vector3(x, 0.26, 0), Vector3(0.13, 0.08, 9.1), color)
+
+func update_preview() -> void:
+	if preview != null:
+		world.remove_child(preview)
+		preview.queue_free()
+		preview = null
+	clear_children(highlights)
+	if selection_kind != "plot" or selected < 0:
+		return
+	var point := map_position(game.plot_position(selected))
+	outline(point, Color("8ed6f8"))
+	if game.buildings[selected] != "empty":
+		return
+	preview = create_object(world, preview_kind, "construction_preview", point)
+	preview.interaction_area.collision_layer = 0
+	preview.set_language(game.language)
+	var ghost := StandardMaterial3D.new()
+	ghost.albedo_color = Color(0.48, 0.79, 1, 0.48)
+	ghost.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ghost.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for item in preview.visual_root.find_children("*", "GeometryInstance3D", true, false):
+		item.material_override = ghost
+		item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for i in range(24):
+		if i != selected and game.buildings[i] == "house" and game.plot_position(i).distance_to(game.plot_position(selected)) < 6.8:
+			outline(map_position(game.plot_position(i)), Color("a7f384"))
 
 func dispatch() -> void:
 	if game.dispatch(selection_kind):
@@ -372,47 +752,52 @@ func construct(kind: String) -> void:
 		audio.play("build", "Effects", game.plot_position(selected))
 		if kind == "park":
 			audio.play("leaves", "Effects", game.plot_position(selected))
+		close_sheet()
 	else:
 		audio.play_ui("deny")
-	refresh()
 
-func confirm_reset() -> void:
-	var dialog := ConfirmationDialog.new()
-	dialog.theme = ui_theme
-	dialog.title = t("confirm")
-	dialog.dialog_text = t("reset_info")
-	dialog.ok_button_text = t("ok")
-	dialog.cancel_button_text = t("cancel")
-	add_child(dialog)
-	dialog.confirmed.connect(func():
-		var previous_language: String = game.language
-		audio.reset_state()
-		game = Simulation.new()
-		game.language = previous_language
-		game.save_game()
-		selection_kind = "signal"
-		selected = -1
-		refresh())
-	dialog.close_requested.connect(dialog.queue_free)
-	dialog.canceled.connect(func():
-		audio.play_ui("cancel")
-		dialog.queue_free())
-	dialog.popup_centered()
+func update_crew_status() -> void:
+	if status == null or not is_instance_valid(status):
+		return
+	if game.job == "":
+		status.text = t("crew_available")
+	else:
+		var phase_text: String = t("return") if game.job_phase == "return" else (t("travel") if game.route_index < game.route.size() else t("repairing") % ceili(game.repair_left))
+		status.text = t("busy") % [t(game.job), phase_text]
 
 func _process(delta: float) -> void:
 	if car == null:
 		return
 	elapsed += delta
-	if game.tick(delta):
-		refresh()
-	audio.sync(game, camera.size, delta)
-	update_crew_status()
-	car.position = game.vehicle
+	if OS.is_debug_build() and OS.has_feature("android"):
+		diagnostic_clock += delta
+		if diagnostic_clock >= 5:
+			diagnostic_clock = 0
+			print("FMT_METRICS ", JSON.stringify({"quality": quality, "fps": Engine.get_frames_per_second(), "map_size": str(viewport_container.get_child(0).size), "draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), "safe_top": safe_top, "safe_bottom": safe_bottom, "selection": selection_kind, "job": game.job, "leak_fixed": game.leak_fixed, "signal_fixed": game.signal_fixed}))
+	scenery.traffic_controller.signal_fixed = game.signal_fixed
+	scenery.traffic_controller.service_position = car.position
+	scenery.traffic_controller.service_active = game.job != ""
+	scenery.animate(elapsed)
+	var movement_allowed := true
 	if game.job != "" and game.route_index < game.route.size():
-		var direction: Vector3 = game.route[game.route_index] - game.vehicle
+		movement_allowed = scenery.traffic_controller.service_allowed(map_position(game.vehicle), map_position(game.route[game.route_index]), delta)
+	if game.tick(delta, movement_allowed):
+		refresh()
+	audio.sync(game, camera.size / 2.2, delta)
+	update_crew_status()
+	car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
+	if game.job != "" and game.route_index < game.route.size():
+		var direction: Vector3 = map_position(game.route[game.route_index]) - car.position
 		if direction.length() > 0.01:
 			car.rotation.y = atan2(direction.x, direction.z)
+			if absf(direction.x) > absf(direction.z):
+				car.position.z += signf(direction.x)
+			else:
+				car.position.x -= signf(direction.z)
 	leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
+	for marker_name in ["LeakMarker", "SignalMarker"]:
+		var marker := world.get_node(marker_name) as Node3D
+		marker.position.y = 5.2 + sin(elapsed * 2) * 0.15
 	save_clock += delta
 	if save_clock > 2:
 		game.save_game()
@@ -434,6 +819,92 @@ func _notification(what: int) -> void:
 		if audio != null:
 			audio.set_paused(false)
 
+func load_graphics() -> void:
+	if OS.has_feature("mobile"):
+		quality = "medium"
+	if FileAccess.file_exists(settings_path):
+		var data = JSON.parse_string(FileAccess.get_file_as_string(settings_path))
+		if data is Dictionary and data.get("quality") in ["low", "medium", "high"]:
+			quality = data.quality
+
+func set_quality(value: String) -> void:
+	if value not in ["low", "medium", "high"]:
+		return
+	quality = value
+	apply_quality()
+	var file := FileAccess.open(settings_path + ".tmp", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify({"quality": quality}))
+		file.close()
+		DirAccess.rename_absolute(settings_path + ".tmp", settings_path)
+
+func apply_quality() -> void:
+	viewport_container.stretch_shrink = {"high": 1, "medium": 2, "low": 3}[quality]
+	sunlight.shadow_enabled = quality != "low"
+	var viewport := viewport_container.get_child(0) as SubViewport
+	viewport.msaa_3d = Viewport.MSAA_DISABLED if quality == "low" else (Viewport.MSAA_2X if quality == "medium" else Viewport.MSAA_4X)
+	scenery.traffic_controller.set_active_count(8 if quality == "low" else (16 if quality == "medium" else 24))
+	Engine.max_fps = 30 if quality == "low" else 60
+	update_layout()
+
+func open_settings() -> void:
+	var dialog := AcceptDialog.new()
+	dialog.theme = ui_theme
+	dialog.title = "Настройки" if game.language == "ru" else "Settings"
+	dialog.ok_button_text = t("audio_done")
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	dialog.add_child(column)
+	var quality_label := label(24, column, "Качество 3D" if game.language == "ru" else "3D quality", true)
+	quality_label.custom_minimum_size.x = 400
+	var quality_buttons := VBoxContainer.new()
+	quality_buttons.add_theme_constant_override("separation", 8)
+	column.add_child(quality_buttons)
+	for value in ["low", "medium", "high"]:
+		var caption: String = ({"low": "Экономное · A22", "medium": "Сбалансированное", "high": "Высокое · S21+"} if game.language == "ru" else {"low": "Low · A22", "medium": "Balanced", "high": "High · S21+"})[value]
+		var choice := button(quality_buttons, caption, set_quality_from_menu.bind(value, dialog))
+		choice.name = "Quality_" + value
+		choice.set_meta("quality", value)
+		choice.add_theme_font_size_override("font_size", 24)
+		if value == quality:
+			choice.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
+	var language_choice := button(column, "English / Русский", switch_language)
+	language_choice.custom_minimum_size.y = 72
+	var zoom_row := hbox(column)
+	button(zoom_row, "−", change_zoom.bind(7.0))
+	button(zoom_row, "+", change_zoom.bind(-7.0))
+	button(column, t("audio"), open_audio_settings)
+	reset_button = button(column, t("reset"), confirm_reset)
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	add_child(dialog)
+	decorate_dialog(dialog)
+	dialog.popup_centered(Vector2i(450, 770))
+func confirm_reset() -> void:
+	var dialog := ConfirmationDialog.new()
+	dialog.theme = ui_theme
+	dialog.title = t("confirm")
+	dialog.dialog_text = t("reset_info")
+	dialog.ok_button_text = t("ok")
+	dialog.cancel_button_text = t("cancel")
+	add_child(dialog)
+	dialog.confirmed.connect(func():
+		var previous_language: String = game.language
+		audio.reset_state()
+		game = Simulation.new()
+		game.language = previous_language
+		game.save_game()
+		selection_kind = "signal"
+		selected = -1
+		refresh())
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.canceled.connect(func():
+		audio.play_ui("cancel")
+		dialog.queue_free())
+	dialog.get_ok_button().custom_minimum_size.y = 72
+	dialog.get_cancel_button().custom_minimum_size.y = 72
+	decorate_dialog(dialog)
+	dialog.popup_centered()
 
 
 func open_audio_settings() -> void:
@@ -454,7 +925,7 @@ func open_audio_settings() -> void:
 		slider.min_value = 0
 		slider.max_value = 100
 		slider.value = audio.levels[channel] * 100
-		slider.custom_minimum_size = Vector2(180, 44)
+		slider.custom_minimum_size = Vector2(180, 72)
 		row.add_child(slider)
 		slider.value_changed.connect(func(value: float): audio.set_level(channel, value / 100.0))
 	var note := label(14, column)
@@ -464,11 +935,33 @@ func open_audio_settings() -> void:
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.close_requested.connect(dialog.queue_free)
 	add_child(dialog)
-	dialog.popup_centered(Vector2i(440, 360))
+	dialog.get_ok_button().custom_minimum_size.y = 72
+	decorate_dialog(dialog)
+	dialog.popup_centered(Vector2i(450, 470))
 
-func update_crew_status() -> void:
-	if game.job == "":
-		status.text = t("idle")
-		return
-	var phase_text: String = t("return") if game.job_phase == "return" else (t("travel") if game.route_index < game.route.size() else t("repairing") % ceili(game.repair_left))
-	status.text = t("busy") % [t(game.job), phase_text]
+
+func _exit_tree() -> void:
+	if audio != null and is_instance_valid(audio):
+		audio.shutdown()
+
+func viewport_point(world_point: Vector3) -> Vector2:
+	return viewport_container.get_global_transform_with_canvas() * (camera.unproject_position(world_point) * viewport_container.stretch_shrink)
+
+func set_quality_from_menu(value: String, dialog: Window) -> void:
+	set_quality(value)
+	for item in dialog.find_children("Quality_*", "Button", true, false):
+		var active: bool = item.get_meta("quality") == quality
+		item.add_theme_stylebox_override("normal", style(Color("d6eafa") if active else Color("f2f2ee"), 12, Color("aad2ee") if active else Color("dddcd6")))
+
+func decorate_dialog(dialog: AcceptDialog) -> void:
+	var buttons: Array[Button] = [dialog.get_ok_button()]
+	if dialog is ConfirmationDialog:
+		buttons.append(dialog.get_cancel_button())
+	for item in buttons:
+		item.custom_minimum_size = Vector2(140, 72)
+		item.add_theme_font_size_override("font_size", 24)
+		item.add_theme_stylebox_override("normal", style(Color("eef1ee"), 12, Color("d6d9d4")))
+		item.add_theme_stylebox_override("hover", style(Color("dceafa")))
+		item.add_theme_stylebox_override("pressed", style(Color("c5e2f5")))
+		for property_name in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+			item.add_theme_color_override(property_name, INK)

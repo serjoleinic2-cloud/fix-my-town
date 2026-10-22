@@ -24,7 +24,7 @@ func run() -> void:
 	scene.refresh()
 	check(scene.game.dispatch("leak"), "Dispatch before replacement")
 	scene.game.tick(1)
-	scene.car.position = scene.game.vehicle
+	scene.car.position = scene.map_position(scene.game.vehicle)
 	var before_budget: int = scene.game.budget
 	var before_vehicle: Vector3 = scene.game.vehicle
 	var before_route: Array = scene.game.route.duplicate()

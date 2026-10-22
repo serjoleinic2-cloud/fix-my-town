@@ -5,3 +5,4 @@
 [node name="ModelWrapper" type="Node3D"]
 
 [node name="Model" parent="." instance=ExtResource("1")]
+scale = Vector3(1.5, 1.5, 2.5)

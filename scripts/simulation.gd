@@ -20,7 +20,7 @@ var save_path: String = SAVE_PATH
 
 func _init() -> void:
 	for i in range(24):
-		buildings.append("house" if i in [0, 1, 4, 5, 8, 12, 16, 20] else "empty")
+		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
 	buildings[2] = "depot"
 
 func plot_position(index: int) -> Vector3:
@@ -82,7 +82,7 @@ func dispatch(kind: String) -> bool:
 	save_game()
 	return true
 
-func tick(delta: float) -> bool:
+func tick(delta: float, movement_allowed: bool = true) -> bool:
 	var changed := false
 	income_clock += delta
 	if income_clock >= 12.0:
@@ -91,13 +91,14 @@ func tick(delta: float) -> bool:
 		changed = true
 	if job != "":
 		if route_index < route.size():
-			var target: Vector3 = route[route_index]
-			var speed := 2.6
-			if not signal_fixed and absf(vehicle.z) < 1.8:
-				speed = 0.55
-			vehicle = vehicle.move_toward(target, delta * speed)
-			if vehicle.distance_to(target) < 0.01:
-				route_index += 1
+			if movement_allowed:
+				var target: Vector3 = route[route_index]
+				var speed := 2.6
+				if not signal_fixed and absf(vehicle.z) < 1.8:
+					speed = 0.55
+				vehicle = vehicle.move_toward(target, delta * speed)
+				if vehicle.distance_to(target) < 0.01:
+					route_index += 1
 		elif job_phase == "return":
 			job = ""
 			job_phase = "travel"

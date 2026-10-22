@@ -1,5 +1,7 @@
 extends Node
 
+const DistrictWorld = preload("res://scripts/district_world.gd")
+
 const MAX_VOICES = 12
 const SETTINGS_PATH = "user://audio_settings.json"
 const CHANNELS = ["Ambience", "Effects", "Interface", "Music"]
@@ -51,9 +53,9 @@ func play(sound: String, channel: String, position_value: Variant = null) -> voi
 	if position_value is Vector3:
 		player = AudioStreamPlayer3D.new()
 		spatial_root.add_child(player)
-		player.position = position_value
-		player.unit_size = 16
-		player.max_distance = 85
+		player.position = DistrictWorld.world_position(position_value)
+		player.unit_size = 55
+		player.max_distance = 300
 		player.volume_db = linear_to_db(zoom_gain)
 	else:
 		player = AudioStreamPlayer.new()
@@ -83,8 +85,8 @@ func set_loop(key: String, sound: String, channel: String, enabled: bool, positi
 		if position_value is Vector3:
 			player = AudioStreamPlayer3D.new()
 			spatial_root.add_child(player)
-			player.unit_size = 16
-			player.max_distance = 85
+			player.unit_size = 55
+			player.max_distance = 300
 		else:
 			player = AudioStreamPlayer.new()
 			add_child(player)
@@ -95,7 +97,7 @@ func set_loop(key: String, sound: String, channel: String, enabled: bool, positi
 	var active: Node = loops[key]
 	active.volume_db = linear_to_db(maxf(0.001, gain * (zoom_gain if position_value is Vector3 else 1.0)))
 	if position_value is Vector3:
-		active.position = position_value
+		active.position = DistrictWorld.world_position(position_value)
 	active.stream_paused = paused
 
 func sync(game: RefCounted, zoom: float, delta: float) -> void:

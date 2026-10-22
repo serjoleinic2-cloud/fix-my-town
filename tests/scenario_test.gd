@@ -107,12 +107,12 @@ func run() -> void:
 	var routed_click := InputEventMouseButton.new()
 	routed_click.button_index = MOUSE_BUTTON_LEFT
 	routed_click.pressed = true
-	routed_click.position = scene.viewport_container.global_position + scene.camera.unproject_position(Vector3(-9, 3, 6))
+	routed_click.position = scene.viewport_point(scene.world.get_node("LeakMarker").position)
+	root.push_input(routed_click, true)
+	routed_click.pressed = false
 	root.push_input(routed_click, true)
 	await process_frame
 	check(scene.selection_kind == "leak", "Viewport input must select leak marker")
-	routed_click.pressed = false
-	root.push_input(routed_click, true)
 	scene.select_problem("signal")
 	scene.dispatch()
 	check(scene.game.job == "signal", "UI dispatch")
@@ -127,13 +127,13 @@ func run() -> void:
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
-	click.position = scene.camera.unproject_position(scene.game.plot_position(7))
+	click.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(7))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selected == 7, "Map picking")
-	click.position = scene.camera.unproject_position(Vector3(-9, 0, 6))
+	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-9, 0, 6))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selection_kind == "leak", "Leak on map opens action panel")
-	click.position = scene.camera.unproject_position(Vector3(-6.3, 0, 0))
+	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-6.3, 0, 0))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selection_kind == "signal", "Signal on map opens action panel")
 	for path in [staged.save_path, game.save_path, slow.save_path, fast.save_path, poor.save_path, scene.game.save_path]:

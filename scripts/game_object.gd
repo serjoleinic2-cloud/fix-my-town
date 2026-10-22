@@ -20,10 +20,10 @@ func setup(object_type: String, persistent_id: String) -> void:
 	mounts = Node3D.new()
 	mounts.name = "Mounts"
 	add_child(mounts)
-	var sockets := {"Entrance": Vector3(0, 0, 0.85), "Smoke": Vector3(0, 2, 0), "Water": Vector3(0, 0.3, 0.85),
-		"LightFront": Vector3(0, 0.5, 0.7), "LightRoof": Vector3(0, 1.1, 0),
-		"WheelFrontLeft": Vector3(-0.45, 0.2, 0.4), "WheelFrontRight": Vector3(0.45, 0.2, 0.4),
-		"WheelRearLeft": Vector3(-0.45, 0.2, -0.4), "WheelRearRight": Vector3(0.45, 0.2, -0.4)}
+	var sockets := {"Entrance": Vector3(0, 0, 4.5), "Smoke": Vector3(0, 5, 0), "Water": Vector3(0, 0.3, 4.5),
+		"LightFront": Vector3(0, 0.7, 1.3), "LightRoof": Vector3(0, 1.7, 0.7),
+		"WheelFrontLeft": Vector3(-0.85, 0.37, 0.9), "WheelFrontRight": Vector3(0.85, 0.37, 0.9),
+		"WheelRearLeft": Vector3(-0.85, 0.37, -0.85), "WheelRearRight": Vector3(0.85, 0.37, -0.85)}
 	for socket: String in sockets:
 		var point := Marker3D.new()
 		point.name = socket
@@ -36,9 +36,9 @@ func setup(object_type: String, persistent_id: String) -> void:
 	add_child(interaction_area)
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(footprint.x, 2, footprint.y)
+	shape.size = Vector3(footprint.x, 5, footprint.y)
 	collision.shape = shape
-	collision.position.y = 1
+	collision.position.y = 2.5
 	interaction_area.add_child(collision)
 	replace_visual()
 
@@ -54,3 +54,13 @@ func set_serviced(value: bool) -> void:
 	var model := visual_root.get_child(0)
 	if model.has_method("set_serviced"):
 		model.set_serviced(value)
+
+func set_language(language: String) -> void:
+	var model := visual_root.get_child(0)
+	if model.has_method("set_language"):
+		model.set_language(language)
+
+func set_traffic_state(horizontal: String, vertical: String) -> void:
+	var model := visual_root.get_child(0)
+	if model.has_method("set_signal_states"):
+		model.set_signal_states(horizontal, vertical)

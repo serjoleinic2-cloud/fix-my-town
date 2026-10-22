@@ -54,5 +54,6 @@ for kind in ['house','repair_van']:
 [node name="ModelWrapper" type="Node3D"]
 
 [node name="Model" parent="." instance=ExtResource("1")]
+scale = {"Vector3(1.5, 1.5, 2.5)" if kind == "house" else "Vector3(2, 1.5, 2)"}
 ''',encoding='utf-8')
 print('Created two original GLB replacement fixtures')

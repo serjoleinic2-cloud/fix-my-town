@@ -66,6 +66,19 @@ var updating_layout: bool = false
 var mode_switcher: HBoxContainer
 var render_scale: float = 1.0
 var diagnostic_clock: float = 0.0
+var quality_mode: bool = false
+var quality_legend: PanelContainer
+var state_button: Button
+var transit_button: Button
+var transit_visuals: Node3D
+var transit_signature: String = ""
+var transit_stats: Label
+var stop_candidate: int = 0
+var placing_stop: bool = false
+var last_quality: float = -1
+var quality_trend: String = "→"
+const QUALITY_COLORS = [Color("df6356"), Color("e9994f"), Color("d8bd57"), Color("9fc76e"), Color("59a675")]
+const QUALITY_NAMES = [["Критическое", "Неблагополучное", "Удовлетворительное", "Благополучное", "Отличное"], ["Critical", "Struggling", "Satisfactory", "Good", "Excellent"]]
 const TEXT = {
 	"title": ["FIX MY TOWN · Мэрия", "FIX MY TOWN · City Hall"],
 	"goal": ["1. Почините светофор и протечку\n2. Постройте кафе или парк", "1. Repair the signal and water leak\n2. Build a café or park"],
@@ -79,7 +92,7 @@ const TEXT = {
 	"empty": ["Участок %d • доступ к дороге\nБонус зависит от соседних домов и объектов.", "Plot %d • road access\nBonus depends on nearby homes and amenities."],
 	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Ремонтная служба", "Repair depot"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
-	"occupied": ["%s • участок %d\nПодключён к дороге и службам.", "%s • plot %d\nConnected to roads and services."],
+	"occupied": ["%s • участок %d", "%s • plot %d"],
 	"reset": ["Заново", "Restart"], "confirm": ["Начать новый район?", "Start a new district?"],
 	"reset_info": ["Текущий прогресс будет заменён.", "Your current progress will be replaced."],
 	"ok": ["Начать", "Start"], "cancel": ["Отмена", "Cancel"],
@@ -138,6 +151,9 @@ func style(color: Color, radius: int = 14, border: Color = Color.TRANSPARENT) ->
 
 func label(size_value: int, parent: Node, text_value: String = "", bold: bool = false) -> Label:
 	var item := Label.new()
+	if parent == sheet_column and sheet_column != null:
+		item.size.x = maxf(100, screen.size.x - 64)
+		item.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	item.text = text_value
 	item.add_theme_font_size_override("font_size", size_value)
 	item.add_theme_color_override("font_color", INK)
@@ -248,6 +264,17 @@ func build_ui() -> void:
 	language_button = button(tools, "EN", switch_language)
 	language_button.hide()
 	audio_button = button(tools, "☷", open_settings)
+	state_button = button(tools, "", toggle_quality)
+	state_button.add_theme_font_size_override("font_size", 18)
+	transit_button = button(tools, "BUS", open_transit)
+	quality_legend = card(screen)
+	var legend_column := VBoxContainer.new()
+	quality_legend.add_child(legend_column)
+	for i in range(5):
+		var item := label(18, legend_column)
+		item.name = "Band%d" % i
+		item.add_theme_color_override("font_color", QUALITY_COLORS[i])
+	quality_legend.hide()
 	button(tools, "+", change_zoom.bind(-7.0)).hide()
 	button(tools, "−", change_zoom.bind(7.0)).hide()
 	button(tools, "⌖", focus_problem).hide()
@@ -255,6 +282,7 @@ func build_ui() -> void:
 		child.custom_minimum_size = Vector2(72, 72)
 		child.add_theme_font_size_override("font_size", 25)
 		child.add_theme_stylebox_override("normal", style(Color(0.98, 0.97, 0.94, 0.93), 14))
+	state_button.add_theme_font_size_override("font_size", 18)
 	mission = card(screen)
 	var mission_row := hbox(mission, 14)
 	var tile := card(mission_row, Color("dceefa"))
@@ -276,6 +304,9 @@ func build_ui() -> void:
 	mission_column.add_child(progress_bar)
 	sheet = card(screen)
 	sheet.resized.connect(func():
+		if not updating_layout:
+			call_deferred("update_layout"))
+	sheet.minimum_size_changed.connect(func():
 		if not updating_layout:
 			call_deferred("update_layout"))
 	sheet_column = VBoxContainer.new()
@@ -327,7 +358,12 @@ func update_layout() -> void:
 	hud.position = Vector2(safe_left, safe_top + 10)
 	hud.size = Vector2(size_value.x - safe_left - safe_right, 56)
 	var tools := screen.get_node("MapTools") as Control
-	tools.position = Vector2(size_value.x - safe_right - 72, safe_top + 84)
+	var tools_width := maxf(105, tools.get_combined_minimum_size().x)
+	tools.position = Vector2(size_value.x - safe_right - tools_width, safe_top + 84)
+	tools.custom_minimum_size.x = 105
+	tools.size.x = tools_width
+	quality_legend.position = Vector2(safe_left, safe_top + 84)
+	quality_legend.size = Vector2(size_value.x - safe_left - safe_right - tools_width - 16, 150)
 	navbar.position = Vector2(0, size_value.y - safe_bottom - 114)
 	navbar.size = Vector2(size_value.x, 114 + safe_bottom)
 	var nav_style := style(PAPER, 0)
@@ -405,6 +441,8 @@ func build_world() -> void:
 	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
 	make_marker("SignalMarker", Vector3(-14.4, 5, 0))
 	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
+	transit_visuals = Node3D.new()
+	world.add_child(transit_visuals)
 	highlights = Node3D.new()
 	world.add_child(highlights)
 
@@ -438,7 +476,9 @@ func redraw_plots() -> void:
 			object = create_object(plots, kind, "plot_" + str(i), map_position(game.plot_position(i)))
 			var base := Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f") if kind != "empty" else Color("9cab7a"))
 			base.name = "PlotBase"
-		object.set_serviced(game.leak_fixed)
+		object.set_serviced(game.has_water(i) if kind == "house" else true)
+		var base := object.get_node("PlotBase") as MeshInstance3D
+		base.material_override = Art.material(quality_color(game.house_quality(i).score) if quality_mode and kind == "house" else (Color("91a66f") if kind != "empty" else Color("9cab7a")))
 		object.set_language(game.language)
 
 func set_camera_focus(point: Vector3) -> void:
@@ -518,6 +558,15 @@ func map_input(event: InputEvent) -> void:
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
 		return
+	if placing_stop:
+		var nearest := INF
+		for row in range(6):
+			var distance: float = game.transit.stop_position(row).distance_to(hit)
+			if distance < nearest:
+				stop_candidate = row
+				nearest = distance
+		refresh()
+		return
 	for kind in ["leak", "signal"]:
 		var location := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
 		if location.distance_to(hit) < 2.2:
@@ -560,11 +609,12 @@ func select_tab(key: String) -> void:
 			selection_kind = "plot"
 			set_camera_focus(map_position(game.plot_position(selected)) + Vector3(6, 0, 6))
 	else:
-		selection_kind = ""
+		selection_kind = "district_status"
 		selected = -1
 	refresh()
 
 func close_sheet() -> void:
+	placing_stop = false
 	selection_kind = ""
 	selected = -1
 	active_tab = "district"
@@ -583,6 +633,16 @@ func clear_children(parent: Node) -> void:
 func refresh() -> void:
 	if world == null or camera == null:
 		return
+	var current_quality: float = game.district_quality()
+	if last_quality >= 0 and not is_equal_approx(current_quality, last_quality):
+		quality_trend = "↑" if current_quality > last_quality else "↓"
+	last_quality = current_quality
+	state_button.text = tr_text("Состояние", "Condition")
+	state_button.add_theme_stylebox_override("normal", style(Color("d6eafa") if quality_mode else PAPER))
+	quality_legend.visible = quality_mode
+	for i in range(5):
+		quality_legend.find_child("Band%d" % i, true, false).text = "● " + QUALITY_NAMES[0 if game.language == "ru" else 1][i]
+	redraw_transit()
 	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.income()]
 	district_label.text = t("district_name")
 	budget_label.text = str(game.budget)
@@ -626,9 +686,14 @@ func build_sheet() -> void:
 	sheet.visible = selection_kind != ""
 	mission.visible = not sheet.visible
 	status = null
+	transit_stats = null
 	if not sheet.visible:
 		return
-	if selection_kind in ["signal", "leak"]:
+	if selection_kind == "district_status":
+		build_district_sheet()
+	elif selection_kind == "transit":
+		build_transit_sheet()
+	elif selection_kind in ["signal", "leak"]:
 		action_height = 500
 		header(t("leak_title") if selection_kind == "leak" else t("signal_title"), "pipe_white")
 		var sub := hbox(sheet_column)
@@ -695,12 +760,13 @@ func build_sheet() -> void:
 		build_button.disabled = game.budget < Catalog.cost(preview_kind)
 		var cancel := button(action_box, t("cancel"), close_sheet)
 		cancel.custom_minimum_size.y = 72
+	elif selected >= 0 and game.buildings[selected] == "house":
+		build_house_sheet()
 	elif selected >= 0:
 		action_height = 190
 		header(t(game.buildings[selected]))
 		details = label(23, sheet_column, t("occupied") % [t(game.buildings[selected]), selected + 1])
 		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label(21, sheet_column, t("residents") % [game.population(), game.income()])
 
 func choose_preview(kind: String) -> void:
 	preview_kind = kind
@@ -718,6 +784,20 @@ func update_preview() -> void:
 		preview.queue_free()
 		preview = null
 	clear_children(highlights)
+	if placing_stop:
+		var point: Vector3 = game.transit.stop_position(stop_candidate)
+		for i in range(4):
+			var first: Vector3 = point + Vector3(cos(PI * i / 2) * game.Transit.WALK_RADIUS, 0.3, sin(PI * i / 2) * game.Transit.WALK_RADIUS)
+			var second: Vector3 = point + Vector3(cos(PI * (i + 1) / 2) * game.Transit.WALK_RADIUS, 0.3, sin(PI * (i + 1) / 2) * game.Transit.WALK_RADIUS)
+			var length := first.distance_to(second)
+			var edge := Art.box(highlights, (first + second) / 2, Vector3(0.18, 0.08, length), Color("8ed6f8"))
+			edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
+		for i in range(24):
+			if game.buildings[i] == "house" and game.transit.in_range(map_position(game.plot_position(i)), stop_candidate):
+				outline(map_position(game.plot_position(i)), Color("a7f384"))
+		preview = create_object(world, "bus_stop", "stop_preview", point)
+		preview.interaction_area.collision_layer = 0
+		return
 	if selection_kind != "plot" or selected < 0:
 		return
 	var point := map_position(game.plot_position(selected))
@@ -736,7 +816,7 @@ func update_preview() -> void:
 		item.material_override = ghost
 		item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for i in range(24):
-		if i != selected and game.buildings[i] == "house" and game.plot_position(i).distance_to(game.plot_position(selected)) < 6.8:
+		if i != selected and game.buildings[i] == "house" and game.building_world(i).distance_to(game.building_world(selected)) < Simulation.AMENITY_RADIUS:
 			outline(map_position(game.plot_position(i)), Color("a7f384"))
 
 func dispatch() -> void:
@@ -777,7 +857,10 @@ func _process(delta: float) -> void:
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.service_position = car.position
 	scenery.traffic_controller.service_active = game.job != ""
+	scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
+	game.transit.tick(delta, scenery.traffic_controller)
+	update_transit_stats()
 	var movement_allowed := true
 	if game.job != "" and game.route_index < game.route.size():
 		movement_allowed = scenery.traffic_controller.service_allowed(map_position(game.vehicle), map_position(game.route[game.route_index]), delta)
@@ -965,3 +1048,174 @@ func decorate_dialog(dialog: AcceptDialog) -> void:
 		item.add_theme_stylebox_override("pressed", style(Color("c5e2f5")))
 		for property_name in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 			item.add_theme_color_override(property_name, INK)
+
+func tr_text(ru: String, en: String) -> String:
+	return ru if game.language == "ru" else en
+
+func quality_name(score: float) -> String:
+	if score < 0:
+		return tr_text("Нет данных", "No data")
+	return QUALITY_NAMES[0 if game.language == "ru" else 1][Simulation.quality_band(score)]
+
+func quality_color(score: float) -> Color:
+	return QUALITY_COLORS[Simulation.quality_band(score)]
+
+func toggle_quality() -> void:
+	quality_mode = not quality_mode
+	refresh()
+
+func build_district_sheet() -> void:
+	action_height = 300
+	header(t("district_name"))
+	var score: float = game.district_quality()
+	var condition := label(24, sheet_column, "● " + quality_name(score) + "  " + quality_trend, true)
+	condition.add_theme_color_override("font_color", quality_color(score) if score >= 0 else INK)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size.y = 12
+	bar.show_percentage = false
+	bar.value = maxf(0, score)
+	bar.add_theme_stylebox_override("fill", style(quality_color(score) if score >= 0 else Color("a5acb0"), 6))
+	sheet_column.add_child(bar)
+	label(21, sheet_column, t("residents") % [game.population(), game.income()])
+	var row := hbox(sheet_column)
+	button(row, tr_text("Состояние", "Condition"), toggle_quality)
+	button(row, tr_text("Транспорт", "Transit"), open_transit)
+
+func house_problems(index: int) -> Array:
+	var data: Dictionary = game.house_quality(index)
+	var issues: Array = []
+	if not data.water:
+		issues.append([tr_text("Нет воды — устраните протечку", "No water — repair the leak"), "leak"])
+	if not data.services:
+		issues.append([tr_text("Службы задерживаются — почините светофор", "Services delayed — repair the signal"), "signal"])
+	if not data.transport:
+		issues.append([tr_text("Нет транспорта — подключите остановку к маршруту", "No transit — connect a stop to a route"), "transit"])
+	if data.environment < 20:
+		issues.append([tr_text("Мало удобств — постройте парк или кафе", "Few amenities — build a park or café"), "build_tab"])
+	return issues
+
+func build_house_sheet() -> void:
+	action_height = 340
+	header(t("house"))
+	var data: Dictionary = game.house_quality(selected)
+	var condition := label(26, sheet_column, "● " + quality_name(data.score), true)
+	condition.add_theme_color_override("font_color", quality_color(data.score))
+	var issues := house_problems(selected)
+	for i in range(mini(2, issues.size())):
+		var issue := label(22, sheet_column, issues[i][0])
+		issue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if issues.is_empty():
+		label(22, sheet_column, tr_text("Основные потребности обеспечены", "Essential needs are met"))
+	else:
+		var key: String = issues[0][1]
+		var caption: String = (tr_text("Устранить протечку", "Fix the leak") if key == "leak" else tr_text("Починить светофор", "Fix the signal")) if key in ["leak", "signal"] else tr_text("Открыть транспорт", "Open transit") if key == "transit" else t("build_tab")
+		button(sheet_column, caption, house_action.bind(key), true)
+	button(sheet_column, tr_text("Подробнее", "Details"), house_details)
+
+func house_action(key: String) -> void:
+	if key in ["leak", "signal"]:
+		select_problem(key)
+	elif key == "transit":
+		open_transit()
+	else:
+		select_tab("build_tab")
+
+func house_details() -> void:
+	if selected < 0:
+		return
+	var data: Dictionary = game.house_quality(selected)
+	var dialog := AcceptDialog.new()
+	dialog.theme = ui_theme
+	dialog.title = t("house")
+	dialog.ok_button_text = t("audio_done")
+	dialog.dialog_text = tr_text("Качество жизни", "Quality of life") + ": %d/100 · %s\n" % [data.score, quality_name(data.score)]
+	dialog.dialog_text += tr_text("Уровень здания: 1 (улучшения ещё не добавлены)", "Building level: 1 (upgrades are not available yet)") + "\n"
+	dialog.dialog_text += tr_text("Вода: ", "Water: ") + (tr_text("есть", "available") if data.water else tr_text("нет — устраните протечку", "none — repair the leak")) + "\n"
+	dialog.dialog_text += tr_text("Службы: ", "Services: ") + (tr_text("доступны", "available") if data.services else tr_text("задержка — почините светофор", "delayed — repair the signal")) + "\n"
+	dialog.dialog_text += tr_text("Транспорт: ", "Transit: ") + (tr_text("маршрут соединяет нужные точки", "route connects useful destinations") if data.transport else tr_text("нужны остановки и маршрут", "stops and a route are needed")) + "\n"
+	dialog.dialog_text += tr_text("Окружение: ", "Amenities: ") + str(data.environment) + "/30"
+	add_child(dialog)
+	decorate_dialog(dialog)
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(490, 390))
+
+func open_transit() -> void:
+	selection_kind = "transit"
+	selected = -1
+	placing_stop = false
+	refresh()
+
+func build_transit_sheet() -> void:
+	action_height = 420
+	header(tr_text("Транспорт", "Transit"))
+	transit_stats = label(22, sheet_column)
+	transit_stats.visible = not placing_stop
+	transit_stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	update_transit_stats()
+	if not game.completed:
+		var locked := label(22, sheet_column, tr_text("Сначала завершите ремонт и постройте кафе или парк.", "Complete the repairs and build a café or park first."))
+		locked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		return
+	if game.transit.stops.size() < 2:
+		if placing_stop:
+			var explanation := label(21, sheet_column, tr_text("Нажмите у дороги на карте. Контур — пешая доступность, зелёные рамки — охваченные дома.", "Tap near the road. The outline shows walking range; green borders mark covered homes."))
+			explanation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			var row := hbox(sheet_column)
+			button(row, "‹", change_stop_candidate.bind(-1))
+			label(22, row, tr_text("Место ", "Site ") + str(stop_candidate + 1))
+			button(row, "›", change_stop_candidate.bind(1))
+			var confirm := button(sheet_column, tr_text("Поставить остановку · 40", "Place stop · 40"), confirm_stop, true)
+			confirm.disabled = stop_candidate in game.transit.stops or game.budget < 40
+			button(sheet_column, t("cancel"), open_transit)
+		else:
+			button(sheet_column, tr_text("Разместить остановку · 40", "Place a stop · 40"), begin_stop_placement, true)
+	else:
+		var launch := button(sheet_column, tr_text("Маршрут работает", "Route running") if game.transit.active else tr_text("Запустить автобус · 60", "Start bus · 60"), launch_transit, true)
+		launch.disabled = game.transit.active or game.budget < 60
+	if placing_stop:
+		return
+	var note := label(20, sheet_column, tr_text("Один маршрут по западной улице. Остановки парные; автобус делает рейсы между ними. Полезна связь жилья с депо (работа) или кафе.", "One route on the western street, with paired stops and a shuttle bus. Connect homes to the depot (jobs) or a café."))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+func begin_stop_placement() -> void:
+	placing_stop = true
+	stop_candidate = 0 if game.transit.stops.is_empty() else 4
+	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
+	refresh()
+
+func change_stop_candidate(delta: int) -> void:
+	stop_candidate = posmod(stop_candidate + delta, 6)
+	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
+	refresh()
+
+func confirm_stop() -> void:
+	if game.place_stop(stop_candidate):
+		placing_stop = false
+		audio.play_ui("success")
+	else:
+		audio.play_ui("deny")
+	refresh()
+
+func launch_transit() -> void:
+	if game.start_transit():
+		audio.play_ui("success")
+	refresh()
+
+func update_transit_stats() -> void:
+	if transit_stats == null or not is_instance_valid(transit_stats):
+		return
+	var metrics: Dictionary = game.transit_metrics()
+	transit_stats.text = tr_text("Остановки: %d/2 · Охват: %d жителей\nПолезное сообщение: %d · Загрузка ≈ %d/%d\nЗадержка рейса: %.0f сек. · Расход: 3/12 сек.", "Stops: %d/2 · Coverage: %d residents\nUseful connections: %d · Load ≈ %d/%d\nTrip delay: %.0f sec · Cost: 3/12 sec") % [game.transit.stops.size(), metrics.covered, metrics.served, metrics.load, metrics.capacity, maxf(game.transit.delay, game.transit.last_delay)]
+	if game.transit.active and not game.transit.funded:
+		transit_stats.text += tr_text("\nНет средств на обслуживание", "\nMaintenance is not funded")
+
+func redraw_transit() -> void:
+	var signature := str(game.transit.stops)
+	if signature == transit_signature:
+		return
+	transit_signature = signature
+	clear_children(transit_visuals)
+	for row in game.transit.stops:
+		var stop := create_object(transit_visuals, "bus_stop", "bus_stop_%d" % row, game.transit.stop_position(row))
+		stop.interaction_area.collision_layer = 0

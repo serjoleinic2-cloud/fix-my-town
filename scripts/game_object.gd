@@ -7,6 +7,10 @@ var visual_root: Node3D
 var interaction_area: Area3D
 var mounts: Node3D
 var footprint: Vector2
+var serviced_value: bool = true
+var language_value: String = "ru"
+var traffic_horizontal: String = "red"
+var traffic_vertical: String = "red"
 
 func setup(object_type: String, persistent_id: String) -> void:
 	type_id = object_type
@@ -24,6 +28,13 @@ func setup(object_type: String, persistent_id: String) -> void:
 		"LightFront": Vector3(0, 0.7, 1.3), "LightRoof": Vector3(0, 1.7, 0.7),
 		"WheelFrontLeft": Vector3(-0.85, 0.37, 0.9), "WheelFrontRight": Vector3(0.85, 0.37, 0.9),
 		"WheelRearLeft": Vector3(-0.85, 0.37, -0.85), "WheelRearRight": Vector3(0.85, 0.37, -0.85)}
+	if type_id == "city_bus":
+		sockets.LightFront = Vector3(0, 1, 2.33)
+		sockets.LightRoof = Vector3(0, 2.1, 0.4)
+		sockets.WheelFrontLeft = Vector3(-0.85, 0.3, 1.5)
+		sockets.WheelFrontRight = Vector3(0.85, 0.3, 1.5)
+		sockets.WheelRearLeft = Vector3(-0.85, 0.3, -1.5)
+		sockets.WheelRearRight = Vector3(0.85, 0.3, -1.5)
 	for socket: String in sockets:
 		var point := Marker3D.new()
 		point.name = socket
@@ -48,19 +59,26 @@ func replace_visual(alternate: bool = false) -> void:
 		child.queue_free()
 	var scene := load(Catalog.scene_path(type_id, alternate)) as PackedScene
 	visual_root.add_child(scene.instantiate())
+	set_serviced(serviced_value)
+	set_language(language_value)
+	set_traffic_state(traffic_horizontal, traffic_vertical)
 
 func set_serviced(value: bool) -> void:
+	serviced_value = value
 	# Только визуальное состояние; игровой источник истины находится в Simulation.
 	var model := visual_root.get_child(0)
 	if model.has_method("set_serviced"):
 		model.set_serviced(value)
 
 func set_language(language: String) -> void:
+	language_value = language
 	var model := visual_root.get_child(0)
 	if model.has_method("set_language"):
 		model.set_language(language)
 
 func set_traffic_state(horizontal: String, vertical: String) -> void:
+	traffic_horizontal = horizontal
+	traffic_vertical = vertical
 	var model := visual_root.get_child(0)
 	if model.has_method("set_signal_states"):
 		model.set_signal_states(horizontal, vertical)

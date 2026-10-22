@@ -42,6 +42,29 @@ func capture() -> void:
 	if mode == "low":
 		scene.quality = "low"
 		scene.apply_quality()
+	if mode in ["house", "condition"]:
+		scene.selected = 16
+		scene.selection_kind = "plot"
+		scene.quality_mode = mode == "condition"
+		scene.set_camera_focus(scene.map_position(scene.game.plot_position(16)) + Vector3(7, 0, 7))
+	if mode in ["transit", "stop", "transit_en"]:
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		scene.game.buildings[9] = "cafe"
+		scene.game.check_complete()
+		scene.game.budget = 500
+		scene.game.place_stop(0)
+		scene.selection_kind = "transit"
+		if mode == "stop":
+			scene.placing_stop = true
+			scene.stop_candidate = 4
+		else:
+			scene.game.place_stop(4)
+			scene.game.start_transit()
+			scene.game.transit.tick(0.1, scene.scenery.traffic_controller)
+		if mode == "transit_en":
+			scene.game.language = "en"
+		scene.set_camera_focus(scene.game.transit.stop_position(4) + Vector3(7, 0, 7))
 	if mode == "safe":
 		scene.safe_override = Vector4(0, 36, 0, 38)
 	scene.refresh()

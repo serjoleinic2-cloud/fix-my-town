@@ -24,6 +24,8 @@ func _ready() -> void:
 		van()
 	elif visual_type == "traffic_signal":
 		make_signals()
+	elif visual_type == "bus_stop":
+		bus_stop()
 	elif visual_type in ["civilian_car", "city_bus"]:
 		civilian_vehicle(visual_type == "city_bus", seed_value)
 	elif visual_type == "water_leak":
@@ -212,7 +214,7 @@ func civilian_vehicle(bus: bool, seed_value: int) -> void:
 		for x in [-0.86, 0.86]:
 			for z in [-1.7, -0.8, 0.1, 1.0]:
 				Art.box(self, Vector3(x, 1.45, z), Vector3(0.03, 0.65, 0.75), Color("557d8a"))
-		Art.box(self, Vector3(0.87, 0.85, 1.8), Vector3(0.03, 1.5, 0.55), Color("486d79"))
+		Art.box(self, Vector3(-0.87, 0.85, 1.8), Vector3(0.03, 1.5, 0.55), Color("486d79"))
 		Art.box(self, Vector3(0, 1.95, 0.4), Vector3(1.1, 0.22, 1.4), Color("d4d7ca"))
 	else:
 		Art.box(self, Vector3(0, 0.55, 0), Vector3(1.4, 0.6, 2.5), color)
@@ -222,3 +224,17 @@ func civilian_vehicle(bus: bool, seed_value: int) -> void:
 		for z in [-1.5 if bus else -0.8, 1.5 if bus else 0.8]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.3, z), 0.3, 0.15, Color("3f4c4d"), 1, 10)
 			wheel.rotation.z = PI / 2
+
+func bus_stop() -> void:
+	# Парные платформы для обоих направлений, за пределами проезжей части.
+	for side in [-1, 1]:
+		var platform := Node3D.new()
+		add_child(platform)
+		platform.position.x = side * 2.48
+		Art.box(platform, Vector3(0, 0.06, 0), Vector3(0.65, 0.12, 4.8), Color("e3d9be"))
+		for z in [-1.6, 1.6]:
+			Art.box(platform, Vector3(side * 0.15, 1.25, z), Vector3(0.08, 2.5, 0.08), Color("677f84"))
+		Art.box(platform, Vector3(0, 2.5, 0), Vector3(0.9, 0.16, 4), Color("6c9ca8"))
+		Art.box(platform, Vector3(0, 0.7, 0), Vector3(0.45, 0.12, 2.4), Color("ad9978"))
+		Art.box(platform, Vector3(0, 2, 2.1), Vector3(0.65, 0.8, 0.12), Color("328cb8"))
+		Art.sign_text(platform, Vector3(0, 2, 2.18), "BUS", 30)

@@ -1,5 +1,10 @@
 extends RefCounted
 
+const Transit = preload("res://scripts/transit.gd")
+var transit = Transit.new()
+const WATER_AFFECTED_HOMES = [12, 16, 20]
+const AMENITY_RADIUS: float = 22.0
+
 const Catalog = preload("res://scripts/asset_catalog.gd")
 
 const SAVE_PATH = "user://progress.json"
@@ -31,20 +36,105 @@ func happiness() -> int:
 	for i in range(24):
 		if buildings[i] in ["cafe", "park"]:
 			value += Catalog.TYPES[buildings[i]].mood + placement_bonus(i, buildings[i])
-	return mini(value, 100)
+	return clampi(value + (3 if transit_metrics().served > 0 else -5), 0, 100)
 
 func placement_bonus(index: int, kind: String) -> int:
 	var bonus := 0
 	for i in range(24):
-		if i != index and plot_position(i).distance_to(plot_position(index)) < 6.8:
+		if i != index and building_world(i).distance_to(building_world(index)) < AMENITY_RADIUS:
 			if buildings[i] == "house":
 				bonus += 2
 			if (kind == "cafe" and buildings[i] == "park") or (kind == "park" and buildings[i] == "cafe"):
 				bonus += 3
 	return bonus
 
+func house_residents(index: int) -> int:
+	if buildings[index] != "house":
+		return 0
+	return 8 if has_water(index) else 4
+
 func population() -> int:
-	return 64 + (24 if leak_fixed else 0) + int((happiness() - 38) / 3.0)
+	var total := 0
+	for index in range(24):
+		total += house_residents(index)
+	return total
+
+func has_water(index: int) -> bool:
+	return leak_fixed or index not in WATER_AFFECTED_HOMES
+
+func building_world(index: int) -> Vector3:
+	return preload("res://scripts/district_world.gd").world_position(plot_position(index))
+
+func transit_metrics() -> Dictionary:
+	var covered := 0
+	var served := 0
+	for i in range(24):
+		if buildings[i] != "house":
+			continue
+		if transit.stops.any(func(row): return transit.in_range(building_world(i), row)):
+			covered += house_residents(i)
+		if house_transit(i):
+			served += house_residents(i)
+	return {"covered": covered, "served": served, "demand": ceili(served * 0.25), "load": mini(Transit.CAPACITY, ceili(served * 0.25)), "capacity": Transit.CAPACITY}
+
+func house_transit(index: int) -> bool:
+	if not transit.active or not transit.funded or transit.stops.size() != 2:
+		return false
+	var point := building_world(index)
+	for j in range(2):
+		if not transit.in_range(point, transit.stops[j]):
+			continue
+		for i in range(24):
+			if buildings[i] in ["cafe", "depot"] and transit.in_range(building_world(i), transit.stops[1 - j]):
+				return true
+	return false
+
+func place_stop(row: int) -> bool:
+	if not completed or row < 0 or row > 5 or transit.stops.size() >= 2 or row in transit.stops or budget < Transit.STOP_COST:
+		return false
+	budget -= Transit.STOP_COST
+	transit.stops.append(row)
+	transit.stops.sort()
+	save_game()
+	return true
+
+func start_transit() -> bool:
+	if not completed or transit.active or transit.stops.size() != 2 or budget < Transit.BUS_COST:
+		return false
+	budget -= Transit.BUS_COST
+	transit.active = true
+	transit.funded = true
+	transit.coordinate = Transit.ROW_Z[transit.stops[0]]
+	transit.direction = 1
+	transit.dwell = 3
+	save_game()
+	return true
+
+func house_quality(index: int) -> Dictionary:
+	var water := has_water(index)
+	var point := building_world(index)
+	var services := signal_fixed or point.x >= 0 or point.z < 0
+	var transport := house_transit(index)
+	var environment := 12
+	for i in range(24):
+		if buildings[i] in ["cafe", "park"] and building_world(i).distance_to(point) < AMENITY_RADIUS:
+			environment += 8 if buildings[i] == "cafe" else 10
+	var score := (30 if water else 0) + (20 if services else 10) + (20 if transport else 0) + mini(environment, 30)
+	if not water:
+		score = mini(score, 19)
+	return {"score": clampi(score, 0, 100), "water": water, "services": services, "transport": transport, "environment": mini(environment, 30)}
+
+func district_quality() -> float:
+	var total := 0
+	var weighted := 0
+	for i in range(24):
+		var residents := house_residents(i)
+		weighted += residents * house_quality(i).score
+		total += residents
+	return float(weighted) / total if total > 0 else -1.0
+
+static func quality_band(score: float) -> int:
+	return clampi(int(score) / 20, 0, 4)
 
 func income() -> int:
 	return 12 + (8 if leak_fixed else 0) + buildings.count("cafe") * 6 - buildings.count("park") * 2
@@ -88,6 +178,10 @@ func tick(delta: float, movement_allowed: bool = true) -> bool:
 	if income_clock >= 12.0:
 		income_clock -= 12.0
 		budget += income()
+		if transit.active:
+			transit.funded = budget >= Transit.UPKEEP
+			if transit.funded:
+				budget -= Transit.UPKEEP
 		changed = true
 	if job != "":
 		if route_index < route.size():
@@ -131,7 +225,7 @@ func save_game() -> void:
 	var data := {"version": 1, "vehicle_type_id": "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
-		"repair_left": repair_left, "income_clock": income_clock}
+		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data()}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
 		return
@@ -181,6 +275,10 @@ func load_game() -> bool:
 			return false
 	if typeof(data.get("leak_fixed")) != TYPE_BOOL or typeof(data.get("signal_fixed")) != TYPE_BOOL:
 		return false
+	var loaded_transit := Transit.new()
+	if not loaded_transit.restore(data.get("transit", {})):
+		return false
+	transit = loaded_transit
 	budget = clampi(int(data.budget), 0, 1000000)
 	language = "en" if data.get("language") == "en" else "ru"
 	leak_fixed = data.leak_fixed

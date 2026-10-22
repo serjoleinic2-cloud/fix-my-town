@@ -98,27 +98,9 @@ func step(delta: float) -> void:
 	for vehicle: Dictionary in vehicles:
 		if not vehicle.node.visible:
 			continue
-		var distance := SPEED * delta
-		for other: Dictionary in vehicles:
-			if other.id == vehicle.id or not other.node.visible or other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
-				continue
-			var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
-			if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
-				distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
-		var position_value := lane_position(vehicle)
-		if service_active:
-			var lateral: float = absf(service_position.z - position_value.z) if vehicle.axis == "H" else absf(service_position.x - position_value.x)
-			var gap: float = ((service_position.x - position_value.x) if vehicle.axis == "H" else (service_position.z - position_value.z)) * vehicle.direction
-			if lateral < 0.9 and gap > 0 and gap < FOLLOW_DISTANCE + distance:
-				distance = maxf(0, gap - FOLLOW_DISTANCE)
-		for intersection: Dictionary in intersections:
-			if absf((intersection.z if vehicle.axis == "H" else intersection.x) - vehicle.road) > 0.1:
-				continue
-			var crossing: float = intersection.x if vehicle.axis == "H" else intersection.z
-			var ahead: float = (crossing - vehicle.coordinate) * vehicle.direction
-			if ahead >= STOP_DISTANCE - 0.1 and ahead <= STOP_DISTANCE + distance + 0.2:
-				if not permission(intersection, vehicle.axis, vehicle.id, delta):
-					distance = minf(distance, maxf(0, ahead - STOP_DISTANCE))
+		if vehicle.get("managed", false):
+			continue
+		var distance := travel_distance(vehicle, delta)
 		vehicle.coordinate += distance * vehicle.direction
 		var low := -64.0 if vehicle.axis == "H" else -48.0
 		var high := 34.0 if vehicle.axis == "H" else 48.0
@@ -128,7 +110,42 @@ func step(delta: float) -> void:
 			vehicle.coordinate = high
 		place_vehicle(vehicle)
 
+func travel_distance(vehicle: Dictionary, delta: float) -> float:
+	var distance := SPEED * delta
+	for other: Dictionary in vehicles:
+		if other.id == vehicle.id or not other.node.visible or other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
+			continue
+		var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
+		if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
+			distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
+	var position_value := lane_position(vehicle)
+	if service_active:
+		var lateral: float = absf(service_position.z - position_value.z) if vehicle.axis == "H" else absf(service_position.x - position_value.x)
+		var gap: float = ((service_position.x - position_value.x) if vehicle.axis == "H" else (service_position.z - position_value.z)) * vehicle.direction
+		if lateral < 0.9 and gap > 0 and gap < vehicle.spacing + distance:
+			distance = maxf(0, gap - vehicle.spacing)
+	for intersection: Dictionary in intersections:
+		if absf((intersection.z if vehicle.axis == "H" else intersection.x) - vehicle.road) > 0.1:
+			continue
+		var crossing: float = intersection.x if vehicle.axis == "H" else intersection.z
+		var ahead: float = (crossing - vehicle.coordinate) * vehicle.direction
+		var stop_distance: float = 5.6 if vehicle.node.type_id == "city_bus" else STOP_DISTANCE
+		if ahead < stop_distance - 0.3:
+			wait_times.erase(intersection.key + ":" + vehicle.id)
+		if ahead >= stop_distance - 0.1 and ahead <= stop_distance + distance + 0.2:
+			if not permission(intersection, vehicle.axis, vehicle.id, delta):
+				distance = minf(distance, maxf(0, ahead - stop_distance))
+	return distance
+
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
+	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
+	for other: Dictionary in vehicles:
+		if not other.node.visible or other.id == actor or other.axis == axis:
+			continue
+		var point := lane_position(other)
+		var clearance: float = 4.6 if other.node.type_id == "city_bus" else 3.5
+		if absf(point.x - intersection.x) < clearance and absf(point.z - intersection.z) < clearance:
+			return false
 	if not is_broken(intersection):
 		return phase(axis, clock + intersection.offset) == "green"
 	var wait_key: String = intersection.key + ":" + actor
@@ -170,6 +187,8 @@ func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 		if lateral > 0.15:
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
+		if ahead < 3.5:
+			wait_times.erase(intersection.key + ":crew_0")
 		if ahead >= 3.5 and ahead <= 4.5 and not permission(intersection, axis, "crew_0", delta):
 			return false
 	return true
@@ -177,4 +196,4 @@ func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 func set_active_count(count: int) -> void:
 	reservations.clear()
 	for i in range(cars.size()):
-		cars[i].visible = i < count
+		cars[i].visible = i < count or vehicles[i].get("managed", false)

@@ -92,6 +92,22 @@ func run() -> void:
 			var proposed := current + forward * 2
 			var distance := traffic.service_travel_distance(current, proposed, 0.1)
 			check(absf(distance - (6 - Traffic.stop_distance_for("repair_van"))) < 0.001, "Van movement clamps to front clearance")
+	# During repair, the stopped van occupies the road and traffic from either direction must wait.
+	traffic.intersections.clear()
+	traffic.service_active = true
+	traffic.service_position = Vector3(0, 0.18, 0)
+	for index in [0, 1]:
+		var vehicle: Dictionary = traffic.vehicles[index]
+		vehicle.node.visible = index < 2
+		vehicle.axis = "H"
+		vehicle.direction = 1 if index == 0 else -1
+		vehicle.road = -1.0 if vehicle.direction == 1 else 1.0
+		vehicle.coordinate = -6.0 if vehicle.direction == 1 else 6.0
+		var distance := traffic.travel_distance(vehicle, 0.5)
+		check(distance <= 2.2, "Traffic yields to a stopped service van from both directions")
+	traffic.service_active = false
+	var released: Dictionary = traffic.vehicles[0]
+	check(traffic.travel_distance(released, 0.5) > 2.2, "Traffic resumes after the service van leaves")
 	# Полный сценарий с тем же дорожным контроллером, который вызывает main.
 	traffic.set_active_count(8)
 	traffic.clock = 0

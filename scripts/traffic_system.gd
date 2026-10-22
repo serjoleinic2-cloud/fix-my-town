@@ -125,8 +125,10 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	if service_active:
 		var lateral: float = absf(service_position.z - position_value.z) if vehicle.axis == "H" else absf(service_position.x - position_value.x)
 		var gap: float = ((service_position.x - position_value.x) if vehicle.axis == "H" else (service_position.z - position_value.z)) * vehicle.direction
-		if lateral < 0.9 and gap > 0 and gap < vehicle.spacing + distance:
-			distance = maxf(0, gap - vehicle.spacing)
+		# Служебная машина занимает ширину обеих полос, пока стоит на проезжей части.
+		# Останавливаем потоки с обеих сторон, чтобы машины не проходили сквозь неё.
+		if lateral < 1.8 and gap > 0 and gap < vehicle.spacing + distance:
+			distance = maxf(0, gap - maxf(vehicle.spacing, 3.8))
 	for intersection: Dictionary in intersections:
 		if absf((intersection.z if vehicle.axis == "H" else intersection.x) - vehicle.road) > 0.1:
 			continue

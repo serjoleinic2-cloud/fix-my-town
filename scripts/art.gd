@@ -99,16 +99,19 @@ static func hedge(parent: Node3D, pos: Vector3, size_value: Vector3) -> void:
 	box(parent, pos, size_value, Color("66864a"))
 	box(parent, pos + Vector3(0, size_value.y * 0.5, 0), Vector3(size_value.x * 0.85, 0.18, size_value.z * 0.85), Color("7e9b53"))
 
-static func bench(parent: Node3D, pos: Vector3, angle: float = 0) -> void:
+static func bench(parent: Node3D, pos: Vector3, angle: float = 0, scale_value: float = 1.0) -> Node3D:
 	var node := Node3D.new()
+	node.name = "ParkBench"
 	node.position = pos
 	node.rotation.y = angle
+	node.scale = Vector3.ONE * scale_value
 	parent.add_child(node)
 	for x in [-0.65, 0.65]:
 		box(node, Vector3(x, 0.36, 0), Vector3(0.1, 0.72, 0.5), Color("4d6254"))
 	for z in [-0.22, 0.02, 0.26]:
 		box(node, Vector3(0, 0.65, z), Vector3(1.7, 0.1, 0.17), Color("aa8756"))
 	box(node, Vector3(0, 1.1, -0.3), Vector3(1.7, 0.38, 0.12), Color("aa8756"))
+	return node
 
 static func lamp(parent: Node3D, pos: Vector3) -> void:
 	cylinder(parent, pos + Vector3(0, 2, 0), 0.055, 4, Color("56646a"), 1, 7)

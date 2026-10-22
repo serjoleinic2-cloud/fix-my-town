@@ -6,6 +6,8 @@ const Art = preload("res://scripts/art.gd")
 @export_range(1, 3) var visual_level: int = 1
 var windows: Array[MeshInstance3D] = []
 var signs: Array[Label3D] = []
+var fountain_sprites: Array[Sprite3D] = []
+var fountain_clock: float = 0
 
 func _ready() -> void:
 	var seed_value := absi(str(get_parent().get_parent().get("instance_id")).hash())
@@ -40,6 +42,15 @@ func _ready() -> void:
 			jet.rotation.x = cos(angle) * 0.45
 		Art.cylinder(self, Vector3(1.45, 0.06, 0), 0.48, 0.1, Color("776d58"))
 	Art.batch(self)
+
+func _process(delta: float) -> void:
+	fountain_clock += delta
+	for i in range(fountain_sprites.size()):
+		var sprite := fountain_sprites[i]
+		var phase := fountain_clock * 5.0 + float(i) * 2.1
+		sprite.position.y = 0.82 + sin(phase) * 0.12
+		sprite.scale.y = 0.92 + sin(phase + 0.7) * 0.12
+		sprite.modulate.a = 0.76 + sin(phase + 1.4) * 0.12
 
 func house(seed_value: int) -> void:
 	var lift := (visual_level - 1) * 1.5
@@ -163,13 +174,46 @@ func park() -> void:
 	Art.box(self, Vector3(0, 0.09, 0), Vector3(8.6, 0.06, 1.1), Color("d9d2ab"))
 	Art.cylinder(self, Vector3(0, 0.25, 0), 1.7, 0.5, Color("cecbb7"), 1, 20)
 	Art.cylinder(self, Vector3(0, 0.52, 0), 1.4, 0.04, Color("7ab7c7"), 1, 20)
-	Art.cylinder(self, Vector3(0, 1, 0), 0.25, 1, Color("e7e0c9"))
-	Art.cylinder(self, Vector3(0, 1.5, 0), 0.8, 0.16, Color("e7e0c9"))
+	make_fountain_sprites()
 	for x in [-3, 3]:
 		for z in [-3, 3]:
 			if visual_level < 3 or x != 3 or z != -3:
 				Art.tree(self, Vector3(x, 0, z), 1.0, false, int(x + z))
-		Art.bench(self, Vector3(x, 0, 0), PI / 2)
+	for i in range(2):
+		var x := -1.4 if i == 0 else 1.4
+		var bench := Art.bench(self, Vector3(x, 0, 2.7), 0, 0.7)
+		bench.name = "ParkBench%d" % i
+
+func make_fountain_sprites() -> void:
+	var image := Image.create(48, 96, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	for y in range(7, 87):
+		var progress := float(y - 7) / 80.0
+		var center := 24.0 + sin(progress * PI * 1.4) * 5.0
+		var half_width := maxf(1.0, 4.0 * (1.0 - progress * 0.72))
+		for x in range(48):
+			var distance := absf(float(x) - center)
+			if distance <= half_width:
+				var alpha := 0.88 if distance < half_width * 0.55 else 0.56
+				image.set_pixel(x, y, Color(0.48, 0.83, 0.96, alpha))
+	for point in [Vector2i(12, 32), Vector2i(35, 46), Vector2i(10, 58), Vector2i(38, 68), Vector2i(16, 76)]:
+		for dy in range(-2, 3):
+			for dx in range(-2, 3):
+				if dx * dx + dy * dy <= 4:
+					image.set_pixel(point.x + dx, point.y + dy, Color(0.75, 0.94, 1.0, 0.9))
+	var texture := ImageTexture.create_from_image(image)
+	for i in range(3):
+		var sprite := Sprite3D.new()
+		sprite.name = "FountainWater%d" % i
+		sprite.texture = texture
+		sprite.pixel_size = 0.014
+		sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sprite.position = Vector3((i - 1) * 0.38, 0.82, 0)
+		sprite.scale = Vector3(0.8 if i != 1 else 1.0, 0.9 + i * 0.06, 1)
+		sprite.shaded = false
+		sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		add_child(sprite)
+		fountain_sprites.append(sprite)
 
 func van() -> void:
 	Art.box(self, Vector3(0, 0.87, -0.35), Vector3(1.65, 1.35, 1.85), Color("218fb9"))

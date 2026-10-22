@@ -63,8 +63,33 @@ func run() -> void:
 		traffic.step(0.05)
 		game.transit.tick(0.05, traffic)
 	check(game.transit.trips >= 2 and game.transit.last_delay > 0, "Bus shuttles, dwells and waits at signals")
+	var saved_intersections: Array = traffic.intersections.duplicate()
+	traffic.intersections.clear()
+	for index in range(traffic.vehicles.size()):
+		if index != 2:
+			traffic.vehicles[index].node.hide()
+	var bus: Dictionary = traffic.vehicles[2]
+	game.transit.coordinate = 21.5
+	game.transit.direction = 1
+	game.transit.visual_direction = 1
+	game.transit.dwell = 0
+	traffic.place_vehicle(bus)
+	game.transit.tick(0.05, traffic)
+	check(is_equal_approx(game.transit.coordinate, 21.6) and game.transit.direction == -1 and game.transit.visual_direction == 1, "Bus begins a turnaround at the terminal without changing lanes instantly")
+	var previous_bus_x: float = bus.node.position.x
+	var largest_lane_step: float = 0
+	for i in range(20):
+		game.transit.tick(0.05, traffic)
+		largest_lane_step = maxf(largest_lane_step, absf(bus.node.position.x - previous_bus_x))
+		previous_bus_x = bus.node.position.x
+	check(largest_lane_step <= 0.04 and bus.node.position.x > -15.4 and bus.node.position.x < -13.4, "Bus changes lanes gradually while dwelling at a terminal")
+	for i in range(45):
+		game.transit.tick(0.05, traffic)
+	check(is_equal_approx(bus.node.position.x, -13.4) and game.transit.visual_direction == game.transit.direction, "Bus finishes its terminal turn in the return lane")
+	traffic.intersections = saved_intersections
 	game.transit.coordinate = -4.0
 	game.transit.direction = 1
+	game.transit.visual_direction = 1
 	game.transit.dwell = 0
 	traffic.clock = 0
 	game.transit.tick(0.1, traffic)

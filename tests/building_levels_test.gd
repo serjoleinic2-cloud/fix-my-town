@@ -113,6 +113,11 @@ func run() -> void:
 				var area = object.interaction_area
 				var sockets = object.mounts
 				var visual = object.visual_root.get_child(0)
+				if kind == "park":
+					var benches: Array = visual.find_children("ParkBench*", "Node3D", true, false)
+					var fountain := visual.find_child("FountainWater0", true, false) as Sprite3D
+					check(benches.size() == 2 and benches.all(func(item): return item.scale.x < 0.8 and absf(item.position.x) > 1.1 and absf(item.position.z) > 1.1), "Park benches are smaller and outside both paths")
+					check(fountain != null and fountain.billboard == BaseMaterial3D.BILLBOARD_ENABLED, "Fountain water uses camera-facing 2D sprites")
 				money = scene.game.budget
 				scene.begin_upgrade()
 				for i in range(12):

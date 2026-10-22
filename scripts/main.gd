@@ -27,6 +27,9 @@ var navbar: PanelContainer
 var sheet: PanelContainer
 var sheet_column: VBoxContainer
 var mission: PanelContainer
+var completion_left: float = 0
+var completion_observed: bool = false
+var mission_icon: TextureRect
 var objective: Label
 var stats: Label
 var details: Label
@@ -127,6 +130,7 @@ func t(key: String) -> String:
 
 func _ready() -> void:
 	game.load_game()
+	completion_observed = game.completed
 	load_graphics()
 	build_ui()
 	build_world()
@@ -221,6 +225,9 @@ func build_ui() -> void:
 	layer.add_child(screen)
 	ui_theme = Theme.new()
 	ui_theme.default_font_size = 22
+	for dialog_type in ["AcceptDialog", "ConfirmationDialog"]:
+		ui_theme.set_constant("buttons_min_height", dialog_type, 72)
+		ui_theme.set_constant("buttons_min_width", dialog_type, 140)
 	ui_theme.set_color("font_color", "Label", INK)
 	ui_theme.set_color("font_color", "Button", INK)
 	ui_theme.set_stylebox("panel", "AcceptDialog", style(PAPER))
@@ -286,7 +293,7 @@ func build_ui() -> void:
 	mission = card(screen)
 	var mission_row := hbox(mission, 14)
 	var tile := card(mission_row, Color("dceefa"))
-	icon(tile, "drop", 38)
+	mission_icon = icon(tile, "drop", 38)
 	var mission_column := VBoxContainer.new()
 	mission_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mission_row.add_child(mission_column)
@@ -476,6 +483,8 @@ func redraw_plots() -> void:
 			object = create_object(plots, kind, "plot_" + str(i), map_position(game.plot_position(i)))
 			var base := Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f") if kind != "empty" else Color("9cab7a"))
 			base.name = "PlotBase"
+		object.set_level(game.building_level(i))
+		object.visual_root.visible = true
 		object.set_serviced(game.has_water(i) if kind == "house" else true)
 		var base := object.get_node("PlotBase") as MeshInstance3D
 		base.material_override = Art.material(quality_color(game.house_quality(i).score) if quality_mode and kind == "house" else (Color("91a66f") if kind != "empty" else Color("9cab7a")))
@@ -652,6 +661,13 @@ func refresh() -> void:
 		var item: Button = nav_buttons[key]
 		item.find_child("Caption", true, false).text = t(key)
 		item.add_theme_stylebox_override("normal", style(Color("d6eafa") if active_tab == key else PAPER, 12, Color("aad2ee") if active_tab == key else Color("e6e1d7")))
+	if game.completed and not completion_observed:
+		completion_left = 3.5
+	completion_observed = game.completed
+	if not game.completed:
+		completion_left = 0
+	var mission_symbol := "star" if game.completed else ("drop" if not game.leak_fixed else ("hammer" if not game.signal_fixed else "pin"))
+	mission_icon.texture = load("res://assets/icons/ui_" + mission_symbol + ".svg")
 	var completed_steps := int(game.leak_fixed) + int(game.signal_fixed) + int(game.buildings.has("cafe") or game.buildings.has("park"))
 	objective.text = t("mission_done") if game.completed else (t("mission_water") if not game.leak_fixed else (t("mission_signal") if not game.signal_fixed else t("mission_build")))
 	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
@@ -684,12 +700,14 @@ func build_sheet() -> void:
 	clear_children(mode_switcher)
 	sheet.add_theme_stylebox_override("panel", style(PAPER, 22))
 	sheet.visible = selection_kind != ""
-	mission.visible = not sheet.visible
+	update_mission_visibility()
 	status = null
 	transit_stats = null
 	if not sheet.visible:
 		return
-	if selection_kind == "district_status":
+	if selection_kind == "upgrade":
+		build_upgrade_sheet()
+	elif selection_kind == "district_status":
 		build_district_sheet()
 	elif selection_kind == "transit":
 		build_transit_sheet()
@@ -736,9 +754,10 @@ func build_sheet() -> void:
 		action_height = 410
 		header(t("preview_title") % t(preview_kind).to_lower())
 		var choices := mode_switcher
-		for kind in ["cafe", "park"]:
-			var choose := button(choices, t(kind), choose_preview.bind(kind))
+		for kind in ["house", "cafe", "park"]:
+			var choose := button(choices, tr_text("Дом", "House") if kind == "house" else t(kind), choose_preview.bind(kind))
 			choose.custom_minimum_size.y = 72
+			choose.add_theme_font_size_override("font_size", 22)
 			if kind == preview_kind:
 				choose.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
 		var cost_row := hbox(card(sheet_column, Color("eeefec")))
@@ -748,9 +767,9 @@ func build_sheet() -> void:
 		label(24, cost_row, str(Catalog.cost(preview_kind)), true)
 		var effect_row := hbox(card(sheet_column, Color("eeefec")))
 		icon(effect_row, "people", 26)
-		var effect_name := label(23, effect_row, t("comfort"), true)
+		var effect_name := label(23, effect_row, tr_text("Вместимость", "Capacity") if preview_kind == "house" else t("comfort"), true)
 		effect_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var bonus: int = mini(Catalog.TYPES[preview_kind].mood + game.placement_bonus(selected, preview_kind), 100 - game.happiness())
+		var bonus: int = 8 if preview_kind == "house" else mini(Catalog.level_data(preview_kind).mood + game.placement_bonus(selected, preview_kind), 100 - game.happiness())
 		var benefit := label(24, effect_row, "+%d" % bonus, true)
 		benefit.add_theme_color_override("font_color", Color("58a56b"))
 		action_box = VBoxContainer.new()
@@ -760,8 +779,8 @@ func build_sheet() -> void:
 		build_button.disabled = game.budget < Catalog.cost(preview_kind)
 		var cancel := button(action_box, t("cancel"), close_sheet)
 		cancel.custom_minimum_size.y = 72
-	elif selected >= 0 and game.buildings[selected] == "house":
-		build_house_sheet()
+	elif selected >= 0 and Catalog.LEVELS.has(game.buildings[selected]):
+		build_building_sheet()
 	elif selected >= 0:
 		action_height = 190
 		header(t(game.buildings[selected]))
@@ -798,6 +817,16 @@ func update_preview() -> void:
 		preview = create_object(world, "bus_stop", "stop_preview", point)
 		preview.interaction_area.collision_layer = 0
 		return
+	if selection_kind == "upgrade" and selected >= 0:
+		var point := map_position(game.plot_position(selected))
+		outline(point, Color("8ed6f8"))
+		preview = create_object(world, game.buildings[selected], "plot_%d" % selected, point)
+		preview.set_level(game.building_level(selected) + 1)
+		preview.set_serviced(game.has_water(selected) if game.buildings[selected] == "house" else true)
+		preview.set_language(game.language)
+		preview.interaction_area.collision_layer = 0
+		plots.get_node("plot_%d" % selected).visual_root.hide()
+		return
 	if selection_kind != "plot" or selected < 0:
 		return
 	var point := map_position(game.plot_position(selected))
@@ -816,7 +845,7 @@ func update_preview() -> void:
 		item.material_override = ghost
 		item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for i in range(24):
-		if i != selected and game.buildings[i] == "house" and game.building_world(i).distance_to(game.building_world(selected)) < Simulation.AMENITY_RADIUS:
+		if i != selected and (game.buildings[i] in ["cafe", "park"] if preview_kind == "house" else game.buildings[i] == "house") and game.building_world(i).distance_to(game.building_world(selected)) < Simulation.AMENITY_RADIUS:
 			outline(map_position(game.plot_position(i)), Color("a7f384"))
 
 func dispatch() -> void:
@@ -849,6 +878,8 @@ func _process(delta: float) -> void:
 	if car == null:
 		return
 	elapsed += delta
+	completion_left = maxf(0, completion_left - delta)
+	update_mission_visibility()
 	if OS.is_debug_build() and OS.has_feature("android"):
 		diagnostic_clock += delta
 		if diagnostic_clock >= 5:
@@ -861,10 +892,14 @@ func _process(delta: float) -> void:
 	scenery.animate(elapsed)
 	game.transit.tick(delta, scenery.traffic_controller)
 	update_transit_stats()
-	var movement_allowed := true
+	var movement_fraction := 1.0
 	if game.job != "" and game.route_index < game.route.size():
-		movement_allowed = scenery.traffic_controller.service_allowed(map_position(game.vehicle), map_position(game.route[game.route_index]), delta)
-	if game.tick(delta, movement_allowed):
+		var current := map_position(game.vehicle)
+		var proposed := map_position(game.proposed_vehicle(delta))
+		var intended := current.distance_to(proposed)
+		if intended > 0.0001:
+			movement_fraction = scenery.traffic_controller.service_travel_distance(current, proposed, delta) / intended
+	if game.tick(delta, true, movement_fraction):
 		refresh()
 	audio.sync(game, camera.size / 2.2, delta)
 	update_crew_status()
@@ -1095,22 +1130,40 @@ func house_problems(index: int) -> Array:
 	return issues
 
 func build_house_sheet() -> void:
-	action_height = 340
-	header(t("house"))
-	var data: Dictionary = game.house_quality(selected)
-	var condition := label(26, sheet_column, "● " + quality_name(data.score), true)
-	condition.add_theme_color_override("font_color", quality_color(data.score))
-	var issues := house_problems(selected)
-	for i in range(mini(2, issues.size())):
-		var issue := label(22, sheet_column, issues[i][0])
-		issue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	if issues.is_empty():
-		label(22, sheet_column, tr_text("Основные потребности обеспечены", "Essential needs are met"))
+	build_building_sheet()
+
+func build_building_sheet() -> void:
+	action_height = 430
+	var kind: String = game.buildings[selected]
+	var level_value: int = game.building_level(selected)
+	header(t(kind) + " · %d/3" % level_value)
+	var issues: Array = []
+	if kind == "house":
+		var data: Dictionary = game.house_quality(selected)
+		var condition := label(25, sheet_column, "● " + quality_name(data.score), true)
+		condition.add_theme_color_override("font_color", quality_color(data.score))
+		issues = house_problems(selected)
+		for i in range(mini(2, issues.size())):
+			var issue := label(20, sheet_column, issues[i][0])
+			issue.set_meta("house_problem", true)
 	else:
+		label(22, sheet_column, building_effect(kind, level_value))
+	if level_value < 3:
+		label(20, sheet_column, tr_text("Следующий: ", "Next: ") + building_effect(kind, level_value + 1))
+	else:
+		label(20, sheet_column, tr_text("Достигнут третий уровень", "Level three reached"))
+	var row := hbox(sheet_column)
+	var improve := button(row, tr_text("Улучшить · %d", "Upgrade · %d") % game.upgrade_cost(selected) if level_value < 3 else tr_text("Максимум", "Maximum"), begin_upgrade, true)
+	improve.name = "UpgradeButton"
+	improve.disabled = level_value >= 3
+	var more := button(row, tr_text("Ещё", "More"), open_building_more)
+	more.size_flags_horizontal = Control.SIZE_SHRINK_END
+	more.custom_minimum_size.x = 100
+	more.name = "MoreButton"
+	if not issues.is_empty():
 		var key: String = issues[0][1]
 		var caption: String = (tr_text("Устранить протечку", "Fix the leak") if key == "leak" else tr_text("Починить светофор", "Fix the signal")) if key in ["leak", "signal"] else tr_text("Открыть транспорт", "Open transit") if key == "transit" else t("build_tab")
-		button(sheet_column, caption, house_action.bind(key), true)
-	button(sheet_column, tr_text("Подробнее", "Details"), house_details)
+		button(sheet_column, caption, house_action.bind(key))
 
 func house_action(key: String) -> void:
 	if key in ["leak", "signal"]:
@@ -1129,7 +1182,7 @@ func house_details() -> void:
 	dialog.title = t("house")
 	dialog.ok_button_text = t("audio_done")
 	dialog.dialog_text = tr_text("Качество жизни", "Quality of life") + ": %d/100 · %s\n" % [data.score, quality_name(data.score)]
-	dialog.dialog_text += tr_text("Уровень здания: 1 (улучшения ещё не добавлены)", "Building level: 1 (upgrades are not available yet)") + "\n"
+	dialog.dialog_text += tr_text("Уровень здания: %d/3", "Building level: %d/3") % game.building_level(selected) + "\n"
 	dialog.dialog_text += tr_text("Вода: ", "Water: ") + (tr_text("есть", "available") if data.water else tr_text("нет — устраните протечку", "none — repair the leak")) + "\n"
 	dialog.dialog_text += tr_text("Службы: ", "Services: ") + (tr_text("доступны", "available") if data.services else tr_text("задержка — почините светофор", "delayed — repair the signal")) + "\n"
 	dialog.dialog_text += tr_text("Транспорт: ", "Transit: ") + (tr_text("маршрут соединяет нужные точки", "route connects useful destinations") if data.transport else tr_text("нужны остановки и маршрут", "stops and a route are needed")) + "\n"
@@ -1219,3 +1272,109 @@ func redraw_transit() -> void:
 	for row in game.transit.stops:
 		var stop := create_object(transit_visuals, "bus_stop", "bus_stop_%d" % row, game.transit.stop_position(row))
 		stop.interaction_area.collision_layer = 0
+
+func building_effect(kind: String, level_value: int) -> String:
+	var data := Catalog.level_data(kind, level_value)
+	if kind == "house":
+		return tr_text("До %d жителей · доход %d/12 сек. при воде", "Up to %d residents · income %d/12 sec with water") % [data.residents, data.income]
+	if kind == "cafe":
+		return tr_text("Доход +%d · окружение +%d", "Income +%d · amenities +%d") % [data.income, data.environment]
+	return tr_text("Окружение +%d · расход %d/12 сек.", "Amenities +%d · cost %d/12 sec") % [data.environment, -data.income]
+
+func begin_upgrade() -> void:
+	if selected < 0 or game.upgrade_cost(selected) <= 0:
+		return
+	selection_kind = "upgrade"
+	set_camera_focus(game.building_world(selected) + Vector3(7, 0, 7))
+	refresh()
+
+func cancel_upgrade() -> void:
+	selection_kind = "plot"
+	refresh()
+
+func build_upgrade_sheet() -> void:
+	action_height = 360
+	var kind: String = game.buildings[selected]
+	var level_value: int = game.building_level(selected)
+	header(tr_text("Предпросмотр · %d/3", "Preview · %d/3") % mini(3, level_value + 1))
+	label(22, sheet_column, building_effect(kind, mini(3, level_value + 1)))
+	var changes: Dictionary = game.project_change(selected)
+	label(20, sheet_column, change_summary(changes))
+	var confirm := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % game.upgrade_cost(selected), confirm_upgrade.bind(selected, kind, level_value), true)
+	confirm.name = "ConfirmUpgrade"
+	confirm.disabled = game.upgrade_cost(selected) <= 0 or game.budget < game.upgrade_cost(selected)
+	button(sheet_column, t("cancel"), cancel_upgrade).name = "CancelUpgrade"
+
+func confirm_upgrade(index: int, kind: String, expected_level: int) -> void:
+	if game.buildings[index] == kind and game.building_level(index) == expected_level and game.upgrade(index):
+		audio.play_ui("success")
+		audio.play("build", "Effects", game.plot_position(index))
+		selection_kind = "plot"
+	else:
+		audio.play_ui("deny")
+	refresh()
+
+func change_summary(after: Dictionary) -> String:
+	var before: Dictionary = game.metrics()
+	return tr_text("Жители: %+d · доход: %+d/12 сек.\nРейтинг: %+d · спрос на автобус: %+d", "Residents: %+d · income: %+d/12 sec\nRating: %+d · bus demand: %+d") % [after.population - before.population, after.income - before.income, after.rating - before.rating, after.demand - before.demand]
+
+func open_building_more() -> void:
+	if selected < 0:
+		return
+	var index := selected
+	var dialog := AcceptDialog.new()
+	dialog.theme = ui_theme
+	dialog.title = tr_text("Ещё", "More")
+	dialog.ok_button_text = t("cancel")
+	var column := VBoxContainer.new()
+	dialog.add_child(column)
+	if game.buildings[index] == "house":
+		button(column, tr_text("Подробнее", "Details"), func():
+			dialog.queue_free()
+			house_details())
+	button(column, tr_text("Снести…", "Demolish…"), func():
+		dialog.queue_free()
+		request_demolition(index))
+	add_child(dialog)
+	decorate_dialog(dialog)
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(420, 250))
+
+func request_demolition(index: int) -> void:
+	if not Catalog.LEVELS.has(game.buildings[index]):
+		return
+	var kind: String = game.buildings[index]
+	var level_value: int = game.building_level(index)
+	var after: Dictionary = game.project_change(index, true)
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "DemolitionConfirmation"
+	dialog.theme = ui_theme
+	dialog.title = tr_text("Подтвердите снос", "Confirm demolition")
+	dialog.ok_button_text = tr_text("Снести", "Demolish")
+	dialog.cancel_button_text = t("cancel")
+	var column := VBoxContainer.new()
+	column.custom_minimum_size.x = 420
+	dialog.add_child(column)
+	var message := label(22, column)
+	message.custom_minimum_size.x = 420
+	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	message.text = t(kind) + tr_text(" · уровень %d\n", " · level %d\n") % level_value
+	message.text += tr_text("Здание исчезнет, участок освободится.\n", "The building will be removed, freeing the plot.\n")
+	message.text += change_summary(after)
+	message.text += tr_text("\nОхват жителей: %d → %d\nПолезное сообщение: %d → %d", "\nResidents covered: %d → %d\nUseful connections: %d → %d") % [game.transit_metrics().covered, after.covered, game.transit_metrics().served, after.served]
+	message.text += tr_text("\nСостояние района: %s → %s", "\nDistrict condition: %s → %s") % [quality_name(game.district_quality()), quality_name(after.quality)]
+	message.text += tr_text("\nВозврат средств: %d\nБонус соседства и окружение пересчитаются. Отменить снос после подтверждения нельзя.", "\nRefund: %d\nNeighbor bonuses and amenities will be recalculated. Demolition cannot be undone after confirmation.") % game.demolition_refund(index)
+	add_child(dialog)
+	decorate_dialog(dialog)
+	dialog.confirmed.connect(func():
+		if game.buildings[index] == kind and game.building_level(index) == level_value and game.demolish(index):
+			audio.play_ui("success")
+			close_sheet()
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(480, 570))
+
+func update_mission_visibility() -> void:
+	mission.visible = not sheet.visible and (not game.completed or completion_left > 0)

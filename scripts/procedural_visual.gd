@@ -3,6 +3,7 @@ extends Node3D
 const Art = preload("res://scripts/art.gd")
 @export var visual_type: String = "house"
 @export var alternate: bool = false
+@export_range(1, 3) var visual_level: int = 1
 var windows: Array[MeshInstance3D] = []
 var signs: Array[Label3D] = []
 
@@ -41,13 +42,14 @@ func _ready() -> void:
 	Art.batch(self)
 
 func house(seed_value: int) -> void:
+	var lift := (visual_level - 1) * 1.5
 	var creams := [Color("eee5ce"), Color("e6dfc7"), Color("e8dcc0"), Color("d9e1d2")]
 	var color: Color = creams[seed_value % creams.size()]
 	Art.box(self, Vector3(0, 0.27, 0), Vector3(5.1, 0.5, 3.9), Color("d2cbb5"))
-	Art.box(self, Vector3(0, 1.92, 0), Vector3(4.8, 3.3, 3.5), color)
-	roof(2.7, 2.0, 3.52, 4.9, Color("e9a389"))
-	Art.box(self, Vector3(1.3, 4.65, -0.75), Vector3(0.47, 1.6, 0.55), Color("c68d72"))
-	Art.box(self, Vector3(1.3, 5.47, -0.75), Vector3(0.62, 0.18, 0.7), Color("e2c1a0"))
+	Art.box(self, Vector3(0, 1.92 + lift / 2, 0), Vector3(4.8, 3.3 + lift, 3.5), color)
+	roof(2.7, 2.0, 3.52 + lift, 4.9 + lift, Color("e9a389"))
+	Art.box(self, Vector3(1.3, 4.65 + lift, -0.75), Vector3(0.47, 1.6, 0.55), Color("c68d72"))
+	Art.box(self, Vector3(1.3, 5.47 + lift, -0.75), Vector3(0.62, 0.18, 0.7), Color("e2c1a0"))
 	Art.box(self, Vector3(0.5, 0.07, 3), Vector3(1.05, 0.12, 2.8), Color("d8d2bc"))
 	Art.box(self, Vector3(0.5, 0.23, 2), Vector3(1.3, 0.3, 0.7), Color("d3cdb8"))
 	Art.box(self, Vector3(0.5, 1.25, 1.78), Vector3(0.9, 2.2, 0.1), Color("797e6b"))
@@ -56,6 +58,16 @@ func house(seed_value: int) -> void:
 		window(Vector3(x, 2, 1.79), false)
 	for z in [-0.85, 0.85]:
 		window(Vector3(-2.42, 2, z), true)
+	for floor_index in range(1, visual_level):
+		for x in [-1.5, 1.55]:
+			window(Vector3(x, 2 + floor_index * 1.5, 1.79), false)
+		window(Vector3(-2.42, 2 + floor_index * 1.5, 0), true)
+	if visual_level >= 2:
+		Art.box(self, Vector3(0.5, 2.6, 2), Vector3(1.8, 0.15, 0.8), Color("d7ceb3"))
+	if visual_level == 3:
+		Art.box(self, Vector3(0.5, 3.15, 2.2), Vector3(1.8, 0.08, 0.08), Color("6a8984"))
+		for x in [-0.3, 0.5, 1.3]:
+			Art.box(self, Vector3(x, 2.9, 2.2), Vector3(0.06, 0.5, 0.06), Color("6a8984"))
 	Art.fence(self, Vector3(0, 0, -4.3), 8.6)
 	Art.fence(self, Vector3(-4.3, 0, 0), 8.6, PI / 2)
 	Art.fence(self, Vector3(4.3, 0, 0), 8.6, PI / 2)
@@ -87,6 +99,16 @@ func roof(x: float, z: float, low: float, high: float, color: Color) -> void:
 	Art.box(self, Vector3(0, high, 0), Vector3(0.14, 0.12, z * 2.05), color.lightened(0.12))
 
 func cafe() -> void:
+	if visual_level >= 2:
+		var height_value := 1.7 if visual_level == 2 else 2.7
+		Art.box(self, Vector3(0, 3.9 + height_value / 2, -0.8), Vector3(5.1, height_value, 3.6), Color("e7d7b6"))
+		Art.box(self, Vector3(0, 4 + height_value, -0.8), Vector3(5.6, 0.22, 4.1), Color("bd8066"))
+		for x in [-1.6, 0, 1.6]:
+			Art.box(self, Vector3(x, 4.7, 1.04), Vector3(1.1, 1.05, 0.05), Color("638e9b"))
+	if visual_level == 3:
+		for x in [-2.4, 2.4]:
+			Art.box(self, Vector3(x, 1.2, 2.5), Vector3(0.13, 2.4, 0.13), Color("719295"))
+		Art.box(self, Vector3(0, 2.4, 3.8), Vector3(5.4, 0.16, 0.7), Color("bba782"))
 	Art.box(self, Vector3(0, 0.14, 0.5), Vector3(7, 0.25, 7.5), Color("d9d4c2"))
 	Art.box(self, Vector3(0, 1.95, -0.8), Vector3(5.3, 3.7, 3.8), Color("ebe3cb"))
 	Art.box(self, Vector3(0, 3.9, -0.8), Vector3(5.6, 0.3, 4.1), Color("c47d62"))
@@ -124,6 +146,18 @@ func depot() -> void:
 	Art.box(self, Vector3(2.3, 6.7, -1.5), Vector3(1.6, 0.2, 1.8), Color("e3d0ae"))
 
 func park() -> void:
+	if visual_level >= 2:
+		for x in [-2.7, 2.7]:
+			for z in [-1.8, 1.8]:
+				Art.box(self, Vector3(x, 0.25, z), Vector3(1.2, 0.4, 0.9), Color("c8b68d"))
+				for i in range(3):
+					Art.cylinder(self, Vector3(x - 0.35 + i * 0.35, 0.5, z), 0.14, 0.2, Color("d6868e"), 1, 8)
+	if visual_level == 3:
+		Art.cylinder(self, Vector3(2.6, 0.25, -2.6), 1.4, 0.45, Color("d4c6a6"), 1, 6)
+		for x in [1.7, 3.5]:
+			for z in [-3.5, -1.7]:
+				Art.box(self, Vector3(x, 1.2, z), Vector3(0.12, 2, 0.12), Color("c9c2a7"))
+		Art.cylinder(self, Vector3(2.6, 2.5, -2.6), 1.6, 0.8, Color("709e95"), 0, 6)
 	Art.box(self, Vector3(0, 0.02, 0), Vector3(8.6, 0.08, 8.6), Color("a6b879"))
 	Art.box(self, Vector3(0, 0.09, 0), Vector3(1.1, 0.06, 8.6), Color("d9d2ab"))
 	Art.box(self, Vector3(0, 0.09, 0), Vector3(8.6, 0.06, 1.1), Color("d9d2ab"))
@@ -133,7 +167,8 @@ func park() -> void:
 	Art.cylinder(self, Vector3(0, 1.5, 0), 0.8, 0.16, Color("e7e0c9"))
 	for x in [-3, 3]:
 		for z in [-3, 3]:
-			Art.tree(self, Vector3(x, 0, z), 1.0, false, int(x + z))
+			if visual_level < 3 or x != 3 or z != -3:
+				Art.tree(self, Vector3(x, 0, z), 1.0, false, int(x + z))
 		Art.bench(self, Vector3(x, 0, 0), PI / 2)
 
 func van() -> void:
@@ -182,11 +217,12 @@ func make_signals() -> void:
 	var rotations := [-PI / 2, PI / 2, 0.0, PI]
 	for i in range(4):
 		var pole := Node3D.new()
+		pole.name = "SignalPole%d" % i
 		add_child(pole)
 		pole.position = positions[i]
 		pole.rotation.y = rotations[i]
-		Art.cylinder(pole, Vector3(0, 1.8, 0), 0.08, 3.6, Color("566264"))
-		Art.box(pole, Vector3(0, 3.6, 0), Vector3(0.48, 1.2, 0.36), Color("283b40"))
+		Art.cylinder(pole, Vector3(0, 1.8, 0), 0.08, 3.6, Color("93999d"))
+		Art.box(pole, Vector3(0, 3.6, 0), Vector3(0.48, 1.2, 0.36), Color("858b90"))
 		for lamp in range(3):
 			var point: Vector3 = pole.transform * Vector3(0, 3.94 - lamp * 0.34, 0.22)
 			signal_bulbs.set_instance_transform(i * 3 + lamp, Transform3D(Basis(), point))

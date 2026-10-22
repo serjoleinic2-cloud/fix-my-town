@@ -13,6 +13,7 @@ var language: String = "ru"
 var leak_fixed: bool = false
 var signal_fixed: bool = false
 var buildings: Array = []
+var levels: Array = []
 var job: String = ""
 var job_phase: String = "travel"
 var route: Array = []
@@ -25,6 +26,7 @@ var save_path: String = SAVE_PATH
 
 func _init() -> void:
 	for i in range(24):
+		levels.append(1)
 		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
 	buildings[2] = "depot"
 
@@ -35,7 +37,7 @@ func happiness() -> int:
 	var value := 38 + (18 if leak_fixed else 0) + (14 if signal_fixed else 0)
 	for i in range(24):
 		if buildings[i] in ["cafe", "park"]:
-			value += Catalog.TYPES[buildings[i]].mood + placement_bonus(i, buildings[i])
+			value += Catalog.level_data(buildings[i], building_level(i)).mood + placement_bonus(i, buildings[i])
 	return clampi(value + (3 if transit_metrics().served > 0 else -5), 0, 100)
 
 func placement_bonus(index: int, kind: String) -> int:
@@ -43,15 +45,16 @@ func placement_bonus(index: int, kind: String) -> int:
 	for i in range(24):
 		if i != index and building_world(i).distance_to(building_world(index)) < AMENITY_RADIUS:
 			if buildings[i] == "house":
-				bonus += 2
+				bonus += 2 * building_level(i)
 			if (kind == "cafe" and buildings[i] == "park") or (kind == "park" and buildings[i] == "cafe"):
-				bonus += 3
+				bonus += 3 * building_level(i)
 	return bonus
 
 func house_residents(index: int) -> int:
 	if buildings[index] != "house":
 		return 0
-	return 8 if has_water(index) else 4
+	var capacity: int = Catalog.level_data("house", building_level(index)).residents
+	return capacity if has_water(index) else capacity / 2
 
 func population() -> int:
 	var total := 0
@@ -68,6 +71,7 @@ func building_world(index: int) -> Vector3:
 func transit_metrics() -> Dictionary:
 	var covered := 0
 	var served := 0
+	var demand := 0.0
 	for i in range(24):
 		if buildings[i] != "house":
 			continue
@@ -75,19 +79,24 @@ func transit_metrics() -> Dictionary:
 			covered += house_residents(i)
 		if house_transit(i):
 			served += house_residents(i)
-	return {"covered": covered, "served": served, "demand": ceili(served * 0.25), "load": mini(Transit.CAPACITY, ceili(served * 0.25)), "capacity": Transit.CAPACITY}
+			demand += house_residents(i) * (0.25 + 0.05 * (house_destination_level(i) - 1))
+	return {"covered": covered, "served": served, "demand": ceili(demand), "load": mini(Transit.CAPACITY, ceili(demand)), "capacity": Transit.CAPACITY}
 
 func house_transit(index: int) -> bool:
+	return house_destination_level(index) > 0
+
+func house_destination_level(index: int) -> int:
 	if not transit.active or not transit.funded or transit.stops.size() != 2:
-		return false
+		return 0
+	var best := 0
 	var point := building_world(index)
 	for j in range(2):
 		if not transit.in_range(point, transit.stops[j]):
 			continue
 		for i in range(24):
 			if buildings[i] in ["cafe", "depot"] and transit.in_range(building_world(i), transit.stops[1 - j]):
-				return true
-	return false
+				best = maxi(best, building_level(i))
+	return best
 
 func place_stop(row: int) -> bool:
 	if not completed or row < 0 or row > 5 or transit.stops.size() >= 2 or row in transit.stops or budget < Transit.STOP_COST:
@@ -118,7 +127,7 @@ func house_quality(index: int) -> Dictionary:
 	var environment := 12
 	for i in range(24):
 		if buildings[i] in ["cafe", "park"] and building_world(i).distance_to(point) < AMENITY_RADIUS:
-			environment += 8 if buildings[i] == "cafe" else 10
+			environment += Catalog.level_data(buildings[i], building_level(i)).environment
 	var score := (30 if water else 0) + (20 if services else 10) + (20 if transport else 0) + mini(environment, 30)
 	if not water:
 		score = mini(score, 19)
@@ -137,16 +146,20 @@ static func quality_band(score: float) -> int:
 	return clampi(int(score) / 20, 0, 4)
 
 func income() -> int:
-	return 12 + (8 if leak_fixed else 0) + buildings.count("cafe") * 6 - buildings.count("park") * 2
+	var total := 0
+	for i in range(24):
+		total += building_income(i)
+	return maxi(4, total)
 
 func build(index: int, kind: String) -> bool:
-	if index < 0 or index >= 24 or buildings[index] != "empty" or kind not in ["cafe", "park"]:
+	if index < 0 or index >= 24 or buildings[index] != "empty" or kind not in ["house", "cafe", "park"]:
 		return false
 	var cost := Catalog.cost(kind)
 	if budget < cost:
 		return false
 	budget -= cost
 	buildings[index] = kind
+	levels[index] = 1
 	check_complete()
 	save_game()
 	return true
@@ -172,7 +185,7 @@ func dispatch(kind: String) -> bool:
 	save_game()
 	return true
 
-func tick(delta: float, movement_allowed: bool = true) -> bool:
+func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0) -> bool:
 	var changed := false
 	income_clock += delta
 	if income_clock >= 12.0:
@@ -190,7 +203,7 @@ func tick(delta: float, movement_allowed: bool = true) -> bool:
 				var speed := 2.6
 				if not signal_fixed and absf(vehicle.z) < 1.8:
 					speed = 0.55
-				vehicle = vehicle.move_toward(target, delta * speed)
+				vehicle = vehicle.move_toward(target, delta * speed * clampf(movement_fraction, 0, 1))
 				if vehicle.distance_to(target) < 0.01:
 					route_index += 1
 		elif job_phase == "return":
@@ -216,13 +229,13 @@ func tick(delta: float, movement_allowed: bool = true) -> bool:
 	return changed
 
 func check_complete() -> void:
-	completed = leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park"))
+	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
 
 func save_game() -> void:
 	var points: Array = []
 	for point: Vector3 in route:
 		points.append([point.x, point.y, point.z])
-	var data := {"version": 1, "vehicle_type_id": "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
+	var data := {"version": 2, "levels": levels, "completed": completed, "vehicle_type_id": "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
 		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data()}
@@ -240,7 +253,7 @@ func load_game() -> bool:
 	if file == null:
 		return false
 	var data = JSON.parse_string(file.get_as_text())
-	if not data is Dictionary or data.get("version") != 1:
+	if not data is Dictionary or (data.get("version") != 1 and data.get("version") != 2):
 		return false
 	var stored = data.get("buildings", [])
 	if not stored is Array or stored.size() != 24:
@@ -248,6 +261,23 @@ func load_game() -> bool:
 	for kind in stored:
 		if kind not in ["house", "empty", "depot", "cafe", "park"]:
 			return false
+	var stored_levels: Variant = data.get("levels", [])
+	if data.version == 1 and not data.has("levels"):
+		stored_levels = []
+		stored_levels.resize(24)
+		stored_levels.fill(1)
+	if not stored_levels is Array or stored_levels.size() != 24:
+		return false
+	var loaded_levels: Array = []
+	for i in range(24):
+		var value: Variant = stored_levels[i]
+		if not (value is float or value is int) or not is_finite(float(value)) or value != int(value) or value < 1 or value > 3:
+			return false
+		if not Catalog.LEVELS.has(stored[i]) and value != 1:
+			return false
+		loaded_levels.append(int(value))
+	if data.has("completed") and typeof(data.completed) != TYPE_BOOL:
+		return false
 	var stored_job = data.get("job", "")
 	if stored_job not in ["", "signal", "leak"]:
 		return false
@@ -284,6 +314,8 @@ func load_game() -> bool:
 	leak_fixed = data.leak_fixed
 	signal_fixed = data.signal_fixed
 	buildings = stored
+	levels = loaded_levels
+	completed = data.get("completed", false)
 	job = stored_job
 	job_phase = stored_phase
 	route = loaded_route
@@ -305,3 +337,69 @@ func valid_point(point: Variant) -> bool:
 
 func target_type_id() -> String:
 	return "traffic_signal" if job == "signal" else ("water_leak" if job == "leak" else "")
+
+func building_level(index: int) -> int:
+	return int(levels[index])
+
+func building_income(index: int) -> int:
+	var kind: String = buildings[index]
+	if not Catalog.LEVELS.has(kind):
+		return 0
+	var amount: int = Catalog.level_data(kind, building_level(index)).income
+	return amount / 2 if kind == "house" and not has_water(index) else amount
+
+func upgrade_cost(index: int) -> int:
+	if index < 0 or index >= 24 or not Catalog.LEVELS.has(buildings[index]) or building_level(index) >= 3:
+		return 0
+	return Catalog.level_data(buildings[index], building_level(index)).upgrade_cost
+
+func upgrade(index: int) -> bool:
+	var price := upgrade_cost(index)
+	if price <= 0 or budget < price:
+		return false
+	budget -= price
+	levels[index] += 1
+	save_game()
+	return true
+
+func demolition_refund(index: int) -> int:
+	if index < 0 or index >= 24 or not Catalog.LEVELS.has(buildings[index]):
+		return 0
+	var value := Catalog.cost(buildings[index])
+	for previous in range(1, building_level(index)):
+		value += Catalog.level_data(buildings[index], previous).upgrade_cost
+	return value / 4
+
+func demolish(index: int) -> bool:
+	if index < 0 or index >= 24 or not Catalog.LEVELS.has(buildings[index]):
+		return false
+	budget += demolition_refund(index)
+	buildings[index] = "empty"
+	levels[index] = 1
+	save_game()
+	return true
+
+func metrics() -> Dictionary:
+	var transport := transit_metrics()
+	return {"population": population(), "income": income(), "rating": happiness(), "quality": district_quality(), "covered": transport.covered, "served": transport.served, "demand": transport.demand}
+
+func project_change(index: int, demolition: bool = false) -> Dictionary:
+	# Только расчёт: ни записи файла, ни расходования средств.
+	var projected = get_script().new()
+	projected.buildings = buildings.duplicate()
+	projected.levels = levels.duplicate()
+	projected.leak_fixed = leak_fixed
+	projected.signal_fixed = signal_fixed
+	projected.transit.restore(transit.data())
+	if demolition:
+		projected.buildings[index] = "empty"
+		projected.levels[index] = 1
+	else:
+		projected.levels[index] = mini(3, building_level(index) + 1)
+	return projected.metrics()
+
+func proposed_vehicle(delta: float) -> Vector3:
+	if job == "" or route_index >= route.size():
+		return vehicle
+	var speed := 0.55 if not signal_fixed and absf(vehicle.z) < 1.8 else 2.6
+	return vehicle.move_toward(route[route_index], delta * speed)

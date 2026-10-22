@@ -17,7 +17,7 @@ func run() -> void:
 	root.add_child(traffic)
 	traffic.build()
 	traffic.signal_fixed = true
-	for i in range(360):
+	for i in range(380):
 		var time := i * 0.05
 		check(not (Traffic.phase("H", time) == "green" and Traffic.phase("V", time) == "green"), "Conflicting greens")
 	check(traffic.intersections.size() == 49, "Every grid intersection controlled")
@@ -36,22 +36,22 @@ func run() -> void:
 	traffic.clock = 10.0
 	for i in range(15):
 		traffic.step(0.1)
-	check(is_equal_approx(car.coordinate, -18.4), "Stop before red light at stop line")
+	check(is_equal_approx(car.coordinate, -19.75), "Stop before red light at stop line")
 	traffic.clock = 0
 	traffic.step(0.1)
-	check(car.coordinate > -18.4, "Proceed on green")
-	car.coordinate = -18.4
+	check(car.coordinate > -19.75, "Proceed on green")
+	car.coordinate = -19.75
 	traffic.clock = 7
 	traffic.step(0.1)
-	check(is_equal_approx(car.coordinate, -18.4), "Yellow stops approaching traffic")
-	check(not traffic.service_allowed(Vector3(-18.4, 0, 0), Vector3(0, 0, 0), 0.1), "Service obeys lights")
+	check(is_equal_approx(car.coordinate, -19.75), "Yellow stops approaching traffic")
+	check(not traffic.service_allowed(Vector3(-19.9, 0, 0), Vector3(0, 0, 0), 0.1), "Service obeys lights")
 	traffic.set_active_count(3)
 	var bus: Dictionary = traffic.vehicles[2]
 	bus.axis = "H"
 	bus.direction = 1
 	bus.road = 0.0
 	bus.coordinate = -12.5
-	car.coordinate = -18.4
+	car.coordinate = -19.75
 	traffic.clock = 0
 	traffic.step(0.1)
 	check(bus.coordinate - car.coordinate >= 5.8, "Safe bus following distance")
@@ -62,6 +62,36 @@ func run() -> void:
 	check(not traffic.permission(crossing, "H", "test_a", 0.1), "Broken signal requires stop")
 	check(traffic.permission(crossing, "H", "test_a", 1), "First actor proceeds after yielding")
 	check(not traffic.permission(crossing, "V", "test_b", 1), "Broken crossing excludes conflicting vehicle")
+	# Проверка переднего края кузова, а не только центра, на всех подъездах.
+	traffic.signal_fixed = true
+	for vehicle_index in [0, 2]:
+		traffic.set_active_count(0)
+		var vehicle: Dictionary = traffic.vehicles[vehicle_index]
+		vehicle.node.show()
+		for axis in ["H", "V"]:
+			for direction in [-1, 1]:
+				vehicle.axis = axis
+				vehicle.direction = direction
+				vehicle.road = 0.0 if axis == "H" else -14.4
+				var center: float = -14.4 if axis == "H" else 0.0
+				var stop: float = Traffic.stop_distance_for(vehicle.node.type_id)
+				vehicle.coordinate = center - direction * (stop + 2)
+				traffic.clock = 10 if axis == "H" else 1
+				for frame in range(20):
+					traffic.step(0.05)
+				check(absf(vehicle.coordinate - (center - direction * stop)) < 0.001, "Vehicle stops exactly before line")
+				var front: float = 2.33 if vehicle.node.type_id == "city_bus" else 1.25
+				check((center - vehicle.coordinate) * direction - front >= Traffic.STOP_LINE_DISTANCE + 0.19, "Entire body stays behind stop line and zebra")
+	traffic.set_active_count(0)
+	for axis in ["H", "V"]:
+		for direction in [-1, 1]:
+			traffic.clock = 10 if axis == "H" else 1
+			var center := Vector3(-14.4, 0, 0)
+			var forward := Vector3(direction, 0, 0) if axis == "H" else Vector3(0, 0, direction)
+			var current := center - forward * 6
+			var proposed := current + forward * 2
+			var distance := traffic.service_travel_distance(current, proposed, 0.1)
+			check(absf(distance - (6 - Traffic.stop_distance_for("repair_van"))) < 0.001, "Van movement clamps to front clearance")
 	# Полный сценарий с тем же дорожным контроллером, который вызывает main.
 	traffic.set_active_count(8)
 	traffic.clock = 0
@@ -72,12 +102,17 @@ func run() -> void:
 		for i in range(6000):
 			traffic.signal_fixed = game.signal_fixed
 			traffic.step(0.05)
-			var allowed := true
+			var fraction := 1.0
 			if game.route_index < game.route.size():
-				allowed = traffic.service_allowed(preload("res://scripts/district_world.gd").world_position(game.vehicle), preload("res://scripts/district_world.gd").world_position(game.route[game.route_index]), 0.05)
-			game.tick(0.05, allowed)
+				var current := preload("res://scripts/district_world.gd").world_position(game.vehicle)
+				var proposed := preload("res://scripts/district_world.gd").world_position(game.proposed_vehicle(0.05))
+				if current.distance_to(proposed) > 0.0001:
+					fraction = traffic.service_travel_distance(current, proposed, 0.05) / current.distance_to(proposed)
+			game.tick(0.05, true, fraction)
 			if game.job == "":
 				break
+		if game.job != "":
+			print("STUCK ", game.job, " ", game.vehicle, " ", game.route_index, " ", game.job_phase, " phase=", traffic.clock)
 		check(game.job == "", "Crew returns without traffic deadlock")
 	check(game.signal_fixed and game.leak_fixed, "Integrated repairs complete")
 	check(game.build(9, "park") and game.completed, "Integrated scenario completes")

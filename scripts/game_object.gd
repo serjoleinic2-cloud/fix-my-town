@@ -7,6 +7,7 @@ var visual_root: Node3D
 var interaction_area: Area3D
 var mounts: Node3D
 var footprint: Vector2
+var level: int = 1
 var serviced_value: bool = true
 var language_value: String = "ru"
 var traffic_horizontal: String = "red"
@@ -57,7 +58,7 @@ func replace_visual(alternate: bool = false) -> void:
 	for child in visual_root.get_children():
 		visual_root.remove_child(child)
 		child.queue_free()
-	var scene := load(Catalog.scene_path(type_id, alternate)) as PackedScene
+	var scene := load(Catalog.scene_path(type_id, alternate, level)) as PackedScene
 	visual_root.add_child(scene.instantiate())
 	set_serviced(serviced_value)
 	set_language(language_value)
@@ -82,3 +83,10 @@ func set_traffic_state(horizontal: String, vertical: String) -> void:
 	var model := visual_root.get_child(0)
 	if model.has_method("set_signal_states"):
 		model.set_signal_states(horizontal, vertical)
+
+func set_level(value: int) -> void:
+	value = clampi(value, 1, 3) if Catalog.LEVELS.has(type_id) else 1
+	if value == level:
+		return
+	level = value
+	replace_visual()

@@ -4,10 +4,13 @@ const Art = preload("res://scripts/art.gd")
 const ObjectScene = preload("res://scenes/objects/game_object.tscn")
 const ROAD_X = [-57.6, -43.2, -28.8, -14.4, 0.0, 14.4, 28.8]
 const ROAD_Z = [-43.2, -28.8, -14.4, 0.0, 14.4, 28.8, 43.2]
-const STOP_DISTANCE = 4.0
+const STOP_LINE_DISTANCE = 3.9
+const STOP_GAP = 0.2
+const STOP_DISTANCE = 5.35
+const SERVICE_STOP_DISTANCE = 5.5
 const FOLLOW_DISTANCE = 3.6
 const SPEED = 5.2
-const CYCLE = 18.0
+const CYCLE = 19.0
 var cars: Array[Node3D] = []
 var vehicles: Array = []
 var intersections: Array = []
@@ -56,11 +59,11 @@ static func phase(axis: String, time: float) -> String:
 		return "green" if axis == "H" else "red"
 	if local_time < 8.2:
 		return "yellow" if axis == "H" else "red"
-	if local_time < 9:
+	if local_time < 9.5:
 		return "red"
-	if local_time < 16:
+	if local_time < 16.5:
 		return "green" if axis == "V" else "red"
-	if local_time < 17.2:
+	if local_time < 17.7:
 		return "yellow" if axis == "V" else "red"
 	return "red"
 
@@ -129,7 +132,7 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 			continue
 		var crossing: float = intersection.x if vehicle.axis == "H" else intersection.z
 		var ahead: float = (crossing - vehicle.coordinate) * vehicle.direction
-		var stop_distance: float = 5.6 if vehicle.node.type_id == "city_bus" else STOP_DISTANCE
+		var stop_distance: float = stop_distance_for(vehicle.node.type_id)
 		if ahead < stop_distance - 0.3:
 			wait_times.erase(intersection.key + ":" + vehicle.id)
 		if ahead >= stop_distance - 0.1 and ahead <= stop_distance + distance + 0.2:
@@ -154,7 +157,7 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 		return false
 	if reservations.has(intersection.key) and reservations[intersection.key].actor != actor:
 		return false
-	# РЎР»РѕРјР°РЅРЅС‹Р№ СѓР·РµР» РїСЂРѕРїСѓСЃРєР°РµС‚ РјР°С€РёРЅС‹ РїРѕ РѕС‡РµСЂРµРґРё РїРѕСЃР»Рµ РїР°СѓР·С‹.
+	# Сломанный узел пропускает машины по очереди после паузы.
 	reservations[intersection.key] = {"actor": actor, "remaining": 5.0}
 	return true
 
@@ -167,10 +170,18 @@ func place_vehicle(vehicle: Dictionary) -> void:
 	vehicle.node.position = lane_position(vehicle)
 	vehicle.node.rotation.y = (PI / 2 * vehicle.direction) if vehicle.axis == "H" else (0.0 if vehicle.direction == 1 else PI)
 
+static func stop_distance_for(type_id: String) -> float:
+	var front := 2.33 if type_id == "city_bus" else (1.4 if type_id == "repair_van" else 1.25)
+	return STOP_LINE_DISTANCE + front + STOP_GAP
+
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
-	var direction_value := target - current
-	if direction_value.length() < 0.01:
-		return true
+	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
+
+func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) -> float:
+	var direction_value := proposed - current
+	var distance := direction_value.length()
+	if distance < 0.0001:
+		return 0
 	var axis := "H" if absf(direction_value.x) > absf(direction_value.z) else "V"
 	var direction: float = signf(direction_value.x if axis == "H" else direction_value.z)
 	for other: Dictionary in vehicles:
@@ -180,18 +191,19 @@ func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 		if absf(road - other.road) > 0.15:
 			continue
 		var gap: float = (other.coordinate - (current.x if axis == "H" else current.z)) * direction
-		if gap > 0 and gap < other.spacing:
-			return false
+		if gap > 0:
+			distance = minf(distance, maxf(0, gap - other.spacing))
+	var stop_distance := stop_distance_for("repair_van")
 	for intersection: Dictionary in intersections:
 		var lateral: float = absf((current.z - intersection.z) if axis == "H" else (current.x - intersection.x))
 		if lateral > 0.15:
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
-		if ahead < 3.5:
+		if ahead < stop_distance - 0.01:
 			wait_times.erase(intersection.key + ":crew_0")
-		if ahead >= 3.5 and ahead <= 4.5 and not permission(intersection, axis, "crew_0", delta):
-			return false
-	return true
+		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01 and not permission(intersection, axis, "crew_0", delta):
+			distance = minf(distance, maxf(0, ahead - stop_distance))
+	return distance
 
 func set_active_count(count: int) -> void:
 	reservations.clear()

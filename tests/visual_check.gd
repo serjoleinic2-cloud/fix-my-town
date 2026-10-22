@@ -65,9 +65,45 @@ func capture() -> void:
 		if mode == "transit_en":
 			scene.game.language = "en"
 		scene.set_camera_focus(scene.game.transit.stop_position(4) + Vector3(7, 0, 7))
+	if mode in ["upgrade", "upgrade_en", "levels", "demolition"]:
+		scene.game.budget = 5000
+		scene.game.buildings[9] = "cafe"
+		scene.game.buildings[14] = "park"
+		scene.selected = 16
+		scene.selection_kind = "plot"
+		if mode == "upgrade_en":
+			scene.game.language = "en"
+		if mode == "levels":
+			for i in range(24):
+				if scene.game.buildings[i] in ["house", "cafe", "park"]:
+					scene.game.levels[i] = (i % 3) + 1
+		scene.set_camera_focus(scene.game.building_world(16) + Vector3(7, 0, 7))
+	if mode == "traffic_stop":
+		scene.game.signal_fixed = true
+		var controller = scene.scenery.traffic_controller
+		controller.signal_fixed = true
+		controller.set_active_count(3)
+		for i in range(3):
+			var vehicle: Dictionary = controller.vehicles[i]
+			vehicle.axis = "H" if i < 2 else "V"
+			vehicle.direction = 1 if i != 1 else -1
+			vehicle.road = 0.0 if i < 2 else -14.4
+			var center := -14.4 if i < 2 else 0.0
+			vehicle.coordinate = center - vehicle.direction * (controller.stop_distance_for(vehicle.node.type_id) + 0.4)
+		controller.clock = 8.7
+		controller.step(0.1)
+		scene.car.position = Vector3(-13.4, 0.18, 5.5)
+		scene.car.rotation.y = PI
+		scene.camera.size = 45
+		scene.set_camera_focus(Vector3(-14.4, 0, 0))
 	if mode == "safe":
 		scene.safe_override = Vector4(0, 36, 0, 38)
 	scene.refresh()
+	if mode in ["upgrade", "upgrade_en"]:
+		scene.begin_upgrade()
+	if mode == "demolition":
+		capture_viewport.gui_embed_subwindows = true
+		scene.request_demolition(16)
 	if mode == "assets":
 		scene.plots.get_node("plot_0").replace_visual(true)
 		scene.car.replace_visual(true)

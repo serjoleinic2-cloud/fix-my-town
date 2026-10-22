@@ -69,9 +69,9 @@ func run() -> void:
 	traffic.clock = 0
 	game.transit.tick(0.1, traffic)
 	check(game.transit.coordinate > -4.0, "Bus already past stop line clears crossing")
-	game.transit.coordinate = -5.6
+	game.transit.coordinate = -Traffic.stop_distance_for("city_bus")
 	game.transit.tick(0.1, traffic)
-	check(is_equal_approx(game.transit.coordinate, -5.6), "Bus stops behind crossing")
+	check(is_equal_approx(game.transit.coordinate, -Traffic.stop_distance_for("city_bus")), "Bus stops behind crossing")
 	game.save_game()
 	var loaded := Simulation.new()
 	loaded.save_path = game.save_path
@@ -147,8 +147,8 @@ func run() -> void:
 			scene.selection_kind = "plot"
 			scene.refresh()
 			check(scene.house_problems(16).size() >= 1, "House explains current problem")
-			var labels: Array = scene.sheet_column.get_children().filter(func(n): return n is Label)
-			check(labels.size() <= 3, "Normal house panel has at most two issues and one state")
+			var labels: Array = scene.sheet_column.get_children().filter(func(n): return n.has_meta("house_problem"))
+			check(labels.size() <= 2, "Normal house panel has at most two issues")
 		viewport.queue_free()
 		await process_frame
 	if failures == 0:

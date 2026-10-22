@@ -5,6 +5,7 @@ const TrafficSystem = preload("res://scripts/traffic_system.gd")
 var traffic_controller: Node3D
 var traffic: Array[Node3D] = []
 var animation_time: float = 0
+var street_lamp_positions: Array[Vector3] = []
 
 static func world_position(point: Vector3) -> Vector3:
 	var x := point.x * 2.4
@@ -34,7 +35,9 @@ func build() -> void:
 		for x in [-50.4, -36, -21.6, -7.2, 7.2, 21.6]:
 			for dx in [-2.1, 0, 2.1]:
 				Art.box(self, Vector3(x + dx, 0.2, z), Vector3(1.05, 0.012, 0.07), Color("d4d5c8"))
-			Art.lamp(self, Vector3(x + 4.1, 0, z + 2.5))
+			var lamp_position := Vector3(x, 0, z + 2.5)
+			street_lamp_positions.append(lamp_position)
+			Art.lamp(self, lamp_position)
 		for x in [-57.6, -43.2, -28.8, -14.4, 0, 14.4, 28.8]:
 			for side in [-1, 1]:
 				for i in range(6):

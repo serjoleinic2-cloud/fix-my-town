@@ -1700,7 +1700,7 @@ func select_catalog_item(type_id: String) -> void:
 		selected = -1
 		territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
 		selection_kind = "territory"
-		if territory_cell.x < 0:
+		if territory_cell.x < 0 and type_id not in ["fire_station", "police_station", "hospital", "depot"]:
 			set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
 	refresh()
 

@@ -16,6 +16,8 @@ func _ready() -> void:
 		cafe()
 	elif visual_type == "depot":
 		depot()
+	elif visual_type == "fire_station":
+		fire_station()
 	elif visual_type == "park":
 		park()
 	elif visual_type == "empty":
@@ -23,6 +25,8 @@ func _ready() -> void:
 			Art.hedge(self, Vector3(-3 + i * 2.5, 0.24, -3.6), Vector3(0.7, 0.45, 0.55))
 	elif visual_type == "repair_van":
 		van()
+	elif visual_type == "fire_engine":
+		fire_engine()
 	elif visual_type == "traffic_signal":
 		make_signals()
 	elif visual_type == "bus_stop":
@@ -145,6 +149,29 @@ func depot() -> void:
 	Art.box(self, Vector3(2.3, 5, -1.5), Vector3(1.3, 3.3, 1.5), Color("b7896e"))
 	Art.box(self, Vector3(2.3, 6.7, -1.5), Vector3(1.6, 0.2, 1.8), Color("e3d0ae"))
 
+func fire_station() -> void:
+	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), Color("c96b52"))
+	Art.box(self, Vector3(0, 3.7, -0.5), Vector3(7.5, 0.35, 6.5), Color("6d7070"))
+	Art.box(self, Vector3(0, 1.3, 2.65), Vector3(3.5, 2.6, 0.08), Color("48565a"))
+	for y in [0.35, 0.75, 1.15, 1.55, 1.95, 2.35]:
+		Art.box(self, Vector3(0, y, 2.71), Vector3(3.42, 0.045, 0.04), Color("99a5a0"))
+	Art.box(self, Vector3(0, 3.15, 2.72), Vector3(5.8, 0.75, 0.13), Color("a9503e"))
+	signs.append(Art.sign_text(self, Vector3(0, 3.2, 2.82), "ПОЖАРНЫЕ", 32))
+	for x in [-2.55, 2.55]:
+		Art.box(self, Vector3(x, 1.15, 2.78), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
+
+func fire_engine() -> void:
+	Art.box(self, Vector3(0, 0.72, -0.35), Vector3(1.9, 1.15, 2.8), Color("d64f3e"))
+	Art.box(self, Vector3(0, 1.32, 0.58), Vector3(1.82, 1.15, 1.0), Color("c94334"))
+	Art.box(self, Vector3(0, 1.38, 1.11), Vector3(1.5, 0.62, 0.06), Color("9bc7d0"))
+	Art.box(self, Vector3(0, 1.31, -1.78), Vector3(1.52, 0.9, 0.08), Color("dce2db"))
+	Art.box(self, Vector3(0, 1.38, -0.4), Vector3(0.15, 0.18, 1.65), Color("f3d463"))
+	Art.cylinder(self, Vector3(0, 2.02, 0.25), 0.13, 0.12, Color("4c9de0"), 1, 8)
+	for x in [-0.78, 0.78]:
+		for z in [-1.15, 0.95]:
+			var wheel := Art.cylinder(self, Vector3(x, 0.43, z), 0.4, 0.24, Color("3a3b3a"), 0.8, 12)
+			wheel.rotation.z = PI / 2
+
 func park() -> void:
 	if visual_level >= 2:
 		for x in [-2.7, 2.7]:
@@ -196,7 +223,12 @@ func set_serviced(value: bool) -> void:
 
 func set_language(language: String) -> void:
 	for sign: Label3D in signs:
-		sign.text = ("КАФЕ" if language == "ru" else "CAFE") if visual_type == "cafe" else ("СЛУЖБЫ" if language == "ru" else "SERVICE")
+		if visual_type == "cafe":
+			sign.text = "КАФЕ" if language == "ru" else "CAFE"
+		elif visual_type == "fire_station":
+			sign.text = "ПОЖАРНЫЕ" if language == "ru" else "FIRE"
+		else:
+			sign.text = "СЛУЖБЫ" if language == "ru" else "SERVICE"
 
 var signal_bulbs: MultiMesh
 

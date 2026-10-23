@@ -50,6 +50,24 @@ func capture() -> void:
 		scene.game.signal_fixed = true
 		scene.game.buildings[9] = "park"
 		scene.game.check_complete()
+	if mode in ["fire_before", "fire_during"]:
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		scene.game.buildings[9] = "cafe"
+		scene.game.check_complete()
+		scene.game.completed = true
+		scene.game.fire_triggered = true
+		scene.completion_observed = true
+		scene.completion_left = 0
+		var target_id: String = scene.game.FIRST_FIRE_TARGET
+		if mode == "fire_during":
+			scene.game.fires[target_id] = {"phase": "burning", "warning_left": 0.0, "elapsed": 26.0, "danger": 2}
+			scene.game.fires[scene.game.FIRST_FIRE_NEIGHBOR] = {"phase": "warning", "warning_left": 11.0, "elapsed": 0.0, "danger": 1}
+			scene.game.fire_damage[target_id] = 14.0
+			scene.select_problem("fire")
+		else:
+			scene.selection_kind = ""
+		scene.set_camera_focus(scene.game.building_world_for_id(target_id) + Vector3(7, 0, 7))
 	if mode in ["leak", "signal"]:
 		scene.select_problem(mode)
 	if mode in ["build", "en", "park"]:
@@ -131,7 +149,7 @@ func capture() -> void:
 		scene.open_audio_settings()
 	for i in range(12):
 		await process_frame
-	await RenderingServer.frame_post_draw
+	await process_frame
 	var destination := args[0] if not args.is_empty() else "user://preview.png"
 	capture_viewport.get_texture().get_image().save_png(destination)
 	print("CAPTURE: ", destination)

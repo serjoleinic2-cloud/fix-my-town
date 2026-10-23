@@ -19,6 +19,9 @@ var scenery: Node3D
 var plots: Node3D
 var territory_visuals: Node3D
 var car: Node3D
+var fire_car: Node3D
+var fire_station: Node3D
+var fire_markers: Dictionary = {}
 var signal_object: Node3D
 var leak_effect: Node3D
 var sunlight: DirectionalLight3D
@@ -96,6 +99,7 @@ const TEXT = {
 	"stats": ["Бюджет  %d   •   Жители  %d\nНастроение  %d%%   •   Доход  +%d / 12 сек.", "Budget  %d   •   Residents  %d\nHappiness  %d%%   •   Income  +%d / 12 sec"],
 	"signal": ["Светофор", "Traffic signal"], "leak": ["Протечка", "Water leak"],
 	"inspection": ["Проверка обслуживания", "Service inspection"],
+	"fire": ["Пожар", "Fire"],
 	"signal_info": ["Сломанный перекрёсток\nЗадерживает машину. Ремонт: %d монет.", "Broken intersection\nSlows the service van. Repair: %d coins."],
 	"leak_info": ["Протечка у жилого дома\nСнижает заселение и доход. Ремонт: %d монет.", "Leak near a residential building\nReduces occupancy and income. Repair: %d coins."],
 	"repair": ["Отправить бригаду", "Dispatch crew"], "fixed": ["Обслуживание восстановлено", "Service restored"],
@@ -130,7 +134,17 @@ const TEXT = {
  "route_title": ["Маршрут службы", "Service route"],
  "route_delayed": ["Сломанный светофор задерживает машину", "The broken signal delays the vehicle"],
  "route_clear": ["Перекрёсток исправен: путь свободен", "Signal repaired: the route is clear"],
- "repair_duration": ["Работы на месте: 4 сек.", "On-site work: 4 sec"]
+	 "repair_duration": ["Работы на месте: 4 сек.", "On-site work: 4 sec"],
+	 "fire_title": ["Пожар в жилом доме", "House fire"],
+	 "fire_call": ["Вызвать пожарных", "Call firefighters"],
+	 "fire_warning": ["Предупреждение · возгорание через %d сек.", "Warning · fire starts in %d sec"],
+	 "fire_burning": ["Опасность %d/3 · огонь повреждает дом", "Danger %d/3 · fire is damaging the home"],
+	 "fire_neighbor": ["Соседний дом под угрозой · %d сек.", "Nearby home at risk · %d sec"],
+	 "fire_spread": ["Огонь перекинулся на соседний дом", "The fire has spread to the neighboring home"],
+	 "fire_damaged": ["Повреждения здания: %d%%", "Building damage: %d%%"],
+	 "fire_extinguished": ["Пожар потушен · восстановить дом за %d", "Fire extinguished · restore home for %d"],
+	 "fire_station": ["Пожарная часть", "Fire station"],
+		"fire_dispatching": ["Пожарная машина выехала", "Fire engine dispatched"]
 }
 
 func t(key: String) -> String:
@@ -262,24 +276,30 @@ func build_ui() -> void:
 	screen.add_child(mode_switcher)
 	hud = MarginContainer.new()
 	screen.add_child(hud)
-	var top_row := hbox(hud, 8)
+	var top_row := hbox(hud, 4)
 	var name_card := card(top_row)
 	name_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	district_label = label(20, name_card, "", true)
-	district_label.clip_text = true
-	district_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	district_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	district_label.clip_text = false
 	var budget_card := card(top_row)
+	budget_card.custom_minimum_size.x = 120
+	budget_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	var budget_row := hbox(budget_card, 5)
 	icon(budget_row, "coin", 25)
 	budget_label = label(22, budget_row, "", true)
 	var rating_card := card(top_row)
+	rating_card.custom_minimum_size.x = 132
+	rating_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	var rating_row := hbox(rating_card, 5)
 	icon(rating_row, "star", 26)
 	rating_label = label(18, rating_row, "", true)
-	var tools := VBoxContainer.new()
+	var tools := GridContainer.new()
 	tools.name = "MapTools"
 	tools.add_theme_constant_override("separation", 4)
 	screen.add_child(tools)
+	tools.columns = 2
 	language_button = button(tools, "EN", switch_language)
 	language_button.hide()
 	audio_button = button(tools, "☷", open_settings)
@@ -299,10 +319,10 @@ func build_ui() -> void:
 	button(tools, "−", change_zoom.bind(7.0)).hide()
 	button(tools, "⌖", focus_problem).hide()
 	for child in tools.get_children():
-		child.custom_minimum_size = Vector2(72, 72)
-		child.add_theme_font_size_override("font_size", 25)
+		child.custom_minimum_size = Vector2(68, 62)
+		child.add_theme_font_size_override("font_size", 17)
 		child.add_theme_stylebox_override("normal", style(Color(0.98, 0.97, 0.94, 0.93), 14))
-	state_button.add_theme_font_size_override("font_size", 18)
+	state_button.add_theme_font_size_override("font_size", 15)
 	mission = card(screen)
 	var mission_row := hbox(mission, 14)
 	var tile := card(mission_row, Color("dceefa"))
@@ -378,9 +398,9 @@ func update_layout() -> void:
 	hud.position = Vector2(safe_left, safe_top + 10)
 	hud.size = Vector2(size_value.x - safe_left - safe_right, 56)
 	var tools := screen.get_node("MapTools") as Control
-	var tools_width := maxf(105, tools.get_combined_minimum_size().x)
+	var tools_width := maxf(140, tools.get_combined_minimum_size().x)
 	tools.position = Vector2(size_value.x - safe_right - tools_width, safe_top + 84)
-	tools.custom_minimum_size.x = 105
+	tools.custom_minimum_size.x = 140
 	tools.size.x = tools_width
 	quality_legend.position = Vector2(safe_left, safe_top + 84)
 	quality_legend.size = Vector2(size_value.x - safe_left - safe_right - tools_width - 16, 150)
@@ -393,7 +413,7 @@ func update_layout() -> void:
 	navbar.add_theme_stylebox_override("panel", nav_style)
 	mission.position = Vector2(safe_left, navbar.position.y - 108)
 	mission.size = Vector2(size_value.x - safe_left - safe_right, 88)
-	var service_mode: bool = selection_kind in ["signal", "leak"]
+	var service_mode: bool = selection_kind in ["signal", "leak", "fire"]
 	navbar.visible = not service_mode
 	if service_mode:
 		sheet.position = Vector2(0, size_value.y - safe_bottom - action_height)
@@ -462,6 +482,14 @@ func build_world() -> void:
 	signal_object = scenery.traffic_controller.get_problem_signal()
 	leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
 	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
+	fire_station = create_object(world, "fire_station", Simulation.FIRE_STATION_ID, game.fire_station_world())
+	fire_station.interaction_area.collision_layer = 0
+	fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
+	fire_car.position = car.position
+	car.visible = game.job != "fire"
+	fire_car.visible = game.job == "fire"
+	fire_station.set_language(game.language)
+	fire_car.set_language(game.language)
 	make_marker("SignalMarker", Vector3(-14.4, 5, 0))
 	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
 	transit_visuals = Node3D.new()
@@ -486,6 +514,48 @@ func make_marker(marker_name: String, point: Vector3) -> void:
 	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	marker.no_depth_test = true
 	world.add_child(marker)
+
+func update_fire_visuals() -> void:
+	for identifier in fire_markers.keys():
+		if not game.fires.has(identifier):
+			var old_marker: Node = fire_markers[identifier]
+			if is_instance_valid(old_marker):
+				old_marker.queue_free()
+			fire_markers.erase(identifier)
+	for raw_id in game.fires.keys():
+		var identifier := str(raw_id)
+		var marker: Sprite3D = fire_markers.get(identifier)
+		if marker == null or not is_instance_valid(marker):
+			marker = Sprite3D.new()
+			marker.name = "Incident_" + identifier
+			marker.texture = load("res://assets/icons/fire_marker.svg")
+			marker.pixel_size = 0.06
+			marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			marker.no_depth_test = true
+			var flame := Sprite3D.new()
+			flame.name = "FlameAndSmoke"
+			flame.texture = load("res://assets/icons/fire_effect.svg")
+			flame.position = Vector3(0, -2.5, 0.05)
+			flame.pixel_size = 0.037
+			flame.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			flame.no_depth_test = true
+			marker.add_child(flame)
+			var danger := Label3D.new()
+			danger.name = "DangerLevel"
+			danger.position = Vector3(0, 1.45, 0.1)
+			danger.font_size = 48
+			danger.outline_size = 12
+			danger.modulate = Color.WHITE
+			danger.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			marker.add_child(danger)
+			world.add_child(marker)
+			fire_markers[identifier] = marker
+		marker.position = game.building_world_for_id(identifier) + Vector3(0, 7.0 + sin(elapsed * 2.6) * 0.18, 0)
+		marker.modulate = Color("f17a3d") if game.fire_severity(identifier) == 1 else (Color("e75439") if game.fire_severity(identifier) == 2 else Color("c92e32"))
+		marker.get_node("DangerLevel").text = "%d/3" % game.fire_severity(identifier)
+		var flame_effect := marker.get_node("FlameAndSmoke") as Sprite3D
+		flame_effect.position.y = -2.5 + sin(elapsed * 8.0 + float(game.fire_severity(identifier))) * 0.12
+		flame_effect.scale = Vector3.ONE * (1.0 + sin(elapsed * 11.0) * 0.06)
 
 func redraw_plots() -> void:
 	for i in range(24):
@@ -612,6 +682,11 @@ func map_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton and not event is InputEventScreenTouch:
 		return
 	var point: Vector2 = event.position / viewport_container.stretch_shrink
+	for identifier in game.fires:
+		var marker: Sprite3D = fire_markers.get(identifier)
+		if marker != null and marker.visible and camera.unproject_position(marker.position).distance_to(point) < 42.0 * render_scale / viewport_container.stretch_shrink:
+			select_problem("fire")
+			return
 	for kind in ["leak", "signal"]:
 		var fixed: bool = game.leak_fixed if kind == "leak" else game.signal_fixed
 		var marker := world.get_node("LeakMarker" if kind == "leak" else "SignalMarker") as Node3D
@@ -679,6 +754,9 @@ func select_grid_house(identifier: String) -> void:
 func select_plot(index: int) -> void:
 	if index < 0 or index >= game.buildings.size():
 		return
+	if game.fires.has("pine_district_legacy_%d" % index):
+		select_problem("fire")
+		return
 	selected = index
 	selection_kind = "plot"
 	active_tab = "build_tab" if game.buildings[index] == "empty" else "district"
@@ -691,14 +769,14 @@ func select_problem(kind: String) -> void:
 	active_tab = "services"
 	if audio != null:
 		audio.play_ui("select")
-	var point := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
+	var point := map_position(Vector3(-9, 0, 6)) if kind == "leak" else (game.building_world_for_id(game.fire_target()) if kind == "fire" else Vector3(-14.4, 0, 0))
 	set_camera_focus(point + Vector3(7, 0, 7))
 	refresh()
 
 func select_tab(key: String) -> void:
 	active_tab = key
 	if key == "services":
-		select_problem("leak" if not game.leak_fixed else "signal")
+		select_problem("fire" if not game.fires.is_empty() else ("leak" if not game.leak_fixed else "signal"))
 		return
 	if key == "build_tab":
 		if selected < 0 or game.buildings[selected] != "empty":
@@ -861,6 +939,7 @@ func refresh() -> void:
 	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
 	progress_bar.value = completed_steps
 	redraw_plots()
+	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.update_lights()
 	leak_effect.visible = not game.leak_fixed
@@ -943,6 +1022,30 @@ func build_sheet() -> void:
 		dispatch_button.disabled = fixed or game.job != "" or game.budget < Catalog.cost("water_leak" if selection_kind == "leak" else "traffic_signal")
 		status = label(19, sheet_column)
 		status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		update_crew_status()
+	elif selection_kind == "fire":
+		action_height = 390
+		var identifier := game.fire_target()
+		var fire: Dictionary = game.fires.get(identifier, {})
+		if fire.is_empty():
+			selection_kind = ""
+			sheet.visible = false
+			return
+		header(t("fire_title"))
+		var danger := label(22, sheet_column, t("fire_warning") % ceili(float(fire.warning_left)) if fire.phase == "warning" else t("fire_burning") % game.fire_severity(identifier), true)
+		danger.add_theme_color_override("font_color", Color("dc633c"))
+		var next_house := Simulation.FIRST_FIRE_NEIGHBOR if identifier == Simulation.FIRST_FIRE_TARGET else ""
+		if next_house != "" and fire.elapsed >= 12.0:
+			var threat: Dictionary = game.fires.get(next_house, {})
+			if not threat.is_empty():
+				var warning_text := t("fire_neighbor") % ceili(float(threat.warning_left)) if threat.phase == "warning" else t("fire_spread")
+				label(20, sheet_column, warning_text).add_theme_color_override("font_color", Color("cf7543"))
+		var damage := game.house_damage(identifier)
+		label(20, sheet_column, t("fire_damaged") % damage)
+		var fire_action := button(sheet_column, t("fire_call"), dispatch_fire, true)
+		fire_action.name = "DispatchFirefighters"
+		fire_action.disabled = game.job != "" or game.route_between_world(game.fire_station_world(), game.building_world_for_id(identifier)).is_empty()
+		status = label(19, sheet_column)
 		update_crew_status()
 	elif selected >= 0 and game.buildings[selected] == "empty":
 		action_height = 410
@@ -1107,6 +1210,13 @@ func dispatch() -> void:
 		audio.play_ui("deny")
 	refresh()
 
+func dispatch_fire() -> void:
+	if game.dispatch_fire():
+		audio.play("siren", "Effects", game.vehicle)
+	else:
+		audio.play_ui("deny")
+	refresh()
+
 func construct(kind: String) -> void:
 	if game.build(selected, kind):
 		audio.play_construction(game.plot_position(selected), kind == "park")
@@ -1128,6 +1238,9 @@ func _process(delta: float) -> void:
 		return
 	elapsed += delta
 	completion_left = maxf(0, completion_left - delta)
+	if game.completed and not game.fire_triggered and elapsed >= 5.0:
+		if game.start_fire():
+			refresh()
 	update_mission_visibility()
 	if OS.is_debug_build() and OS.has_feature("android"):
 		diagnostic_clock += delta
@@ -1153,6 +1266,9 @@ func _process(delta: float) -> void:
 	audio.sync(game, camera.size / 2.2, delta)
 	update_crew_status()
 	car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
+	fire_car.position = car.position
+	car.visible = game.job != "fire"
+	fire_car.visible = game.job == "fire"
 	if game.job != "" and game.route_index < game.route.size():
 		var direction: Vector3 = map_position(game.route[game.route_index]) - car.position
 		if direction.length() > 0.01:
@@ -1161,10 +1277,13 @@ func _process(delta: float) -> void:
 				car.position.z += signf(direction.x)
 			else:
 				car.position.x -= signf(direction.z)
+	fire_car.position = car.position
+	fire_car.rotation = car.rotation
 	leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
 	for marker_name in ["LeakMarker", "SignalMarker"]:
 		var marker := world.get_node(marker_name) as Node3D
 		marker.position.y = 5.2 + sin(elapsed * 2) * 0.15
+	update_fire_visuals()
 	save_clock += delta
 	if save_clock > 2:
 		game.save_game()
@@ -1411,11 +1530,12 @@ func build_grid_house_sheet() -> void:
 	improve.disabled = entry.level >= 3
 	button(row, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
 	var inspected: bool = bool(entry.get("inspected", false))
-	var inspect_button := button(sheet_column, tr_text("Обслуживание проверено", "Service access checked") if inspected else tr_text("Проверить выезд бригады", "Check crew access"), dispatch_grid_inspection)
-	inspect_button.name = "InspectGridHouse"
-	inspect_button.disabled = inspected or game.job != "" or game.service_route(grid_selected_id).is_empty()
-	status = label(19, sheet_column)
-	update_crew_status()
+	if not inspected:
+		var inspect_button := button(sheet_column, tr_text("Проверить выезд бригады", "Check crew access"), dispatch_grid_inspection)
+		inspect_button.name = "InspectGridHouse"
+		inspect_button.disabled = game.job != "" or game.service_route(grid_selected_id).is_empty()
+		status = label(19, sheet_column)
+		update_crew_status()
 
 func dispatch_grid_inspection() -> void:
 	if game.dispatch_to_building(grid_selected_id):
@@ -1484,6 +1604,16 @@ func build_building_sheet() -> void:
 		for i in range(mini(2, issues.size())):
 			var issue := label(20, sheet_column, issues[i][0])
 			issue.set_meta("house_problem", true)
+		var damage := game.house_damage("pine_district_legacy_%d" % selected)
+		if damage > 0:
+			label(20, sheet_column, t("fire_damaged") % damage).add_theme_color_override("font_color", Color("c96b52"))
+			if game.fires.is_empty():
+				var repair_price := 40 + damage
+				var restore := button(sheet_column, t("fire_extinguished") % repair_price, func():
+					if game.repair_fire_damage("pine_district_legacy_%d" % selected):
+						audio.play_ui("success")
+					refresh(), true)
+				restore.disabled = game.budget < repair_price
 	else:
 		label(22, sheet_column, building_effect(kind, level_value))
 	if level_value < 3:

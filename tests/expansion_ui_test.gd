@@ -88,6 +88,9 @@ func run() -> void:
 		await process_frame
 		check(scene.selected_grid_record().level == 2, "Confirmed upgrade changes the expansion level")
 		check(scene.preview == null and scene.territory_visuals.get_node(NodePath(entry.instance_id)).visual_root.visible, "After confirmation only the upgraded real model remains")
+		scene.game.territory.building_by_id(entry.instance_id).inspected = true
+		scene.refresh()
+		check(scene.sheet.find_child("InspectGridHouse", true, false) == null, "Completed access check no longer leaves a permanent inactive button")
 		# Нижний старый участок расположен в 14.4 м от дома расширения.
 		scene.game.buildings[21] = "empty"
 		var bonus: int = scene.game.placement_bonus(21, "cafe")

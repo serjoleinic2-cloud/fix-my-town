@@ -1,5 +1,7 @@
 extends SceneTree
 
+const Simulation = preload("res://scripts/simulation.gd")
+
 var failures: int = 0
 
 func check(condition: bool, message: String) -> void:
@@ -35,6 +37,9 @@ func run() -> void:
 		scene.update_layout()
 		for i in range(3):
 			await process_frame
+		check(scene.district_label.text == "Сосновый район" and not scene.district_label.clip_text, "District name remains complete in the top bar")
+		var map_tools: Control = scene.screen.get_node("MapTools")
+		check(map_tools.size.y <= 140 and map_tools.get_global_rect().end.y < scene.navbar.position.y, "Compact map actions leave the map visible")
 		check(scene.hud.position.y >= 40, "HUD respects top safe area")
 		check(scene.hud.get_global_rect().end.x <= scene.screen.size.x - 20.0 + 1, "HUD respects right safe area")
 		var map_before: Vector3 = scene.focus_point
@@ -98,6 +103,18 @@ func run() -> void:
 		await process_frame
 		check(scene.game.buildings[9] == "cafe", "Actual touch/mouse build button works")
 		check(scene.game.budget == 180, "Construction button charges once")
+		scene.game.fire_triggered = true
+		scene.game.fires[Simulation.FIRST_FIRE_TARGET] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1}
+		scene.select_problem("fire")
+		check(not scene.navbar.visible and scene.sheet.get_global_rect().end.y <= scene.screen.size.y, "Fire call card fits within the safe screen")
+		check(scene.sheet.find_child("DispatchFirefighters", true, false) != null, "Fire card offers a direct dispatch action")
+		scene.game.fires.clear()
+		scene.game.fire_damage[Simulation.FIRST_FIRE_TARGET] = 24.0
+		scene.select_plot(0)
+		var damage_card: Control = scene.sheet
+		var repair_button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Пожар потушен"))
+		check(not repair_button.is_empty(), "Damaged home card offers a clear restoration action")
+		check(damage_card.get_global_rect().end.y <= scene.navbar.position.y + 1 and damage_card.position.y >= scene.hud.get_global_rect().end.y, "Damaged home card remains above bottom navigation")
 		scene.audio.shutdown()
 		scene.queue_free()
 		await process_frame

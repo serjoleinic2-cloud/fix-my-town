@@ -166,6 +166,10 @@ const TEXT = {
  "mission_signal": ["Восстановите перекрёсток", "Restore the intersection"],
  "mission_build": ["Постройте кафе или парк", "Build a café or a park"],
  "mission_done": ["Квартал снова живёт!", "The district is thriving!"],
+ "next_goal_clear": ["Следующая цель: расчистить лес и подготовить место для новой дороги.", "Next goal: clear the forest and prepare a place for a new road."],
+ "next_goal_road": ["Следующая цель: проложить соединённую дорогу с поворотом.", "Next goal: build a connected road with a turn."],
+ "next_goal_house": ["Следующая цель: построить дом у новой дороги.", "Next goal: build a home beside the new road."],
+ "next_goal_expand": ["Следующая цель: развивайте город и выбирайте следующий участок.", "Next goal: keep expanding the city and choose the next plot."],
  "build_confirm": ["Построить", "Build"], "nearby_bonus": ["Влияние на соседние дома", "Nearby homes benefit"],
  "residents": ["Жители: %d   •   Доход: +%d", "Residents: %d   •   Income: +%d"],
  "construction_mode": ["Строительство", "Construction"],
@@ -808,6 +812,13 @@ func redraw_territory() -> void:
 	var tile_visuals := Node3D.new()
 	tile_visuals.name = "GridCells"
 	territory_visuals.add_child(tile_visuals)
+	# Старый квартал нарисован DistrictWorld исторически. Закрываем газоном удалённые сегменты, чтобы карта совпадала с сеткой.
+	for row in range(0, TerritoryGrid.EXPANSION_ROWS.x):
+		for col in range(0, TerritoryGrid.EXPANSION_COLS.y + 1):
+			var expected_road := (row % 3 == 0) or (col % 3 == 0 and row <= 18)
+			if expected_road and game.territory.state_at(col, row) != "road":
+				var legacy_center: Vector3 = game.territory.cell_world(col, row)
+				Art.box(tile_visuals, legacy_center + Vector3(0, 0.28, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.1, 0.18, TerritoryGrid.CELL_SIZE - 0.1), Color("91a66f"))
 	for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
 		for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
 			var state: String = game.territory.state_at(col, row)
@@ -1038,8 +1049,13 @@ func map_input(event: InputEvent) -> void:
 		# nearest cell rather than the lower-left cell.
 		var col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
 		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
-		if col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
-			select_territory_cell(Vector2i(col, row))
+		if game.territory.in_bounds(col, row):
+			var selected_cell := Vector2i(col, row)
+			var in_expansion := col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
+			if game.territory.state_at(col, row) == "road" and not in_expansion:
+				open_grid_road_card(selected_cell)
+			elif in_expansion:
+				select_territory_cell(selected_cell)
 		return
 	if placing_stop:
 		var nearest := INF
@@ -1057,13 +1073,13 @@ func map_input(event: InputEvent) -> void:
 		return
 	var picked_col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
 	var picked_row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
-	if picked_col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and picked_row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+	if game.territory.in_bounds(picked_col, picked_row):
 		var tapped_cell := Vector2i(picked_col, picked_row)
 		var tapped_state: String = game.territory.state_at(picked_col, picked_row)
 		if tapped_state == "road":
 			open_grid_road_card(tapped_cell)
 			return
-		if tapped_state in ["forest", "free"]:
+		if tapped_state in ["forest", "free"] and picked_col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and picked_row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
 			open_land_cell(tapped_cell)
 			return
 	for kind in ["leak", "signal"]:
@@ -2614,6 +2630,28 @@ func build_district_sheet() -> void:
 	bar.add_theme_stylebox_override("fill", style(quality_color(score) if score >= 0 else Color("a5acb0"), 6))
 	sheet_column.add_child(bar)
 	label(21, sheet_column, t("residents") % [game.population(), game.income()])
+	var next_goal := ""
+	if game.completed:
+		var has_new_road := false
+		var has_new_house := false
+		for entry: Dictionary in game.all_buildings():
+			if not entry.has("legacy_plot"):
+				has_new_house = has_new_house or entry.type_id == "house"
+		for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+			for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
+				if game.territory.state_at(col, row) == "road":
+					has_new_road = true
+		if not has_new_road:
+			next_goal = t("next_goal_clear")
+		elif not has_new_house:
+			next_goal = t("next_goal_house")
+		else:
+			next_goal = t("next_goal_expand")
+	else:
+		next_goal = t("next_goal_expand")
+	var goal_label := label(18, sheet_column, next_goal)
+	goal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	goal_label.add_theme_color_override("font_color", Color("506477"))
 	var row := hbox(sheet_column)
 	button(row, tr_text("Состояние", "Condition"), toggle_quality)
 	button(row, tr_text("Транспорт", "Transit"), open_transit)

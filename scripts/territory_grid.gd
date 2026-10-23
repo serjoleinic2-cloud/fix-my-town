@@ -243,7 +243,13 @@ func access_path(entry: Dictionary, start: Vector2i) -> Array[Vector2i]:
 
 func placement_reason(col: int, row: int, tool: String) -> String:
 	var footprint := Vector2i.ONE if tool in ["clear", "road", "landscaping"] or tool in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
-	if col < EXPANSION_COLS.x or col + footprint.x - 1 > EXPANSION_COLS.y or row < EXPANSION_ROWS.x or row + footprint.y - 1 > EXPANSION_ROWS.y:
+	# Старые улицы тоже можно перестраивать: строительство дороги является
+	# общей операцией города, а ограничения расширения относятся к расчистке и
+	# размещению зданий.
+	var expansion_only := tool != "road"
+	if expansion_only and (col < EXPANSION_COLS.x or col + footprint.x - 1 > EXPANSION_COLS.y or row < EXPANSION_ROWS.x or row + footprint.y - 1 > EXPANSION_ROWS.y):
+		return "outside"
+	if not in_bounds(col, row) or col + footprint.x > WIDTH or row + footprint.y > HEIGHT:
 		return "outside"
 	if tool == "clear":
 		return "" if state_at(col, row) == "forest" else "not_forest"

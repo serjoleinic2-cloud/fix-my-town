@@ -1794,12 +1794,8 @@ func open_grid_road_card(cell: Vector2i) -> void:
 func build_road_sheet() -> void:
 	action_height = 215
 	header(t("road"))
-	var can_remove := game.can_demolish_road(road_selected_cell.x, road_selected_cell.y)
-	var consequence := label(19, sheet_column, t("road_demolition_safe") if can_remove else t("road_demolition_blocked"))
-	consequence.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var demolish := button(sheet_column, t("demolish_road"), request_road_demolition, true)
-	demolish.name = "DemolishRoad"
-	demolish.disabled = not can_remove
+	var info := label(19, sheet_column, tr_text("Дороги формируются при размещении зданий и сохраняют общую сеть города. Снос дорог отключён, чтобы не разрывать подъезды к домам и службам.", "Roads are formed when buildings are placed and keep the city network connected."))
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 func request_road_demolition() -> void:
 	if not game.can_demolish_road(road_selected_cell.x, road_selected_cell.y):

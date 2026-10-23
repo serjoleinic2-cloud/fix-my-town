@@ -602,13 +602,17 @@ func build_world() -> void:
 	var backdrop := Node3D.new()
 	backdrop.name = "NeighborhoodBackdrop"
 	world.add_child(backdrop)
-	for x in [-50.4, -36]:
-		for z in [-36, -21.6, -7.2, 7.2, 21.6, 36]:
-			var kind := "park" if x == -36 and z == -7.2 else "house"
-			var object := create_object(backdrop, kind, "backdrop_%s_%s" % [x, z], Vector3(x, 0, z))
-			object.interaction_area.collision_layer = 0
-			object.set_serviced(true)
-			Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f"))
+	# Decorative background houses are only shown for an occupied legacy city.
+	# A fresh test city must really be empty, including the distant backdrop.
+	var has_legacy_buildings := game.buildings.any(func(kind: String) -> bool: return kind != "empty")
+	if has_legacy_buildings:
+		for x in [-50.4, -36]:
+			for z in [-36, -21.6, -7.2, 7.2, 21.6, 36]:
+				var kind := "park" if x == -36 and z == -7.2 else "house"
+				var object := create_object(backdrop, kind, "backdrop_%s_%s" % [x, z], Vector3(x, 0, z))
+				object.interaction_area.collision_layer = 0
+				object.set_serviced(true)
+				Art.box(object, Vector3(0, 0.02, 0), Vector3(9, 0.12, 9), Color("91a66f"))
 	plots = Node3D.new()
 	world.add_child(plots)
 	territory_visuals = Node3D.new()

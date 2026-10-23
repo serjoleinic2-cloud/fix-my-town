@@ -32,6 +32,12 @@ func run() -> void:
 	car.axis = "H"
 	car.direction = 1
 	car.road = 0.0
+	car.coordinate = Traffic.ROAD_X.back() + 0.1
+	traffic.continue_road_loop(car)
+	check(car.axis == "V" and car.road == Traffic.ROAD_X.back() and car.direction == 1, "Cars turn onto the outer ring instead of disappearing at the edge")
+	car.axis = "H"
+	car.direction = 1
+	car.road = 0.0
 	car.coordinate = -20.0
 	traffic.clock = 10.0
 	for i in range(15):
@@ -184,3 +190,4 @@ func run() -> void:
 	if failures == 0:
 		print("TRAFFIC CHECKS: PASS")
 	quit(0 if failures == 0 else 1)
+

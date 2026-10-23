@@ -60,6 +60,10 @@ func _init() -> void:
 		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
 	buildings[2] = "depot"
 	territory = TerritoryGrid.new(buildings)
+	# New city starts as untouched land: no inherited legacy roads.
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
+			territory.cells[row][col] = "forest"
 
 func start_empty_city() -> void:
 	# A clean sandbox for testing the first placement decisions. Keep the

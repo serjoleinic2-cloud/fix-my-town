@@ -599,12 +599,16 @@ func build_world() -> void:
 	scenery = DistrictWorld.new()
 	world.add_child(scenery)
 	scenery.build()
+	var empty_city: bool = game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty()
+	if empty_city:
+		# Do not show the legacy showcase streets in a brand-new city.
+		scenery.visible = false
 	var backdrop := Node3D.new()
 	backdrop.name = "NeighborhoodBackdrop"
 	world.add_child(backdrop)
 	# Decorative background houses are only shown for an occupied legacy city.
 	# A fresh test city must really be empty, including the distant backdrop.
-	var has_legacy_buildings := game.buildings.any(func(kind: String) -> bool: return kind != "empty")
+	var has_legacy_buildings: bool = game.buildings.any(func(kind: String) -> bool: return kind != "empty")
 	if has_legacy_buildings:
 		for x in [-50.4, -36]:
 			for z in [-36, -21.6, -7.2, 7.2, 21.6, 36]:

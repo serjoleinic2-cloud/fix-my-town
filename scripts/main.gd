@@ -108,6 +108,8 @@ var construction_root: Node3D
 var construction_objects: Dictionary = {}
 var construction_bar_fill: MeshInstance3D
 var catalog_target_road := Vector2i(-1, -1)
+var catalog_scroll: ScrollContainer
+var catalog_scroll_dragging: bool = false
 var selected_vehicle_type: String = ""
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
@@ -1179,16 +1181,14 @@ func select_vehicle_at(point: Vector2) -> bool:
 func select_grid_house(identifier: String) -> void:
 	if game.fires.has(identifier):
 		selected_fire_id = identifier
+		audio.play_building_select("house", game.is_ruined(identifier))
 		select_problem("fire")
 		return
 	grid_selected_id = identifier
 	selection_kind = "grid_house"
 	selected = -1
 	active_tab = "district"
-	var entry: Dictionary = game.territory.building_by_id(identifier)
-	if not entry.is_empty():
-		set_camera_focus(game.territory.building_center(entry) + Vector3(7, 0, 7))
-	audio.play_ui("select")
+	audio.play_building_select(str(game.territory.building_by_id(identifier).get("type_id", "")), game.is_ruined(identifier))
 	refresh()
 
 func select_plot(index: int) -> void:
@@ -1204,7 +1204,7 @@ func select_plot(index: int) -> void:
 	selected = index
 	selection_kind = "plot"
 	active_tab = "build_tab" if game.buildings[index] == "empty" else "district"
-	audio.play_ui("select")
+	audio.play_building_select(game.buildings[index], game.is_ruined("pine_district_legacy_%d" % index))
 	refresh()
 
 func select_problem(kind: String) -> void:
@@ -1213,10 +1213,8 @@ func select_problem(kind: String) -> void:
 	if kind == "fire" and not game.fires.has(selected_fire_id):
 		selected_fire_id = game.fire_target()
 	active_tab = "services"
-	if audio != null:
-		audio.play_ui("select")
-	var point := map_position(Vector3(-9, 0, 6)) if kind == "leak" else (game.building_world_for_id(game.fire_target()) if kind == "fire" else Vector3(-14.4, 0, 0))
-	set_camera_focus(point + Vector3(7, 0, 7))
+	if audio != null and kind != "fire":
+		audio.play_ui("tesla")
 	refresh()
 
 func select_tab(key: String) -> void:
@@ -1274,7 +1272,6 @@ func open_land_catalog(cell: Vector2i) -> void:
 	territory_cell = cell
 	selection_kind = "catalog"
 	selected = -1
-	set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(5, 0, 5))
 	refresh()
 
 func clear_selected_land_cell() -> void:
@@ -1305,9 +1302,6 @@ func log_territory_probe() -> void:
 
 func select_territory_cell(cell: Vector2i) -> void:
 	territory_cell = cell
-	if territory_tool not in ["clear", "road"]:
-		var footprint := Catalog.footprint_cells(service_type if territory_tool == "service" else territory_tool)
-		set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3((footprint.x - 1) * TerritoryGrid.CELL_SIZE / 2, 0, (footprint.y - 1) * TerritoryGrid.CELL_SIZE / 2))
 	refresh()
 	log_territory_probe()
 
@@ -1355,9 +1349,14 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	item.custom_minimum_size.y = 96
 	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item.disabled = not catalog_item_unlocked(type_id)
-	item.add_theme_stylebox_override("normal", style(Color("f3f2ed"), 12, Color("deddd6")))
-	item.add_theme_stylebox_override("hover", style(Color("e5f0f7"), 12, Color("9fc9e0")))
+	item.add_theme_stylebox_override("normal", style(Color("eaf4f8"), 12, Color("9cc7d8")))
+	item.add_theme_stylebox_override("hover", style(Color("d8eff9"), 12, Color("2e9bd1")))
+	item.add_theme_stylebox_override("pressed", style(Color("bfe5f3"), 12, Color("1c78ae")))
 	item.add_theme_stylebox_override("disabled", style(Color("e9e8e3"), 12, Color("d4d3cd")))
+	item.add_theme_color_override("font_color", INK)
+	item.add_theme_color_override("font_hover_color", INK)
+	item.add_theme_color_override("font_pressed_color", INK)
+	item.tooltip_text = t(type_id)
 	item.pressed.connect(func():
 		if audio != null:
 			audio.play_ui("select"))
@@ -1476,6 +1475,10 @@ func build_catalog_sheet() -> void:
 	scroll.custom_minimum_size.y = list_height
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	scroll.scroll_deadzone = 10
+	catalog_scroll = scroll
+	scroll.gui_input.connect(_on_catalog_scroll_input)
 	sheet_column.add_child(scroll)
 	var list := VBoxContainer.new()
 	list.name = "CatalogItems"
@@ -1487,6 +1490,25 @@ func build_catalog_sheet() -> void:
 	if catalog_target_plot >= 0:
 		label(16, sheet_column, tr_text("Свободный участок №%d выбран на карте", "Vacant lot %d is selected on the map") % (catalog_target_plot + 1))
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelCatalog"
+
+func _on_catalog_scroll_input(event: InputEvent) -> void:
+	if catalog_scroll == null:
+		return
+	if event is InputEventScreenTouch:
+		catalog_scroll_dragging = event.pressed
+		if event.pressed:
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventScreenDrag and catalog_scroll_dragging:
+		catalog_scroll.scroll_vertical = clampi(catalog_scroll.scroll_vertical - roundi(event.relative.y), 0, int(catalog_scroll.get_v_scroll_bar().max_value))
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		catalog_scroll_dragging = event.pressed
+		return
+	if event is InputEventMouseMotion and catalog_scroll_dragging and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+		catalog_scroll.scroll_vertical = clampi(catalog_scroll.scroll_vertical - roundi(event.relative.y), 0, int(catalog_scroll.get_v_scroll_bar().max_value))
+		get_viewport().set_input_as_handled()
 
 func build_land_cell_sheet() -> void:
 	action_height = 235
@@ -1746,7 +1768,7 @@ func refresh() -> void:
 	for i in range(5):
 		quality_legend.find_child("Band%d" % i, true, false).text = "● " + QUALITY_NAMES[0 if game.language == "ru" else 1][i]
 	redraw_transit()
-	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.income()]
+	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.net_income()]
 	district_label.text = t("district_name")
 	budget_label.text = str(game.budget)
 	rating_label.text = t("rating") % game.happiness()
@@ -2584,6 +2606,7 @@ func build_grid_house_sheet() -> void:
 	if not data.services:
 		label(20, sheet_column, tr_text("Службы задерживаются — проверьте дорогу и светофор", "Services delayed — check the road and signal")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var grid_damage := game.house_damage(grid_selected_id)
+	var grid_ruined := game.is_ruined(grid_selected_id)
 	if grid_damage > 0:
 		label(20, sheet_column, t("fire_damaged") % grid_damage).add_theme_color_override("font_color", Color("c96b52"))
 		if game.fires.is_empty():
@@ -2604,7 +2627,9 @@ func build_grid_house_sheet() -> void:
 		selection_kind = "grid_upgrade"
 		refresh(), true)
 	improve.name = "UpgradeButton"
-	improve.disabled = entry.level >= 3 or not game.construction_job.is_empty()
+	improve.disabled = grid_ruined or entry.level >= 3 or not game.construction_job.is_empty()
+	if grid_ruined:
+		label(18, sheet_column, tr_text("Руины нельзя улучшать. Сначала восстановите дом.", "Ruins cannot be upgraded. Rebuild the home first.")).add_theme_color_override("font_color", Color("b35b49"))
 	button(sheet_column if narrow_screen else row, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
 	var inspected: bool = bool(entry.get("inspected", false))
 	if not inspected:
@@ -2677,6 +2702,7 @@ func build_building_sheet() -> void:
 	action_height = 0
 	var kind: String = game.buildings[selected]
 	var level_value: int = game.building_level(selected)
+	var legacy_ruined := game.is_ruined("pine_district_legacy_%d" % selected)
 	header(t(kind) + " · %d/3" % level_value)
 	var issues: Array = []
 	if kind == "house":
@@ -2712,7 +2738,9 @@ func build_building_sheet() -> void:
 	var improve_parent: Node = sheet_column if narrow_screen else action_row
 	var improve := button(improve_parent, tr_text("Улучшить · %d", "Upgrade · %d") % game.upgrade_cost(selected) if level_value < 3 else tr_text("Максимум", "Maximum"), begin_upgrade, true)
 	improve.name = "UpgradeButton"
-	improve.disabled = level_value >= 3 or not game.construction_job.is_empty()
+	improve.disabled = legacy_ruined or level_value >= 3 or not game.construction_job.is_empty()
+	if legacy_ruined:
+		label(18, sheet_column, tr_text("Руины нельзя улучшать. Сначала восстановите дом.", "Ruins cannot be upgraded. Rebuild the home first.")).add_theme_color_override("font_color", Color("b35b49"))
 	var more := button(sheet_column if narrow_screen else action_row, tr_text("Ещё", "More"), open_building_more)
 	if not narrow_screen:
 		more.size_flags_horizontal = Control.SIZE_SHRINK_END

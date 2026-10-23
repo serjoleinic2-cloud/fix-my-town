@@ -1,4 +1,5 @@
 .godot/
 *.tmp
+/build/
 docs/references/*.import
 __pycache__/

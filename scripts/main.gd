@@ -2760,6 +2760,16 @@ func build_district_sheet() -> void:
 	bar.add_theme_stylebox_override("fill", style(quality_color(score) if score >= 0 else Color("a5acb0"), 6))
 	sheet_column.add_child(bar)
 	label(21, sheet_column, t("residents") % [game.population(), game.income()])
+	var task_done := game.district_task_progress()
+	label(18, sheet_column, tr_text("Построено домов: %d/%d", "Homes built: %d/%d") % [game.district_house_count(), game.district_house_limit])
+	label(18, sheet_column, tr_text("Заданий выполнено: %d/%d", "Tasks complete: %d/%d") % [task_done, game.district_tasks.size()])
+	var district_progress := ProgressBar.new()
+	district_progress.custom_minimum_size.y = 10
+	district_progress.max_value = maxf(1.0, float(game.district_tasks.size()))
+	district_progress.value = task_done
+	district_progress.show_percentage = false
+	district_progress.add_theme_stylebox_override("fill", style(Color("5b9bd5"), 5))
+	sheet_column.add_child(district_progress)
 	var next_goal := ""
 	if game.completed:
 		var has_new_road := false

@@ -44,6 +44,13 @@ var incident_seed: int = 48291
 var incident_clock: float = 0.0
 var incident_rng := RandomNumberGenerator.new()
 var incidents: Dictionary = {}
+var district_house_limit: int = 8
+var district_tasks: Array = [
+	{"id": "clear_3", "title": "Расчистить 3 участка", "done": false},
+	{"id": "build_4", "title": "Построить 4 дома", "done": false},
+	{"id": "fire_station", "title": "Построить пожарное депо", "done": false},
+	{"id": "quality_60", "title": "Довести качество до 60", "done": false}
+]
 var save_path: String = SAVE_PATH
 
 func _init() -> void:
@@ -74,6 +81,32 @@ func city_level() -> int:
 	if score >= 60:
 		return 2
 	return 1
+
+func district_house_count() -> int:
+	var total := 0
+	for entry: Dictionary in all_buildings():
+		if entry.type_id == "house":
+			total += 1
+	return total
+
+func district_task_progress() -> int:
+	var done := 0
+	var cleared := 0
+	for row in territory.cells:
+		for state in row:
+			if state == "free":
+				cleared += 1
+	for task: Dictionary in district_tasks:
+		var complete := bool(task.get("done", false))
+		match str(task.id):
+			"clear_3": complete = cleared >= 3
+			"build_4": complete = district_house_count() >= 4
+			"fire_station": complete = has_service_building("fire_station")
+			"quality_60": complete = district_quality() >= 60.0
+		task.done = complete
+		if complete:
+			done += 1
+	return done
 
 func record_placement_bonus(target: Dictionary) -> int:
 	var bonus := 0
@@ -1285,7 +1318,8 @@ func save_game() -> void:
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
 		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
-		"incident_seed": incident_seed, "incident_clock": incident_clock, "incidents": incidents}
+		"incident_seed": incident_seed, "incident_clock": incident_clock, "incidents": incidents,
+		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
 		return
@@ -1587,6 +1621,9 @@ func load_game() -> bool:
 	incident_clock = maxf(0.0, float(data.get("incident_clock", 0.0)))
 	incidents = data.get("incidents", {}) if data.get("incidents", {}) is Dictionary else {}
 	incident_rng.seed = incident_seed
+	district_house_limit = clampi(int(data.get("district_house_limit", 8)), 1, 100)
+	if data.get("district_tasks", []) is Array and not data.get("district_tasks", []).is_empty():
+		district_tasks = data.get("district_tasks")
 	route = loaded_route
 	route_index = clampi(int(data.route_index), 0, route.size())
 	vehicle = Vector3(stored_vehicle[0], stored_vehicle[1], stored_vehicle[2])

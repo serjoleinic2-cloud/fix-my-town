@@ -905,7 +905,19 @@ func redraw_territory() -> void:
 							var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)
 							var dash_size := Vector3(0.62, 0.018, 0.055) if offset.x != 0 else Vector3(0.055, 0.018, 0.62)
 							Art.box(tile_visuals, dash_center, dash_size, markings)
-				if topology in ["tee", "cross"]:
+				var junction_signal := topology == "cross"
+				if topology == "tee":
+					# A tee directly beside a cross belongs to the same junction;
+					# the cross cell owns the single signal controller.
+					for neighbour: Vector2i in links:
+						var neighbour_links: Array[Vector2i] = []
+						for candidate: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+							if game.territory.state_at(col + neighbour.x + candidate.x, row + neighbour.y + candidate.y) == "road":
+								neighbour_links.append(candidate)
+						if road_topology(neighbour_links) == "cross":
+							junction_signal = false
+							break
+				if junction_signal:
 					var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
 					road_light.set_meta("expansion_intersection", true)
 					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)

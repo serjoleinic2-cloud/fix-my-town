@@ -815,7 +815,17 @@ func is_in_compact_road_square(col: int, row: int) -> bool:
 					if game.territory.state_at(origin_x + dx, origin_z + dz) != "road":
 						all_roads = false
 			if all_roads:
-				return true
+				# Do not treat a 2x2 part of a larger 3x2/2x3 block as an
+				# isolated square: its outer roads still need their markings.
+				var perimeter_open := true
+				for dx in [-1, 0, 1, 2]:
+					if game.territory.state_at(origin_x + dx, origin_z - 1) == "road" or game.territory.state_at(origin_x + dx, origin_z + 2) == "road":
+						perimeter_open = false
+				for dz in [0, 1]:
+					if game.territory.state_at(origin_x - 1, origin_z + dz) == "road" or game.territory.state_at(origin_x + 2, origin_z + dz) == "road":
+						perimeter_open = false
+				if perimeter_open:
+					return true
 	return false
 
 func redraw_territory() -> void:

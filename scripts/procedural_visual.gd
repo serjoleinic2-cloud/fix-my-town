@@ -278,7 +278,10 @@ func van() -> void:
 	for x in [-0.56, 0.56]:
 		Art.box(self, Vector3(x, 0.7, 1.29), Vector3(0.28, 0.23, 0.06), Color("fff0be"))
 	Art.box(self, Vector3(0, 0.37, 1.35), Vector3(1.65, 0.18, 0.13), Color("566971"))
-	Art.cylinder(self, Vector3(0, 1.68, 0.7), 0.15, 0.24, Color("efb545"), 1, 10)
+	var beacon_red := Art.box(self, Vector3(-0.18, 1.7, 0.7), Vector3(0.16, 0.12, 0.14), Color("dc4242"))
+	beacon_red.name = "BeaconRed"
+	var beacon_blue := Art.box(self, Vector3(0.18, 1.7, 0.7), Vector3(0.16, 0.12, 0.14), Color("438ee8"))
+	beacon_blue.name = "BeaconBlue"
 
 func construction_vehicle() -> void:
 	var excavator := visual_type == "excavator"

@@ -1178,7 +1178,7 @@ func select_projected_building(point: Vector2) -> bool:
 			continue
 		var center: Vector3 = map_position(game.plot_position(index))
 		var corners := PackedVector2Array()
-		for offset in [Vector2(-5.0, -5.0), Vector2(5.0, -5.0), Vector2(5.0, 5.0), Vector2(-5.0, 5.0)]:
+		for offset in [Vector2(-6.4, -6.4), Vector2(6.4, -6.4), Vector2(6.4, 6.4), Vector2(-6.4, 6.4)]:
 			corners.append(camera.unproject_position(center + Vector3(offset.x, 0.2, offset.y)))
 		if Geometry2D.is_point_in_polygon(point, corners):
 			var score: float = camera.unproject_position(center + Vector3(0, 0.2, 0)).distance_squared_to(point)
@@ -1193,8 +1193,8 @@ func select_projected_building(point: Vector2) -> bool:
 		if entry.has("legacy_plot"):
 			continue
 		var center: Vector3 = game.territory.building_center(entry)
-		var half_x: float = float(entry.width) * TerritoryGrid.CELL_SIZE / 2
-		var half_z: float = float(entry.height) * TerritoryGrid.CELL_SIZE / 2
+		var half_x: float = float(entry.width) * TerritoryGrid.CELL_SIZE / 2 + 0.45
+		var half_z: float = float(entry.height) * TerritoryGrid.CELL_SIZE / 2 + 0.45
 		var corners := PackedVector2Array()
 		for offset in [Vector2(-half_x, -half_z), Vector2(half_x, -half_z), Vector2(half_x, half_z), Vector2(-half_x, half_z)]:
 			corners.append(camera.unproject_position(center + Vector3(offset.x, 0.2, offset.y)))

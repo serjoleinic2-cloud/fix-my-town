@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 38059)
-Total output lines: 3062
-
 extends Node3D
 
 const GameObjectScene = preload("res://scenes/objects/game_object.tscn")
@@ -1195,7 +1192,693 @@ func select_grid_house(identifier: String) -> void:
 	refresh()
 
 func select_plot(index: int) -> void:
-	if …8059 tokens truncated… game.signal_fixed else t("route_delayed"))
+	if index < 0 or index >= game.buildings.size():
+		return
+	if game.buildings[index] == "empty":
+		open_catalog(index)
+		return
+	if game.fires.has("pine_district_legacy_%d" % index):
+		selected_fire_id = "pine_district_legacy_%d" % index
+		select_problem("fire")
+		return
+	selected = index
+	selection_kind = "plot"
+	active_tab = "build_tab" if game.buildings[index] == "empty" else "district"
+	audio.play_ui("select")
+	refresh()
+
+func select_problem(kind: String) -> void:
+	selection_kind = kind
+	selected = -1
+	if kind == "fire" and not game.fires.has(selected_fire_id):
+		selected_fire_id = game.fire_target()
+	active_tab = "services"
+	if audio != null:
+		audio.play_ui("select")
+	var point := map_position(Vector3(-9, 0, 6)) if kind == "leak" else (game.building_world_for_id(game.fire_target()) if kind == "fire" else Vector3(-14.4, 0, 0))
+	set_camera_focus(point + Vector3(7, 0, 7))
+	refresh()
+
+func select_tab(key: String) -> void:
+	active_tab = key
+	if key == "services":
+		select_problem("fire" if not game.fires.is_empty() else ("leak" if not game.leak_fixed else "signal"))
+		return
+	if key == "build_tab":
+		open_catalog(selected if selected >= 0 and game.buildings[selected] == "empty" else -1)
+		return
+	else:
+		selection_kind = "district_status"
+		selected = -1
+	refresh()
+
+func open_catalog(target_plot: int = -1) -> void:
+	active_tab = "build_tab"
+	catalog_target_plot = target_plot if target_plot >= 0 and target_plot < game.buildings.size() and game.buildings[target_plot] == "empty" else -1
+	catalog_category = "residential"
+	catalog_grid_target = Vector2i(-1, -1)
+	selection_kind = "catalog"
+	selected = catalog_target_plot
+	territory_cell = Vector2i(-1, -1)
+	if catalog_target_plot >= 0:
+		set_camera_focus(map_position(game.plot_position(catalog_target_plot)) + Vector3(6, 0, 6))
+	else:
+		set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
+	refresh()
+
+func set_catalog_category(category: String) -> void:
+	if category in CATALOG_CATEGORIES:
+		catalog_category = category
+		refresh()
+
+func close_sheet() -> void:
+	placing_stop = false
+	selection_kind = ""
+	selected = -1
+	catalog_grid_target = Vector2i(-1, -1)
+	active_tab = "district"
+	refresh()
+
+func open_land_cell(cell: Vector2i) -> void:
+	territory_cell = cell
+	selection_kind = "land_cell"
+	selected = -1
+	active_tab = "district"
+	refresh()
+
+func open_land_catalog(cell: Vector2i) -> void:
+	active_tab = "build_tab"
+	catalog_target_plot = -1
+	catalog_grid_target = cell
+	catalog_category = "landscaping"
+	territory_cell = cell
+	selection_kind = "catalog"
+	selected = -1
+	set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(5, 0, 5))
+	refresh()
+
+func clear_selected_land_cell() -> void:
+	if territory_cell.x < 0 or game.territory.state_at(territory_cell.x, territory_cell.y) != "forest":
+		return
+	territory_tool = "clear"
+	selection_kind = "territory"
+	refresh()
+
+func open_territory() -> void:
+	selection_kind = "territory"
+	selected = -1
+	territory_tool = "clear"
+	territory_cell = Vector2i(-1, -1)
+	set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
+	refresh()
+	log_territory_probe()
+
+func log_territory_probe() -> void:
+	if not OS.is_debug_build() or not OS.has_feature("android"):
+		return
+	var points: Dictionary = {}
+	var physical := Vector2(DisplayServer.window_get_size()) / screen.size
+	for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22), Vector2i(15, 21), Vector2i(16, 21), Vector2i(15, 22), Vector2i(16, 22)]:
+		var point: Vector2 = camera.unproject_position(game.territory.cell_world(cell.x, cell.y)) * viewport_container.stretch_shrink / render_scale * physical
+		points["%d,%d" % [cell.x, cell.y]] = [roundi(point.x), roundi(point.y)]
+	print("FMT_TERRITORY ", JSON.stringify({"points": points, "selected": str(territory_cell), "tool": territory_tool}))
+
+func select_territory_cell(cell: Vector2i) -> void:
+	territory_cell = cell
+	if territory_tool not in ["clear", "road"]:
+		var footprint := Catalog.footprint_cells(service_type if territory_tool == "service" else territory_tool)
+		set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3((footprint.x - 1) * TerritoryGrid.CELL_SIZE / 2, 0, (footprint.y - 1) * TerritoryGrid.CELL_SIZE / 2))
+	refresh()
+	log_territory_probe()
+
+func catalog_items_for(category: String) -> Array:
+	return CATALOG_ITEMS.get(category, [])
+
+func catalog_cost(type_id: String) -> int:
+	if type_id == "clear":
+		return 5
+	if type_id == "road":
+		return 12
+	return Catalog.cost(type_id)
+
+func catalog_icon(type_id: String) -> String:
+	if type_id == "clear":
+		return "res://assets/icons/catalog_clear.svg"
+	if type_id == "road":
+		return "res://assets/icons/catalog_road.svg"
+	return Catalog.icon_path(type_id)
+
+func catalog_size(type_id: String) -> String:
+	if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id):
+		return t("catalog_footprint_small")
+	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
+		return t("catalog_footprint_legacy")
+	return t("catalog_footprint_large")
+
+func catalog_requirement(type_id: String) -> String:
+	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
+		return t("catalog_requirement_legacy")
+	if type_id == "clear":
+		return t("catalog_requirement_clear")
+	if type_id == "road":
+		return t("catalog_requirement_road")
+	if Catalog.is_landscaping(type_id):
+		return t("catalog_requirement_landscape")
+	return t("catalog_requirement_house")
+
+func catalog_item_unlocked(type_id: String) -> bool:
+	return game.city_level() >= Catalog.unlock_level(type_id)
+
+func catalog_entry_button(parent: Control, type_id: String) -> Button:
+	var item := Button.new()
+	item.name = "CatalogItem_" + type_id
+	item.custom_minimum_size.y = 96
+	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item.disabled = not catalog_item_unlocked(type_id)
+	item.add_theme_stylebox_override("normal", style(Color("f3f2ed"), 12, Color("deddd6")))
+	item.add_theme_stylebox_override("hover", style(Color("e5f0f7"), 12, Color("9fc9e0")))
+	item.add_theme_stylebox_override("disabled", style(Color("e9e8e3"), 12, Color("d4d3cd")))
+	item.pressed.connect(func():
+		if audio != null:
+			audio.play_ui("select"))
+	item.pressed.connect(select_catalog_item.bind(type_id), CONNECT_DEFERRED)
+	var row := hbox(item, 10)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 10
+	row.offset_top = 4
+	row.offset_right = -10
+	row.offset_bottom = -4
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var image: Control
+	if Catalog.TYPES.has(type_id):
+		image = catalog_model_preview(type_id)
+	else:
+		var icon_image := TextureRect.new()
+		icon_image.texture = load(catalog_icon(type_id))
+		icon_image.custom_minimum_size = Vector2(64, 64)
+		icon_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		image = icon_image
+	image.custom_minimum_size = Vector2(68, 68)
+	image.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(image)
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(info)
+	var name_label := label(18, info, t(type_id), true)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var size_label := label(14, info, t("catalog_size") % catalog_size(type_id))
+	size_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	size_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var requirement := label(13, info, t("catalog_requires") % catalog_requirement(type_id))
+	requirement.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	requirement.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var cost_label := label(17, row, t("catalog_price") % catalog_cost(type_id), true)
+	cost_label.custom_minimum_size.x = 88
+	cost_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cost_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if not catalog_item_unlocked(type_id):
+		var lock_label := label(14, item, t("catalog_locked") % Catalog.unlock_level(type_id), true)
+		lock_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		lock_label.add_theme_color_override("font_color", Color("986f48"))
+		lock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(item)
+	return item
+
+func catalog_model_preview(type_id: String) -> Control:
+	var preview_box := SubViewportContainer.new()
+	preview_box.name = "ModelPreview_" + type_id
+	preview_box.stretch = true
+	var preview_viewport := SubViewport.new()
+	preview_viewport.size = Vector2i(128, 112)
+	preview_viewport.own_world_3d = true
+	preview_viewport.transparent_bg = true
+	preview_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	preview_box.add_child(preview_viewport)
+	var preview_world := Node3D.new()
+	preview_world.name = "PreviewWorld"
+	preview_viewport.add_child(preview_world)
+	var preview_object := GameObjectScene.instantiate()
+	preview_world.add_child(preview_object)
+	preview_object.setup(type_id, "catalog_preview_" + type_id)
+	preview_object.interaction_area.collision_layer = 0
+	preview_object.rotation.y = -0.45
+	var key_light := DirectionalLight3D.new()
+	key_light.rotation = Vector3(deg_to_rad(-38), deg_to_rad(35), 0)
+	key_light.light_energy = 1.25
+	preview_world.add_child(key_light)
+	var fill_light := DirectionalLight3D.new()
+	fill_light.rotation = Vector3(deg_to_rad(-18), deg_to_rad(-145), 0)
+	fill_light.light_energy = 0.4
+	preview_world.add_child(fill_light)
+	var camera_preview := Camera3D.new()
+	camera_preview.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera_preview.size = 13.2
+	camera_preview.position = Vector3(12, 11, 14)
+	camera_preview.look_at_from_position(camera_preview.position, Vector3(0, 2.0, 0), Vector3.UP)
+	camera_preview.current = true
+	preview_world.add_child(camera_preview)
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	environment.environment.background_mode = Environment.BG_COLOR
+	environment.environment.background_color = Color(0, 0, 0, 0)
+	preview_world.add_child(environment)
+	return preview_box
+
+func build_catalog_sheet() -> void:
+	var list_count := catalog_items_for(catalog_category).size()
+	var list_height := minf(210, maxf(82, float(list_count) * 96.0))
+	action_height = minf(560, maxf(270, 185 + list_height))
+	header(t("catalog_title"))
+	var level_line := label(18, sheet_column, t("catalog_level") % game.city_level(), true)
+	level_line.name = "CityLevel"
+	if catalog_grid_target.x >= 0:
+		label(16, sheet_column, tr_text("Клетка %d,%d выбрана на карте", "Cell %d,%d selected on the map") % [catalog_grid_target.x + 1, catalog_grid_target.y + 1])
+	var category_selector := OptionButton.new()
+	category_selector.name = "CatalogCategorySelector"
+	category_selector.custom_minimum_size.y = 48
+	category_selector.add_theme_font_size_override("font_size", 18)
+	for category_index in range(CATALOG_CATEGORIES.size()):
+		var category: String = CATALOG_CATEGORIES[category_index]
+		category_selector.add_item(t("category_" + category), category_index)
+	category_selector.select(CATALOG_CATEGORIES.find(catalog_category))
+	category_selector.item_selected.connect(func(index: int): set_catalog_category(CATALOG_CATEGORIES[index]))
+	sheet_column.add_child(category_selector)
+	var scroll := ScrollContainer.new()
+	scroll.name = "CatalogItemsScroll"
+	scroll.custom_minimum_size.y = list_height
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sheet_column.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.name = "CatalogItems"
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 8)
+	scroll.add_child(list)
+	for type_id in catalog_items_for(catalog_category):
+		catalog_entry_button(list, type_id)
+	if catalog_target_plot >= 0:
+		label(16, sheet_column, tr_text("Свободный участок №%d выбран на карте", "Vacant lot %d is selected on the map") % (catalog_target_plot + 1))
+	button(sheet_column, t("cancel"), close_sheet).name = "CancelCatalog"
+
+func build_land_cell_sheet() -> void:
+	action_height = 235
+	var state: String = game.territory.state_at(territory_cell.x, territory_cell.y)
+	header(tr_text("Земля района", "District land"))
+	label(20, sheet_column, tr_text("Клетка %d,%d · %s", "Cell %d,%d · %s") % [territory_cell.x + 1, territory_cell.y + 1, t(state)])
+	if state == "forest":
+		label(18, sheet_column, tr_text("Освободите место, чтобы проложить дорогу или построить объект.", "Clear this tile before adding a road or placing an object."))
+		var clear_button := button(sheet_column, tr_text("Расчистить участок · 5", "Clear tile · 5"), clear_selected_land_cell, true)
+		clear_button.name = "ClearLandCell"
+		clear_button.disabled = game.budget < 5 or not game.construction_job.is_empty()
+	else:
+		label(18, sheet_column, tr_text("Выберите, как использовать свободное место.", "Choose how to use this free space."))
+		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"
+		button(sheet_column, tr_text("Открыть каталог строительства", "Open building catalog"), func():
+			catalog_grid_target = territory_cell
+			active_tab = "build_tab"
+			catalog_category = "residential"
+			selection_kind = "catalog"
+			refresh(), true).name = "BuildOnLandCell"
+	button(sheet_column, t("cancel"), close_sheet).name = "CancelLandCell"
+
+func select_catalog_item(type_id: String) -> void:
+	if not catalog_items_for(catalog_category).has(type_id) or not catalog_item_unlocked(type_id):
+		return
+	territory_tool = type_id
+	preview_kind = type_id
+	selected = catalog_target_plot
+	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
+		selection_kind = "catalog_legacy_placement"
+	else:
+		catalog_target_plot = -1
+		selected = -1
+		territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
+		selection_kind = "territory"
+		if territory_cell.x < 0:
+			set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
+	refresh()
+
+func cancel_catalog_placement() -> void:
+	selection_kind = "catalog"
+	selected = catalog_target_plot
+	territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
+	refresh()
+
+func build_legacy_catalog_placement_sheet() -> void:
+	if selected < 0 or game.buildings[selected] != "empty":
+		selection_kind = "catalog"
+		build_catalog_sheet()
+		return
+	action_height = 330
+	header(t("place_catalog_item") % t(preview_kind))
+	var info_row := hbox(card(sheet_column, Color("eeefec")))
+	var image := TextureRect.new()
+	image.texture = load(catalog_icon(preview_kind))
+	image.custom_minimum_size = Vector2(64, 64)
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	info_row.add_child(image)
+	var info := VBoxContainer.new()
+	info_row.add_child(info)
+	label(18, info, t("catalog_size") % catalog_size(preview_kind))
+	label(16, info, t("catalog_requires") % catalog_requirement(preview_kind)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label(22, sheet_column, t("catalog_price") % Catalog.cost(preview_kind), true)
+	var confirm := button(sheet_column, t("build_confirm"), construct.bind(preview_kind), true)
+	confirm.name = "ConfirmCatalogPlacement"
+	confirm.disabled = game.budget < Catalog.cost(preview_kind)
+	button(sheet_column, t("cancel"), cancel_catalog_placement).name = "CancelCatalogPlacement"
+
+func build_territory_sheet() -> void:
+	action_height = 300
+	var selected_type := service_type if territory_tool == "service" else territory_tool
+	header(t("place_catalog_item") % t(selected_type))
+	var info_row := hbox(card(sheet_column, Color("eeefec")))
+	var image := TextureRect.new()
+	image.texture = load(catalog_icon(selected_type))
+	image.custom_minimum_size = Vector2(54, 54)
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	info_row.add_child(image)
+	var info := VBoxContainer.new()
+	info_row.add_child(info)
+	label(16, info, t("catalog_size") % catalog_size(selected_type))
+	label(14, info, t("catalog_requires") % catalog_requirement(selected_type)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var reason := territory_reason()
+	var status_text := t("cell_unselected")
+	if territory_cell.x >= 0:
+		var cell_state: String = game.territory.state_at(territory_cell.x, territory_cell.y)
+		status_text = tr_text("Клетка %d,%d · %s", "Cell %d,%d · %s") % [territory_cell.x + 1, territory_cell.y + 1, t("occupied_state") if cell_state == "occupied" else t(cell_state)]
+	var cell_status := label(15, sheet_column, status_text)
+	cell_status.name = "TerrainCellStatus"
+	var hint := label(16, sheet_column, placement_hint(reason))
+	hint.name = "TerrainPlacementHint"
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var confirm := button(sheet_column, t("catalog_price") % catalog_cost(selected_type), apply_territory_tool, true)
+	confirm.name = "ConfirmTerritory"
+	confirm.disabled = reason != ""
+	button(sheet_column, t("cancel"), cancel_catalog_placement).name = "CancelTerritory"
+
+func open_grid_road_card(cell: Vector2i) -> void:
+	road_selected_cell = cell
+	selection_kind = "grid_road"
+	selected = -1
+	active_tab = "district"
+	refresh()
+
+func build_road_sheet() -> void:
+	action_height = 215
+	header(t("road"))
+	var can_remove := game.can_demolish_road(road_selected_cell.x, road_selected_cell.y)
+	var consequence := label(19, sheet_column, t("road_demolition_safe") if can_remove else t("road_demolition_blocked"))
+	consequence.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var demolish := button(sheet_column, t("demolish_road"), request_road_demolition, true)
+	demolish.name = "DemolishRoad"
+	demolish.disabled = not can_remove
+
+func request_road_demolition() -> void:
+	if not game.can_demolish_road(road_selected_cell.x, road_selected_cell.y):
+		refresh()
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "RoadDemolitionConfirmation"
+	dialog.theme = ui_theme
+	dialog.title = t("demolish_confirm_title")
+	dialog.dialog_text = t("road_confirm_body") + "\n" + t("construction_duration")
+	dialog.ok_button_text = t("demolish_road")
+	dialog.cancel_button_text = t("cancel")
+	add_child(dialog)
+	decorate_dialog(dialog)
+	dialog.confirmed.connect(func():
+		if game.start_road_demolition(road_selected_cell.x, road_selected_cell.y):
+			selection_kind = "construction_job"
+			refresh()
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(440, 300))
+
+func build_construction_job_sheet() -> void:
+	action_height = 230
+	var task: Dictionary = game.construction_job
+	var task_kind := str(task.get("kind", ""))
+	var verb := t("construction_demolish") if task_kind.begins_with("demolish") else (t("construction_upgrade") if task_kind.begins_with("upgrade") else t("construction_build"))
+	header(verb)
+	var item_id := str(task.get("type_id", ""))
+	if item_id != "":
+		label(21, sheet_column, t(item_id))
+	var bar := ProgressBar.new()
+	bar.name = "ConstructionProgress"
+	bar.max_value = 1.0
+	bar.value = game.construction_progress()
+	bar.custom_minimum_size.y = 20
+	bar.show_percentage = false
+	bar.add_theme_stylebox_override("fill", style(Color("e6a333"), 8))
+	sheet_column.add_child(bar)
+	label(18, sheet_column, t("construction_duration"))
+	button(sheet_column, t("close"), close_sheet).name = "CloseConstructionPanel"
+
+func handle_construction_finish(task: Dictionary) -> void:
+	var kind := str(task.get("kind", ""))
+	if kind in ["build_legacy", "upgrade_legacy"]:
+		select_plot(int(task.get("index", -1)))
+	elif kind == "build_grid":
+		var entry: Dictionary = game.territory.building_at(int(task.get("col", -1)), int(task.get("row", -1)))
+		if not entry.is_empty():
+			select_grid_house(str(entry.instance_id))
+		else:
+			close_sheet()
+	elif kind == "upgrade_grid":
+		select_grid_house(str(task.get("identifier", "")))
+	elif kind == "demolish_grid":
+		open_catalog()
+		catalog_category = "landscaping"
+		refresh()
+	elif kind == "demolish_legacy":
+		open_catalog()
+	elif kind == "road" or kind == "clear" or kind == "demolish_road":
+		if kind == "clear":
+			open_land_catalog(Vector2i(int(task.get("col", -1)), int(task.get("row", -1))))
+		else:
+			open_catalog()
+			catalog_category = "infrastructure"
+			refresh()
+
+func territory_reason() -> String:
+	if territory_cell.x < 0:
+		return "select"
+	var selected_type := service_type if territory_tool == "service" else territory_tool
+	var placement_kind := "landscaping" if Catalog.is_landscaping(selected_type) else ("service" if Catalog.is_service(selected_type) else "house")
+	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool if territory_tool in ["clear", "road"] else placement_kind)
+	if reason != "":
+		return reason
+	if territory_tool not in ["clear", "road"] and game.city_level() < Catalog.unlock_level(selected_type):
+		return "locked"
+	var cost := catalog_cost(selected_type)
+	return "" if game.budget >= cost else "budget"
+
+func placement_hint(reason: String) -> String:
+	match reason:
+		"select": return tr_text("Начните у края существующей дороги.", "Start at an existing road edge.")
+		"outside": return tr_text("Весь участок должен быть в области освоения.", "The whole footprint must fit the expansion area.")
+		"not_forest": return tr_text("Здесь уже нет леса. Выберите зелёную клетку.", "No forest here. Select a green cell.")
+		"clear_first": return tr_text("Сначала расчистите весь отмеченный участок.", "Clear the entire highlighted footprint first.")
+		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
+		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
+		"locked": return tr_text("Это здание ещё не открыто.", "This building is still locked.")
+	if territory_tool == "clear":
+		return tr_text("Расчистка стоит 5. Для дома очистите все клетки его контура 2×2.", "Clear for 5. Clear all four cells in the 2×2 home footprint.")
+	if territory_tool == "road":
+		return tr_text("Дорога стоит 12 за клетку. Начните у существующей дороги; поворот можно сделать следующей клеткой.", "Road costs 12 per tile. Start beside an existing road; add a turn with the next tile.")
+	var selected_type := service_type if territory_tool == "service" else territory_tool
+	if Catalog.is_landscaping(selected_type):
+		return t("catalog_requirement_landscape")
+	return tr_text("Здание занимает участок %s и стоит %d. Разместите его рядом с соединённой дорогой.", "The building uses a %s lot and costs %d. Place it beside a connected road.") % [catalog_size(selected_type), catalog_cost(selected_type)]
+
+func set_territory_tool(tool: String) -> void:
+	territory_tool = tool
+	refresh()
+
+func set_service_type(type_id: String) -> void:
+	service_type = type_id
+	refresh()
+
+func apply_territory_tool() -> void:
+	if territory_cell.x < 0:
+		return
+	var selected_type := service_type if territory_tool == "service" else territory_tool
+	var success := game.start_grid_clear(territory_cell.x, territory_cell.y) if territory_tool == "clear" else game.start_grid_road(territory_cell.x, territory_cell.y) if territory_tool == "road" else game.start_grid_construction(territory_cell.x, territory_cell.y, selected_type)
+	if success:
+		selection_kind = "construction_job"
+		audio.play_construction(DistrictWorld.logical_position(game.territory.cell_world(territory_cell.x, territory_cell.y)))
+		refresh()
+	else:
+		audio.play_ui("deny")
+		refresh()
+
+func switch_language() -> void:
+	game.language = "en" if game.language == "ru" else "ru"
+	game.save_game()
+	refresh()
+
+func clear_children(parent: Node) -> void:
+	for child in parent.get_children():
+		parent.remove_child(child)
+		child.queue_free()
+
+func refresh() -> void:
+	if world == null or camera == null:
+		return
+	var current_quality: float = game.district_quality()
+	if last_quality >= 0 and not is_equal_approx(current_quality, last_quality):
+		quality_trend = "↑" if current_quality > last_quality else "↓"
+	last_quality = current_quality
+	state_button.text = tr_text("Состояние", "Condition")
+	state_button.add_theme_stylebox_override("normal", style(Color("d6eafa") if quality_mode else PAPER))
+	quality_legend.visible = quality_mode
+	for i in range(5):
+		quality_legend.find_child("Band%d" % i, true, false).text = "● " + QUALITY_NAMES[0 if game.language == "ru" else 1][i]
+	redraw_transit()
+	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.income()]
+	district_label.text = t("district_name")
+	budget_label.text = str(game.budget)
+	rating_label.text = t("rating") % game.happiness()
+	language_button.text = "EN" if game.language == "ru" else "RU"
+	for key in nav_buttons:
+		var item: Button = nav_buttons[key]
+		item.find_child("Caption", true, false).text = t(key)
+		item.add_theme_stylebox_override("normal", style(Color("d6eafa") if active_tab == key else PAPER, 12, Color("aad2ee") if active_tab == key else Color("e6e1d7")))
+	if game.completed and not completion_observed:
+		completion_left = 3.5
+	completion_observed = game.completed
+	if not game.completed:
+		completion_left = 0
+	var mission_symbol := "star" if game.completed else ("drop" if not game.leak_fixed else ("hammer" if not game.signal_fixed else "pin"))
+	mission_icon.texture = load("res://assets/icons/ui_" + mission_symbol + ".svg")
+	var completed_steps := int(game.leak_fixed) + int(game.signal_fixed) + int(game.buildings.has("cafe") or game.buildings.has("park"))
+	objective.text = t("mission_done") if game.completed else (t("mission_water") if not game.leak_fixed else (t("mission_signal") if not game.signal_fixed else t("mission_build")))
+	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
+	progress_bar.value = completed_steps
+	redraw_plots()
+	update_fire_visuals()
+	scenery.traffic_controller.signal_fixed = game.signal_fixed
+	scenery.traffic_controller.update_lights()
+	leak_effect.visible = not game.leak_fixed
+	world.get_node("LeakMarker").visible = not game.leak_fixed
+	world.get_node("SignalMarker").visible = not game.signal_fixed
+	build_sheet()
+	update_preview()
+	sync_construction_site()
+	update_layout()
+
+func header(title_value: String, icon_key: String = "") -> void:
+	var row := hbox(sheet_column)
+	if icon_key != "":
+		var tile := card(row, Color("e68a3c"))
+		icon(tile, icon_key, 42)
+	var title := label(26 if screen.size.x < 420 else 30, row, title_value, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.custom_minimum_size.x = 0
+	title.clip_text = true
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var close := button(row, "×", close_sheet)
+	close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	close.custom_minimum_size = Vector2(72, 72)
+	close.add_theme_stylebox_override("normal", style(PAPER))
+
+func build_sheet() -> void:
+	clear_children(sheet_column)
+	clear_children(mode_switcher)
+	mode_switcher.hide()
+	sheet.add_theme_stylebox_override("panel", style(PAPER, 22))
+	sheet.visible = selection_kind != ""
+	update_mission_visibility()
+	status = null
+	transit_stats = null
+	if not sheet.visible:
+		return
+	if selection_kind == "upgrade":
+		build_upgrade_sheet()
+	elif selection_kind == "district_status":
+		build_district_sheet()
+	elif selection_kind == "catalog":
+		build_catalog_sheet()
+	elif selection_kind == "catalog_legacy_placement":
+		build_legacy_catalog_placement_sheet()
+	elif selection_kind == "territory":
+		build_territory_sheet()
+	elif selection_kind == "land_cell":
+		build_land_cell_sheet()
+	elif selection_kind == "construction_job":
+		build_construction_job_sheet()
+	elif selection_kind == "grid_road":
+		build_road_sheet()
+	elif selection_kind == "grid_house":
+		build_grid_house_sheet()
+	elif selection_kind == "grid_upgrade":
+		build_grid_upgrade_sheet()
+	elif selection_kind == "transit":
+		build_transit_sheet()
+	elif selection_kind == "bus":
+		build_bus_sheet()
+	elif selection_kind == "stop":
+		build_stop_sheet()
+	elif selection_kind == "stop_place":
+		build_stop_placement_sheet()
+	elif selection_kind == "vehicle":
+		action_height = 190
+		header(t(selected_vehicle_type) if TEXT.has(selected_vehicle_type) else tr_text("Транспорт", "Vehicle"))
+		var busy_text := tr_text("В пути по поручению", "On assignment") if game.job != "" and selected_vehicle_type in ["repair_van", "fire_engine"] else tr_text("Ожидает поручения", "Waiting for an assignment")
+		label(20, sheet_column, busy_text)
+	elif selection_kind == "traffic_jam":
+		action_height = 300
+		header(tr_text("Затор у пожарной машины", "Fire engine roadblock"))
+		label(20, sheet_column, tr_text("Дорога перекрыта. Полиция поможет освободить проезд.", "The lane is blocked. Police can clear traffic."))
+		var police_available: bool = game.has_service_building("police_station")
+		var call_police := button(sheet_column, tr_text("Вызвать полицию", "Call police") if police_available else tr_text("Построить участок", "Build police station"), call_police_for_jam if police_available else open_police_station_build, true)
+		call_police.name = "CallPolice"
+		call_police.disabled = police_available and (not game.police_job.is_empty() or bool(game.jam_cleared.get(selected_fire_id, false)))
+	elif selection_kind == "police_vehicle":
+		action_height = 190
+		header(tr_text("Патруль", "Police patrol"))
+		label(20, sheet_column, tr_text("Едет освобождать дорогу", "Clearing the road"))
+	elif selection_kind in ["signal", "leak"]:
+		action_height = 500
+		header(t("leak_title") if selection_kind == "leak" else t("signal_title"), "pipe_white")
+		var sub := hbox(sheet_column)
+		details = label(23, sub, t("leak_subtitle") if selection_kind == "leak" else t("signal_subtitle"))
+		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var chips := mode_switcher
+		leak_button = button(chips, t("leak"), select_problem.bind("leak"))
+		signal_button = button(chips, t("signal"), select_problem.bind("signal"))
+		for chip in [leak_button, signal_button]:
+			chip.custom_minimum_size.y = 72
+			chip.add_theme_font_size_override("font_size", 22)
+		var fixed: bool = game.leak_fixed if selection_kind == "leak" else game.signal_fixed
+		var repair_card := card(sheet_column, Color("ebf3fa"))
+		var row := hbox(repair_card)
+		icon(row, "hammer", 30)
+		var content := VBoxContainer.new()
+		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(content)
+		label(23, content, t("fixed") if fixed else t("permanent_repair"), true)
+		label(21, content, t("cost") + ": " + str(Catalog.cost("water_leak" if selection_kind == "leak" else "traffic_signal")))
+		var route_card := card(sheet_column, Color("f0f0ed"))
+		var route_row := hbox(route_card)
+		icon(route_row, "pin", 32)
+		var route_column := VBoxContainer.new()
+		route_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		route_row.add_child(route_column)
+		label(23, route_column, t("route_title"), true)
+		var route_description := label(20, route_column, t("route_clear") if game.signal_fixed else t("route_delayed"))
 		route_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label(19, route_column, t("repair_duration"))
 		action_box = VBoxContainer.new()

@@ -401,7 +401,32 @@ func data() -> Dictionary:
 	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true), "expansion_cols": [expansion_cols.x, expansion_cols.y], "expansion_rows": [expansion_rows.x, expansion_rows.y]}
 
 func restore(value: Variant) -> bool:
-	if not value is Dictionary or value.get("district_id", DISTRICT_ID) != DISTRICT_ID or int(value.get("width", 0)) != WIDTH or int(value.get("height", 0)) != HEIGHT:
+	if not value is Dictionary or value.get("district_id", DISTRICT_ID) != DISTRICT_ID:
+		return false
+	var saved_width := int(value.get("width", 0))
+	var saved_height := int(value.get("height", 0))
+	# Upgrade saves from the original 28x30 prototype into the larger hidden
+	# world without moving their buildings or roads.
+	if saved_width == 28 and saved_height == 30 and value.get("cells") is Array:
+		var old_cells: Array = value.get("cells")
+		if old_cells.size() != saved_height:
+			return false
+		reset()
+		for row in range(HEIGHT):
+			cells[row].fill("forest")
+		for row in range(saved_height):
+			if not old_cells[row] is Array or old_cells[row].size() != saved_width:
+				return false
+			for col in range(saved_width):
+				if old_cells[row][col] not in ["forest", "free", "road", "occupied"]:
+					return false
+				cells[row][col] = old_cells[row][col]
+		value = value.duplicate(true)
+		value["width"] = WIDTH
+		value["height"] = HEIGHT
+		value["cells"] = cells.duplicate(true)
+		value["revealed"] = revealed.duplicate(true)
+	elif saved_width != WIDTH or saved_height != HEIGHT:
 		return false
 	var new_cells: Variant = value.get("cells")
 	var new_buildings: Variant = value.get("buildings")

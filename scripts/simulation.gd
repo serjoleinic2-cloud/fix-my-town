@@ -61,6 +61,41 @@ func _init() -> void:
 	buildings[2] = "depot"
 	territory = TerritoryGrid.new(buildings)
 
+func start_empty_city() -> void:
+	# A clean sandbox for testing the first placement decisions. Keep the
+	# terrain grid and roads, but remove every legacy building and incident.
+	budget = 300
+	leak_fixed = false
+	signal_fixed = false
+	completed = false
+	buildings.clear()
+	levels.clear()
+	for i in range(24):
+		buildings.append("empty")
+		levels.append(1)
+	territory = TerritoryGrid.new(buildings)
+	job = ""
+	job_phase = "travel"
+	route.clear()
+	route_index = 0
+	fires.clear()
+	fire_damage.clear()
+	fire_ruins.clear()
+	fire_jobs.clear()
+	police_job.clear()
+	jam_cleared.clear()
+	construction_job.clear()
+	incidents.clear()
+	incident_clock = 0.0
+	fire_triggered = false
+	transit = Transit.new()
+	district_tasks = [
+		{"id": "clear_3", "title": "Расчистить 3 участка", "done": false},
+		{"id": "build_4", "title": "Построить 4 дома", "done": false},
+		{"id": "fire_station", "title": "Построить пожарное депо", "done": false},
+		{"id": "quality_60", "title": "Довести качество до 60", "done": false}
+	]
+
 func plot_position(index: int) -> Vector3:
 	return Vector3(-9 + (index % 4) * 6, 0, -7.5 + (index / 4) * 3)
 

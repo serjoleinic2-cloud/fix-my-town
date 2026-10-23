@@ -2692,6 +2692,7 @@ func confirm_reset() -> void:
 		var previous_language: String = game.language
 		audio.reset_state()
 		game = Simulation.new()
+		game.start_empty_city()
 		game.language = previous_language
 		game.save_game()
 		selection_kind = "signal"

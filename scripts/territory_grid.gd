@@ -263,7 +263,7 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 	return "" if not access_path(entry, Vector2i(12, 18)).is_empty() else "no_road"
 
 func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
-	if state_at(col, row) != "road" or Vector2i(col, row) == Vector2i(12, 18):
+	if state_at(col, row) != "road":
 		return false
 	if transit != null:
 		for stop in transit.stops:

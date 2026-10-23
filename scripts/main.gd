@@ -1376,6 +1376,15 @@ func log_territory_probe() -> void:
 	print("FMT_TERRITORY ", JSON.stringify({"points": points, "selected": str(territory_cell), "tool": territory_tool}))
 
 func select_territory_cell(cell: Vector2i) -> void:
+	var placement_type := service_type if territory_tool == "service" else territory_tool
+	if placement_type not in ["clear", "road", ""] and not Catalog.is_landscaping(placement_type):
+		# Buildings and services use a 2x2 footprint. A tap on any cell of a
+		# cleared square snaps to the valid top-left cell instead of rejecting
+		# the placement because the tapped cell was the lower-right corner.
+		for candidate: Vector2i in [cell, cell + Vector2i(-1, 0), cell + Vector2i(0, -1), cell + Vector2i(-1, -1)]:
+			if game.territory.placement_reason(candidate.x, candidate.y, "service" if Catalog.is_service(placement_type) else "house") == "":
+				cell = candidate
+				break
 	territory_cell = cell
 	refresh()
 	log_territory_probe()

@@ -22,8 +22,10 @@ var blocking_positions: Array[Dictionary] = []
 var wait_times: Dictionary = {}
 var reservations: Dictionary = {}
 var last_states: Dictionary = {}
+var route_rng := RandomNumberGenerator.new()
 
 func build() -> void:
+	route_rng.seed = 48291
 	for ix in range(ROAD_X.size()):
 		for iz in range(ROAD_Z.size()):
 			var node := ObjectScene.instantiate()
@@ -49,7 +51,8 @@ func make_cars() -> void:
 		var direction := 1 if i % 2 == 0 else -1
 		var road: float = ROAD_Z[(i / 4 + 1) % ROAD_Z.size()] if axis == "H" else ROAD_X[(i / 4 + 2) % ROAD_X.size()]
 		var coordinate: float = -44 + fposmod(i * 11.3, 82)
-		var vehicle := {"id": "civilian_%d" % i, "node": node, "axis": axis, "direction": direction, "road": road, "coordinate": coordinate, "spacing": 5.8 if kind == "city_bus" else FOLLOW_DISTANCE}
+		var vehicle := {"id": "civilian_%d" % i, "node": node, "axis": axis, "direction": direction, "road": road, "coordinate": coordinate, "spacing": 5.8 if kind == "city_bus" else FOLLOW_DISTANCE,
+			"randomized": kind != "city_bus", "speed_factor": route_rng.randf_range(0.86, 1.14), "turn_cooldown": 0.0}
 		vehicles.append(vehicle)
 		cars.append(node)
 		place_vehicle(vehicle)
@@ -104,10 +107,34 @@ func step(delta: float) -> void:
 			continue
 		if vehicle.get("managed", false):
 			continue
+		vehicle.turn_cooldown = maxf(0.0, float(vehicle.get("turn_cooldown", 0.0)) - delta)
 		var distance := travel_distance(vehicle, delta)
 		vehicle.coordinate += distance * vehicle.direction
 		continue_road_loop(vehicle)
+		maybe_random_turn(vehicle)
 		place_vehicle(vehicle)
+
+func maybe_random_turn(vehicle: Dictionary) -> void:
+	if not bool(vehicle.get("randomized", false)) or float(vehicle.get("turn_cooldown", 0.0)) > 0.0:
+		return
+	# A civilian may choose a new direction at any visible intersection. The
+	# choice is deterministic per run, but independent for every vehicle, so
+	# cars no longer form a permanent column on the outer ring.
+	for intersection: Dictionary in intersections:
+		var crossing: float = float(intersection.x if vehicle.axis == "H" else intersection.z)
+		if absf(vehicle.coordinate - crossing) > 0.22:
+			continue
+		var turn_chance := 0.24
+		if route_rng.randf() > turn_chance:
+			return
+		var old_axis: String = str(vehicle.axis)
+		var old_road: float = vehicle.road
+		vehicle.axis = "V" if old_axis == "H" else "H"
+		vehicle.road = intersection.x if vehicle.axis == "V" else intersection.z
+		vehicle.coordinate = old_road
+		vehicle.direction = 1 if route_rng.randf() >= 0.5 else -1
+		vehicle.turn_cooldown = 1.2
+		return
 
 func continue_road_loop(vehicle: Dictionary) -> void:
 	# Cars stay in the road network and turn at the outer intersections instead
@@ -139,7 +166,7 @@ func continue_road_loop(vehicle: Dictionary) -> void:
 		vehicle.direction = 1
 
 func travel_distance(vehicle: Dictionary, delta: float) -> float:
-	var distance := SPEED * delta
+	var distance := SPEED * delta * float(vehicle.get("speed_factor", 1.0))
 	for other: Dictionary in vehicles:
 		if other.id == vehicle.id or not other.node.visible or other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
 			continue
@@ -260,4 +287,3 @@ func set_active_count(count: int) -> void:
 	reservations.clear()
 	for i in range(cars.size()):
 		cars[i].visible = i < count or vehicles[i].get("managed", false)
-

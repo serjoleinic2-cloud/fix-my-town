@@ -22,6 +22,8 @@ func run() -> void:
 		check(not (Traffic.phase("H", time) == "green" and Traffic.phase("V", time) == "green"), "Conflicting greens")
 	check(traffic.intersections.size() == 49, "Every grid intersection controlled")
 	check(traffic.vehicles.filter(func(v): return v.node.type_id == "city_bus").size() == 1, "One replaceable bus")
+	var speed_factors: Array = traffic.vehicles.filter(func(v): return bool(v.get("randomized", false))).map(func(v): return float(v.get("speed_factor", 1.0)))
+	check(speed_factors.max() - speed_factors.min() > 0.08, "Civilian cars use different cruising speeds")
 	for count in [8, 16, 24]:
 		traffic.set_active_count(count)
 		for axis in ["H", "V"]:
@@ -46,6 +48,18 @@ func run() -> void:
 	traffic.clock = 0
 	traffic.step(0.1)
 	check(car.coordinate > -19.75, "Proceed on green")
+	traffic.set_active_count(24)
+	traffic.signal_fixed = true
+	var initial_axes: Dictionary = {}
+	for vehicle: Dictionary in traffic.vehicles:
+		initial_axes[vehicle.id] = vehicle.axis
+	for frame in range(240):
+		traffic.step(0.1)
+	var changed_routes := traffic.vehicles.filter(func(v): return bool(v.get("randomized", false)) and str(v.axis) != str(initial_axes.get(v.id, v.axis))).size()
+	check(changed_routes > 0, "Civilian cars choose independent turns instead of one permanent ring")
+	car.axis = "H"
+	car.direction = 1
+	car.road = 0.0
 	car.coordinate = -19.75
 	traffic.clock = 7
 	traffic.step(0.1)
@@ -190,4 +204,3 @@ func run() -> void:
 	if failures == 0:
 		print("TRAFFIC CHECKS: PASS")
 	quit(0 if failures == 0 else 1)
-

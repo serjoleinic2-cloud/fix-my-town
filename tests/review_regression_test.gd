@@ -14,6 +14,18 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	var empty := Simulation.new()
+	empty.save_path = "user://empty_city_test.json"
+	empty.start_empty_city()
+	var has_roads := false
+	for row in empty.territory.cells:
+		for state in row:
+			if state == "road":
+				has_roads = true
+	check(empty.district_house_count() == 0 and not has_roads, "New city starts without houses or inherited roads")
+	check(empty.incident_penalty() == 0, "Empty city has no legacy service penalty")
+	empty.tick(180.0, true)
+	check(empty.incidents.is_empty(), "Empty city does not generate incidents on empty terrain")
 	var game := Simulation.new()
 	game.save_path = "user://review_regression_test.json"
 	game.budget = 5000

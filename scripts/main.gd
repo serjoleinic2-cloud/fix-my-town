@@ -845,10 +845,14 @@ func redraw_territory() -> void:
 						var arm_center := center + Vector3(offset.x * 0.65, 0.14, offset.y * 0.65)
 						var arm_size := Vector3(TerritoryGrid.CELL_SIZE * 0.5 + half_road, 0.08, 2.8) if offset.x != 0 else Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE * 0.5 + half_road)
 						Art.box(tile_visuals, arm_center, arm_size, asphalt)
-					# Corner pads meet the sidewalks entering from every connected arm.
-					for side_x in [-1.0, 1.0]:
-						for side_z in [-1.0, 1.0]:
-							Art.box(tile_visuals, center + Vector3(side_x * 1.85, 0.16, side_z * 1.85), Vector3(1.1, 0.1, 1.1), concrete)
+						# Sidewalks follow each arm. The old implementation placed four
+						# unrelated corner pads, which made turns look like broken paths.
+						if offset.x != 0:
+							for side in [-1.0, 1.0]:
+								Art.box(tile_visuals, arm_center + Vector3(0, 0.02, side * 1.85), Vector3(arm_size.x, 0.1, 0.9), concrete)
+						else:
+							for side in [-1.0, 1.0]:
+								Art.box(tile_visuals, arm_center + Vector3(side * 1.85, 0.02, 0), Vector3(0.9, 0.1, arm_size.z), concrete)
 				elif Vector2i.LEFT in links or Vector2i.RIGHT in links:
 					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, 2.8), asphalt)
 					for side in [-1.0, 1.0]:
@@ -1720,7 +1724,10 @@ func request_road_demolition() -> void:
 		dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
 	dialog.close_requested.connect(dialog.queue_free)
-	dialog.popup_centered(Vector2i(440, 300))
+	var dialog_width := clampi(int(screen.size.x - safe_left - safe_right - 24), 300, 440)
+	var dialog_height := clampi(int(screen.size.y * 0.32), 260, 360)
+	dialog.get_label().autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dialog.popup_centered(Vector2i(dialog_width, dialog_height))
 
 func build_construction_job_sheet() -> void:
 	action_height = 230
@@ -2109,6 +2116,10 @@ func update_preview() -> void:
 	if selection_kind == "land_cell" and territory_cell.x >= 0:
 		var selected_center: Vector3 = game.territory.cell_world(territory_cell.x, territory_cell.y)
 		outline_land_cell(selected_center, Color("8ed6f8"))
+		return
+	if selection_kind == "grid_road" and road_selected_cell.x >= 0:
+		var road_center: Vector3 = game.territory.cell_world(road_selected_cell.x, road_selected_cell.y)
+		outline_land_cell(road_center, Color("f1c75b"))
 		return
 	if selection_kind in ["grid_house", "grid_upgrade"]:
 		var entry: Dictionary = game.territory.building_by_id(grid_selected_id)

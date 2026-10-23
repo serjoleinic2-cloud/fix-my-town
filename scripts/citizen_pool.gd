@@ -77,16 +77,18 @@ func refresh_routes(force: bool = false) -> void:
 		visual.texture = frames[0]
 		var home: Dictionary = homes[index % homes.size()]
 		var destination: Dictionary = destinations[(index * 3 + 1) % destinations.size()]
-		var walker := {"visual": visual, "frames": frames, "variant": variant, "position": _entrance(home),
+		var spawn := _entrance(home) + _spawn_offset(index)
+		var destination_point := _entrance(destination) + _spawn_offset(index + 1)
+		var walker := {"visual": visual, "frames": frames, "variant": variant, "position": spawn,
 			"home": home, "destination": destination, "from_stop": index % 2, "to_stop": 1 - (index % 2),
 			"uses_bus": false, "route": [], "route_index": 0, "state": "walk_dest", "state_time": 0.0, "step_time": 0.0,
 			"phase": float(index) * 0.71, "fade": 0.0}
 		walker.uses_bus = _assign_transit_stops(walker) if commuting else false
 		if bool(walker.uses_bus):
 			walker.state = "walk_stop"
-			_set_route(walker, _sidewalk_route(_entrance(home), _stop_curb(int(walker.from_stop))))
+			_set_route(walker, _sidewalk_route(spawn, _stop_curb(int(walker.from_stop))))
 		else:
-			_set_route(walker, _sidewalk_route(_entrance(home), _entrance(destination)))
+			_set_route(walker, _sidewalk_route(spawn, destination_point))
 		walkers.append(walker)
 
 func tick(delta: float) -> void:
@@ -201,7 +203,18 @@ func _stop_world(index: int) -> Vector3:
 	return point
 
 func _stop_curb(index: int) -> Vector3:
-	return _stop_world(index) + Vector3(2.5, 0.06, 0.5)
+	var stop: Variant = game.transit.stops[clampi(index, 0, game.transit.stops.size() - 1)]
+	var orientation: String = str(game.stop_orientation(stop)) if stop is Dictionary else "horizontal"
+	return _stop_world(index) + (Vector3(0, 0.06, 2.5) if orientation == "horizontal" else Vector3(2.5, 0.06, 0))
+
+func _spawn_offset(index: int) -> Vector3:
+	# Разводим визуальный пул по тротуару, чтобы одинаковые состояния не
+	# складывали людей в одну точку у входа или остановки.
+	if index <= 0:
+		return Vector3.ZERO
+	var lane := float((index % 3) - 1) * 0.62
+	var step := float((index % 2)) * 0.28
+	return Vector3(lane, 0, step)
 
 func _assign_transit_stops(walker: Dictionary) -> bool:
 	if not game.transit.active or game.transit.stops.size() != 2:
@@ -234,14 +247,11 @@ func _sidewalk_route(start: Vector3, finish: Vector3) -> Array[Vector3]:
 			var after := next - cell
 			var sidewalk_offset := 2.5 if cell.y <= 18 else 1.85
 			var sidewalk_height := 0.14 if cell.y <= 18 else 0.21
-			var curb_offset := Vector3.ZERO
-			if (before.x != 0 or after.x != 0) and (before.y != 0 or after.y != 0):
-				# Turn through the sidewalk corner, never across the centre of the junction.
-				curb_offset = Vector3(sidewalk_offset, sidewalk_height, sidewalk_offset)
-			elif before.x != 0 or after.x != 0:
-				curb_offset = Vector3(0, sidewalk_height, sidewalk_offset)
-			else:
-				curb_offset = Vector3(sidewalk_offset, sidewalk_height, 0)
+			var direction := after if after != Vector2i.ZERO else before
+			# Keep pedestrians on one side of the road. The perpendicular vector
+			# follows the actual turn direction instead of always using +X/+Z.
+			var side := Vector2i(-direction.y, direction.x)
+			var curb_offset := Vector3(float(side.x) * sidewalk_offset, sidewalk_height, float(side.y) * sidewalk_offset)
 			var curb := center + curb_offset
 			if result.back().distance_to(curb) > 0.8 and curb.distance_to(finish) > 1.0:
 				result.append(curb)

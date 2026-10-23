@@ -5,7 +5,7 @@
 - Свайп по всей области карточек каталога, включая саму карточку здания, прокручивает `ScrollContainer`; короткое касание по-прежнему выбирает карточку.
 - Выпадающий список категорий строительства получил светло-зелёный фон, контрастные состояния наведения и нажатия.
 - `tests/expansion_ui_test.gd` и `tests/responsive_ui_test.gd` прошли на Godot 4.7.2.
-- APK `build/FixMyTown-0.5.2.apk` собран и установлен на Galaxy S21+ поверх текущего приложения с сохранением города. Перед установкой сохранены `work/phone-backup-catalog-scroll-20261023/progress.json` и `graphics_settings.json`; приложение запущено, снимок экрана: `docs/screenshots/phone_catalog_scroll_s21plus.png`.
+- APK `build/FixMyTown-0.5.2.apk` собран и установлен на Galaxy S21+ поверх текущего приложения с сохранением города. Перед установкой сохранены `work/phone-backup-catalog-scroll-20261023/progress.json` и `graphics_settings.json`; приложение запущено, снимки экрана: `docs/screenshots/phone_catalog_scroll_s21plus.png` и `docs/screenshots/phone_catalog_open_s21plus_latest.png`.
 - Полный набор на Godot 4.7.2 остановился на существующей проверке `scenario_test.gd` (`Income recovery prevents soft lock`); изменения каталога и UI-тесты проходят. Предыдущий полный набор был успешен на Godot 4.6.
 
 ## Руины и ориентация остановок — 23.10.2026

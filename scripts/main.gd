@@ -2317,10 +2317,18 @@ func call_police_for_jam() -> void:
 	refresh()
 
 func open_police_station_build() -> void:
-	open_territory()
-	territory_tool = "service"
-	service_type = "police_station"
+	open_service_catalog("police_station")
 	refresh()
+
+func open_service_catalog(type_id: String) -> void:
+	active_tab = "build_tab"
+	catalog_category = "services"
+	catalog_grid_target = Vector2i(-1, -1)
+	territory_cell = Vector2i(-1, -1)
+	territory_tool = "service"
+	service_type = type_id
+	selection_kind = "catalog"
+	selected = -1
 
 func sync_fire_engine_nodes() -> void:
 	var active_ids: Dictionary = {}
@@ -2394,9 +2402,7 @@ func sync_police_vehicle() -> void:
 		audio.set_loop("police_siren", "siren", "Effects", game.police_job.phase == "travel", game.police_job.vehicle, 0.3)
 
 func open_fire_station_build() -> void:
-	open_territory()
-	territory_tool = "service"
-	service_type = "fire_station"
+	open_service_catalog("fire_station")
 	refresh()
 
 func construct(kind: String) -> void:

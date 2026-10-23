@@ -801,6 +801,11 @@ func update_fire_visuals() -> void:
 		smoke_effect.scale = Vector3.ONE * (1.0 + sin(elapsed * 2.3) * 0.08)
 
 func redraw_plots() -> void:
+	var empty_city: bool = game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty()
+	plots.visible = not empty_city
+	if empty_city:
+		redraw_territory()
+		return
 	for i in range(24):
 		var kind: String = game.buildings[i]
 		var object = plots.get_node_or_null("plot_" + str(i))
@@ -884,15 +889,10 @@ func redraw_territory() -> void:
 	var tile_visuals := Node3D.new()
 	tile_visuals.name = "GridCells"
 	territory_visuals.add_child(tile_visuals)
-	# Старый квартал нарисован DistrictWorld исторически. Закрываем газоном удалённые сегменты, чтобы карта совпадала с сеткой.
-	for row in range(0, TerritoryGrid.EXPANSION_ROWS.x):
-		for col in range(0, TerritoryGrid.EXPANSION_COLS.y + 1):
-			var expected_road := (row % 3 == 0) or (col % 3 == 0 and row <= 18)
-			if expected_road and game.territory.state_at(col, row) != "road":
-				var legacy_center: Vector3 = game.territory.cell_world(col, row)
-				Art.box(tile_visuals, legacy_center + Vector3(0, 0.28, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.1, 0.18, TerritoryGrid.CELL_SIZE - 0.1), Color("91a66f"))
-	for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
-		for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
+	# The whole world is one consistent cell grid. There is no hidden legacy
+	# road rectangle or prebuilt 24-plot district on a new-city start.
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
 			var color := Color("607e4c") if state == "forest" else Color("9fbd77")

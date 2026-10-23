@@ -821,6 +821,11 @@ func legacy_problem_available(kind: String) -> bool:
 			for state in row:
 				if state == "road":
 					return true
+		# Backward-compatible legacy saves can have buildings before their
+		# road grid is reconstructed. A genuinely empty city has neither.
+		for entry: Dictionary in all_buildings():
+			if entry.has("legacy_plot"):
+				return true
 		return false
 	return false
 

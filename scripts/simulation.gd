@@ -24,6 +24,7 @@ var route_index: int = 0
 var vehicle: Vector3 = Vector3(3, 0, -6)
 var repair_left: float = 4.0
 var income_clock: float = 0.0
+var service_neglect_clock: float = 0.0
 var completed: bool = false
 var target_instance_id: String = ""
 var depot_instance_id: String = "pine_district_legacy_2"
@@ -277,6 +278,34 @@ func income() -> int:
 		total += record_income(entry)
 	return maxi(4, total)
 
+func incident_penalty() -> int:
+	# Unresolved failures drain the treasury every accounting period. Fires are
+	# more expensive than routine service failures, so ignoring them has a clear
+	# escalating cost even before a building becomes a ruin.
+	var penalty := 0
+	if not leak_fixed:
+		penalty += 3
+	if not signal_fixed:
+		penalty += 2
+	penalty += fires.size() * 4
+	for identifier in fire_ruins:
+		if bool(fire_ruins[identifier]):
+			penalty += 2
+	return penalty
+
+func net_income() -> int:
+	var result := income() - incident_penalty()
+	return maxi(1, result) if budget <= 0 else result
+
+func apply_service_neglect_damage(amount: int, identifiers: Array) -> void:
+	for identifier in identifiers:
+		if not is_house_id(str(identifier)) or is_ruined(str(identifier)):
+			continue
+		var key := str(identifier)
+		fire_damage[key] = minf(100.0, float(fire_damage.get(key, 0.0)) + amount)
+		if float(fire_damage[key]) >= 100.0:
+			fire_ruins[key] = true
+
 const CONSTRUCTION_DURATION := 6.0
 
 func start_legacy_construction(index: int, type_id: String) -> bool:
@@ -296,7 +325,7 @@ func start_grid_upgrade(identifier: String) -> bool:
 	if not construction_job.is_empty():
 		return false
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or not Catalog.LEVELS.has(entry.type_id):
+	if entry.is_empty() or entry.has("legacy_plot") or not Catalog.LEVELS.has(entry.type_id) or is_ruined(identifier):
 		return false
 	var level_value := int(entry.get("level", 1))
 	var price: int = Catalog.level_data(entry.type_id, level_value).upgrade_cost
@@ -306,7 +335,8 @@ func start_grid_upgrade(identifier: String) -> bool:
 		"col": entry.col, "row": entry.row, "level": level_value, "cost": price})
 
 func start_legacy_upgrade(index: int) -> bool:
-	if not construction_job.is_empty() or upgrade_cost(index) <= 0 or budget < upgrade_cost(index):
+	var identifier := "pine_district_legacy_%d" % index
+	if not construction_job.is_empty() or upgrade_cost(index) <= 0 or budget < upgrade_cost(index) or is_ruined(identifier):
 		return false
 	return _start_construction({"kind": "upgrade_legacy", "type_id": buildings[index], "index": index,
 		"level": building_level(index), "col": -1, "row": -1, "cost": upgrade_cost(index)})
@@ -731,13 +761,25 @@ func fire_warning_left(identifier: String) -> float:
 
 func repair_fire_damage(identifier: String) -> bool:
 	var damage := house_damage(identifier)
-	var price := 120 if is_ruined(identifier) else 40 + damage
+	var ruined := is_ruined(identifier)
+	var price := 120 if ruined else 40 + damage
 	if damage <= 0 or not fires.is_empty() or job != "" or not fire_jobs.is_empty() or budget < price:
 		return false
 	budget -= price
 	fire_damage.erase(identifier)
 	fire_ruins.erase(identifier)
 	jam_cleared.erase(identifier)
+	if ruined:
+		# A destroyed building returns as a basic one-storey property. Further
+		# visual upgrades are a deliberate player action after restoration.
+		if identifier.begins_with("pine_district_legacy_"):
+			var legacy_index := int(identifier.trim_prefix("pine_district_legacy_"))
+			if legacy_index in range(24):
+				levels[legacy_index] = 1
+		else:
+			var restored_entry := territory.building_by_id(identifier)
+			if not restored_entry.is_empty():
+				restored_entry.level = 1
 	save_game()
 	return true
 
@@ -972,9 +1014,30 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		if old_phase != fire.phase or old_warning != ceili(float(fire.warning_left)) or old_damage != house_damage(identifier) or old_severity != fire_severity(identifier):
 			changed = true
 	income_clock += delta
+	if not leak_fixed or not signal_fixed:
+		service_neglect_clock += delta
 	if income_clock >= 12.0:
 		income_clock -= 12.0
-		budget += income()
+		var financial_change := income() - incident_penalty()
+		# A city at zero receives a small operating subsidy, so lack of money
+		# never becomes a hard loss condition or a permanent soft lock.
+		if budget <= 0:
+			financial_change = maxi(1, financial_change)
+		budget = maxi(0, budget + financial_change)
+		if service_neglect_clock >= 60.0:
+			var neglect_cycles := floori(service_neglect_clock / 60.0)
+			service_neglect_clock = fmod(service_neglect_clock, 60.0)
+			if not leak_fixed:
+				var water_homes: Array = []
+				for index in WATER_AFFECTED_HOMES:
+					water_homes.append("pine_district_legacy_%d" % index)
+				apply_service_neglect_damage(4 * neglect_cycles, water_homes)
+			if not signal_fixed:
+				var city_homes: Array = []
+				for entry: Dictionary in all_buildings():
+					if entry.type_id == "house":
+						city_homes.append(entry.instance_id)
+				apply_service_neglect_damage(2 * neglect_cycles, city_homes)
 		if transit.active:
 			transit.funded = budget >= Transit.UPKEEP
 			if transit.funded:
@@ -1122,7 +1185,7 @@ func save_game() -> void:
 	var data := {"version": 7, "levels": levels, "completed": completed, "city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
-		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
+		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -1412,6 +1475,7 @@ func load_game() -> bool:
 	vehicle = Vector3(stored_vehicle[0], stored_vehicle[1], stored_vehicle[2])
 	repair_left = clampf(float(data.repair_left), 0.0, 4.0)
 	income_clock = clampf(float(data.income_clock), 0.0, 12.0)
+	service_neglect_clock = clampf(float(data.get("service_neglect_clock", 0.0)), 0.0, 60.0)
 	check_complete()
 	return true
 
@@ -1499,3 +1563,4 @@ func proposed_vehicle(delta: float) -> Vector3:
 		return vehicle
 	var speed := 0.55 if not signal_fixed and absf(vehicle.z) < 1.8 else 2.6
 	return vehicle.move_toward(route[route_index], delta * speed)
+

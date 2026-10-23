@@ -1650,7 +1650,9 @@ func build_land_cell_sheet() -> void:
 		label(18, sheet_column, tr_text("Освободите место, чтобы проложить дорогу или построить объект.", "Clear this tile before adding a road or placing an object."))
 		var clear_button := button(sheet_column, tr_text("Расчистить участок · 5", "Clear tile · 5"), clear_selected_land_cell, true)
 		clear_button.name = "ClearLandCell"
-		clear_button.disabled = game.budget < 5 or not game.construction_job.is_empty()
+		clear_button.disabled = not game.completed or game.budget < 5 or not game.construction_job.is_empty()
+		if not game.completed:
+			label(15, sheet_column, tr_text("Эта зона откроется после завершения первого района.", "This zone opens after completing the first district.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	else:
 		label(18, sheet_column, tr_text("Выберите, как использовать свободное место.", "Choose how to use this free space."))
 		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"

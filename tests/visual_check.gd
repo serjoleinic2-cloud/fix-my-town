@@ -103,11 +103,17 @@ func capture() -> void:
 			scene.begin_move_stop(1)
 		else:
 			scene.game.place_stop(4)
+			if mode == "transit":
+				scene.game.transit.stops = [{"col": 6, "row": 14}, {"col": 9, "row": 8}]
 			scene.game.start_transit()
-			scene.game.transit.tick(0.1, scene.scenery.traffic_controller)
+			scene.game.transit.tick(0.1, scene.scenery.traffic_controller, scene.game.territory)
 		if mode == "transit_en":
 			scene.game.language = "en"
 		scene.set_camera_focus(scene.game.transit.stop_position(4) + Vector3(7, 0, 7))
+		if mode == "transit":
+			var route: Array[Vector3] = scene.game.transit.route_for(scene.game.territory, 0, 1)
+			if not route.is_empty():
+				scene.set_camera_focus((route.front() + route.back()) / 2 + Vector3(7, 0, 7))
 	if mode in ["upgrade", "upgrade_en", "levels", "demolition"]:
 		scene.game.budget = 5000
 		scene.game.buildings[9] = "cafe"

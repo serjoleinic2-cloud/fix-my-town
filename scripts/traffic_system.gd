@@ -179,7 +179,7 @@ static func stop_distance_for(type_id: String) -> float:
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
 
-func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) -> float:
+func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0") -> float:
 	var direction_value := proposed - current
 	var distance := direction_value.length()
 	if distance < 0.0001:
@@ -187,7 +187,7 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) 
 	var axis := "H" if absf(direction_value.x) > absf(direction_value.z) else "V"
 	var direction: float = signf(direction_value.x if axis == "H" else direction_value.z)
 	for other: Dictionary in vehicles:
-		if not other.node.visible or other.axis != axis or other.direction != direction:
+		if other.id == actor_id or not other.node.visible or other.axis != axis or other.direction != direction:
 			continue
 		var road: float = current.z if axis == "H" else current.x
 		if absf(road - other.road) > 0.15:
@@ -202,8 +202,8 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) 
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
 		if ahead < stop_distance - 0.01:
-			wait_times.erase(intersection.key + ":crew_0")
-		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01 and not permission(intersection, axis, "crew_0", delta):
+			wait_times.erase(intersection.key + ":" + actor_id)
+		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01 and not permission(intersection, axis, actor_id, delta):
 			distance = minf(distance, maxf(0, ahead - stop_distance))
 	return distance
 

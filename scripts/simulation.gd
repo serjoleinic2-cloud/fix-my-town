@@ -114,7 +114,7 @@ func transit_metrics() -> Dictionary:
 		if entry.type_id != "house":
 			continue
 		var residents := record_residents(entry)
-		if transit.stops.any(func(row): return transit.in_range(entry.position, row)):
+		if transit.stops.any(func(stop): return transit.in_range(entry.position, stop, territory)):
 			covered += residents
 		var destination := record_destination_level(entry)
 		if destination > 0:
@@ -134,31 +134,56 @@ func record_destination_level(entry: Dictionary) -> int:
 	var best := 0
 	var point: Vector3 = entry.position
 	for j in range(2):
-		if not transit.in_range(point, transit.stops[j]):
+		if not transit.in_range(point, transit.stops[j], territory):
 			continue
 		for destination: Dictionary in all_buildings():
-			if destination.type_id in ["cafe", "depot"] and transit.in_range(destination.position, transit.stops[1 - j]):
+			if destination.type_id in ["cafe", "depot"] and transit.in_range(destination.position, transit.stops[1 - j], territory):
 				best = maxi(best, destination.level)
 	return best
 
-func place_stop(row: int) -> bool:
-	if not completed or row < 0 or row > 5 or transit.stops.size() >= 2 or row in transit.stops or budget < Transit.STOP_COST:
+func valid_stop_cell(cell: Vector2i, ignore_index: int = -1) -> bool:
+	if territory.state_at(cell.x, cell.y) != "road" or territory.path_to_city(cell.x, cell.y).is_empty():
+		return false
+	for index in range(transit.stops.size()):
+		if index != ignore_index and transit.stop_cell(transit.stops[index], territory) == cell:
+			return false
+	return true
+
+func place_stop(location: Variant) -> bool:
+	if not completed or transit.stops.size() >= 2 or budget < Transit.STOP_COST:
+		return false
+	var stop: Variant = int(location) if location is int else {"col": location.x, "row": location.y} if location is Vector2i else {}
+	if stop is Dictionary:
+		if not valid_stop_cell(Vector2i(stop.col, stop.row)):
+			return false
+	elif not (stop is int and stop >= 0 and stop < 6) or transit.stops.has(stop):
 		return false
 	budget -= Transit.STOP_COST
-	transit.stops.append(row)
-	transit.stops.sort()
+	transit.stops.append(stop)
 	save_game()
 	return true
 
-func move_stop(index: int, row: int) -> bool:
-	if not completed or index < 0 or index >= transit.stops.size() or row < 0 or row > 5:
+func move_stop(index: int, location: Variant) -> bool:
+	if not completed or index < 0 or index >= transit.stops.size():
 		return false
-	if row in transit.stops and transit.stops[index] != row or transit.stops[index] == row:
+	var stop: Variant = int(location) if location is int else {"col": location.x, "row": location.y} if location is Vector2i else {}
+	if stop is Dictionary:
+		if not valid_stop_cell(Vector2i(stop.col, stop.row), index):
+			return false
+	elif not (stop is int and stop >= 0 and stop < 6):
 		return false
-	transit.stops[index] = row
-	transit.stops.sort()
-	if transit.active and transit.dwell > 0:
-		transit.target_z = Transit.ROW_Z[transit.stops[1] if transit.direction == 1 else transit.stops[0]]
+	if typeof(transit.stops[index]) == typeof(stop) and transit.stops[index] == stop:
+		return false
+	for other_index in range(transit.stops.size()):
+		if other_index == index:
+			continue
+		if typeof(transit.stops[other_index]) == typeof(stop) and transit.stops[other_index] == stop:
+			return false
+		if stop is Dictionary and transit.stop_cell(transit.stops[other_index], territory) == Vector2i(stop.col, stop.row):
+			return false
+	transit.stops[index] = stop
+	if transit.active:
+		transit.route_dirty = true
 	save_game()
 	return true
 
@@ -168,10 +193,19 @@ func start_transit() -> bool:
 	budget -= Transit.BUS_COST
 	transit.active = true
 	transit.funded = true
-	transit.coordinate = Transit.ROW_Z[transit.stops[0]]
+	transit.route_points.clear()
+	transit.route_index = 0
+	transit.current_target = 1
+	transit.route_dirty = false
+	if not transit.make_leg(territory, 0, 1):
+		budget += Transit.BUS_COST
+		transit.active = false
+		return false
+	transit.coordinate = transit.bus_position.z
 	transit.direction = 1
 	transit.visual_direction = 1
-	transit.target_z = Transit.ROW_Z[transit.stops[1]]
+	transit.initial_dwell = true
+	transit.target_z = transit.bus_position.z
 	transit.dwell = 3
 	save_game()
 	return true
@@ -636,6 +670,11 @@ func load_game() -> bool:
 	else:
 		loaded_territory = TerritoryGrid.new(stored)
 	loaded_territory.sync_legacy(stored)
+	for stop in loaded_transit.stops:
+		if stop is Dictionary:
+			var cell := Vector2i(int(stop.col), int(stop.row))
+			if loaded_territory.state_at(cell.x, cell.y) != "road" or loaded_territory.path_to_city(cell.x, cell.y).is_empty():
+				return false
 	var stored_target: String = str(data.get("target_instance_id", ""))
 	if stored_job == "inspection" and loaded_territory.building_by_id(stored_target).is_empty():
 		return false

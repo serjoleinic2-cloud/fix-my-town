@@ -704,6 +704,8 @@ func _handle_mouse_gesture(event: InputEvent) -> void:
 			else:
 				if dragging and not drag_moved:
 					map_input(event)
+				elif dragging and drag_moved and placing_stop:
+					update_preview()
 				dragging = false
 	elif event is InputEventMouseMotion and dragging:
 		if event.position.distance_to(drag_start) > 9 * render_scale:
@@ -723,6 +725,9 @@ func map_input(event: InputEvent) -> void:
 		return
 	var point: Vector2 = event.position / viewport_container.stretch_shrink
 	if placing_stop:
+		var old_stop_index := tapped_existing_stop(point)
+		if old_stop_index >= 0:
+			return # The existing stop stays until a different road point is chosen.
 		var candidate_row := tapped_stop_candidate(point)
 		if candidate_row >= 0:
 			confirm_stop(candidate_row)
@@ -760,12 +765,17 @@ func map_input(event: InputEvent) -> void:
 		return
 	if placing_stop:
 		var nearest := INF
-		for row in range(6):
-			var distance: float = game.transit.stop_position(row).distance_to(hit)
+		var candidates := valid_stop_cells()
+		for index in range(candidates.size()):
+			var cell: Vector2i = candidates[index]
+			var distance: float = game.territory.cell_world(cell.x, cell.y).distance_to(hit)
 			if distance < nearest:
-				stop_candidate = row
+				stop_candidate = index
 				nearest = distance
-		refresh()
+		if nearest <= TerritoryGrid.CELL_SIZE * 0.65:
+			confirm_stop(stop_candidate)
+		else:
+			refresh()
 		return
 	for kind in ["leak", "signal"]:
 		var location := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
@@ -855,7 +865,7 @@ func select_vehicle_at(point: Vector2) -> bool:
 	if best == null:
 		return false
 	selected_vehicle_type = best.type_id
-	selection_kind = "vehicle"
+	selection_kind = "bus" if best.type_id == "city_bus" else "vehicle"
 	selected = -1
 	active_tab = "services"
 	refresh()
@@ -1138,6 +1148,8 @@ func build_sheet() -> void:
 		build_grid_upgrade_sheet()
 	elif selection_kind == "transit":
 		build_transit_sheet()
+	elif selection_kind == "bus":
+		build_bus_sheet()
 	elif selection_kind == "stop":
 		build_stop_sheet()
 	elif selection_kind == "stop_place":
@@ -1315,23 +1327,16 @@ func update_preview() -> void:
 				edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
 		return
 	if placing_stop:
-		for row in range(6):
-			if not stop_candidate_valid(row):
-				continue
-			var point: Vector3 = game.transit.stop_position(row)
-			var candidate := create_object(stop_candidate_visuals, "bus_stop", "stop_candidate_%d" % row, point)
-			candidate.interaction_area.collision_layer = 0
-			make_ghost(candidate, Color("48b8ed"))
-			var badge := Label3D.new()
-			badge.name = "ValidStopBadge"
-			badge.text = "●"
-			badge.font_size = 64
-			badge.outline_size = 12
-			badge.modulate = Color("35a8e5")
-			badge.position = Vector3(0, 4.6, 0)
-			badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			badge.no_depth_test = true
-			candidate.add_child(badge)
+		for cell: Vector2i in displayed_stop_cells():
+			var point: Vector3 = game.territory.cell_world(cell.x, cell.y)
+			var candidate := Sprite3D.new()
+			candidate.name = "stop_candidate_%d_%d" % [cell.x, cell.y]
+			candidate.texture = load("res://assets/icons/bus_stop_candidate.svg")
+			candidate.pixel_size = 0.018
+			candidate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			candidate.no_depth_test = true
+			candidate.position = point + Vector3(0, 2.4, 0)
+			stop_candidate_visuals.add_child(candidate)
 		return
 	if selection_kind == "upgrade" and selected >= 0:
 		var point := map_position(game.plot_position(selected))
@@ -1428,7 +1433,7 @@ func _process(delta: float) -> void:
 	scenery.traffic_controller.service_active = game.job != ""
 	scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
-	game.transit.tick(delta, scenery.traffic_controller)
+	game.transit.tick(delta, scenery.traffic_controller, game.territory)
 	update_transit_stats()
 	var movement_fraction := 1.0
 	if game.job != "" and game.route_index < game.route.size():
@@ -1888,28 +1893,50 @@ func open_stop_card(index: int) -> void:
 
 func tapped_existing_stop(point: Vector2) -> int:
 	for index in range(game.transit.stops.size()):
-		var marker := camera.unproject_position(game.transit.stop_position(game.transit.stops[index]) + Vector3(0, 1.2, 0))
+		var marker := camera.unproject_position(game.transit.stop_position(game.transit.stops[index], game.territory) + Vector3(0, 1.2, 0))
 		if marker.distance_to(point) <= stop_tap_radius():
 			return index
 	return -1
 
 func tapped_stop_candidate(point: Vector2) -> int:
-	for row in range(6):
-		if not stop_candidate_valid(row):
-			continue
-		var marker := camera.unproject_position(game.transit.stop_position(row) + Vector3(0, 1.6, 0))
+	var candidates := displayed_stop_cells()
+	for index in range(candidates.size()):
+		var cell: Vector2i = candidates[index]
+		var marker := camera.unproject_position(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 1.6, 0))
 		if marker.distance_to(point) <= stop_tap_radius():
-			return row
+			return index
 	return -1
 
 func stop_tap_radius() -> float:
 	return 46.0 * render_scale / viewport_container.stretch_shrink
 
-func stop_candidate_valid(row: int) -> bool:
-	if row < 0 or row >= 6 or row in game.transit.stops:
-		return false
-	var road: Vector2i = game.territory.nearest_road(game.transit.stop_position(row))
-	return not game.territory.path_to_city(road.x, road.y).is_empty()
+func valid_stop_cells() -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
+			var cell := Vector2i(col, row)
+			if game.valid_stop_cell(cell, moving_stop_index if placing_stop else -1):
+				if placing_stop and moving_stop_index >= 0 and game.transit.stop_cell(game.transit.stops[moving_stop_index], game.territory) == cell:
+					continue
+				result.append(cell)
+	return result
+
+func displayed_stop_cells() -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var visible_rect := Rect2(Vector2.ZERO, screen.size / viewport_container.stretch_shrink)
+	for cell: Vector2i in valid_stop_cells():
+		var point: Vector3 = game.territory.cell_world(cell.x, cell.y)
+		var projected := camera.unproject_position(point + Vector3(0, 1.6, 0))
+		if point.distance_to(focus_point) > 14.4 or not visible_rect.has_point(projected):
+			continue
+		result.append(cell)
+		if result.size() >= 12:
+			break
+	return result
+
+func stop_label(stop: Variant) -> String:
+	var point: Vector3 = game.transit.stop_position(stop, game.territory)
+	return "%.0f, %.0f" % [point.x, point.z]
 
 func build_transit_sheet() -> void:
 	action_height = 420
@@ -1927,12 +1954,21 @@ func build_transit_sheet() -> void:
 	else:
 		for index in range(game.transit.stops.size()):
 			var stop_row := hbox(sheet_column)
-			label(19, stop_row, tr_text("Остановка %d · место %d" % [index + 1, game.transit.stops[index] + 1], "Stop %d · site %d" % [index + 1, game.transit.stops[index] + 1]))
+			label(19, stop_row, tr_text("Остановка %d · дорога %s" % [index + 1, stop_label(game.transit.stops[index])], "Stop %d · road %s" % [index + 1, stop_label(game.transit.stops[index])]))
 			button(stop_row, tr_text("Перенести", "Move"), begin_move_stop.bind(index))
 		var launch := button(sheet_column, tr_text("Маршрут работает", "Route running") if game.transit.active else tr_text("Запустить автобус · 60", "Start bus · 60"), launch_transit, true)
 		launch.disabled = game.transit.active or game.budget < 60
-	var note := label(20, sheet_column, tr_text("Один маршрут по западной улице. Остановки парные; автобус делает рейсы между ними. Полезна связь жилья с депо (работа) или кафе.", "One route on the western street, with paired stops and a shuttle bus. Connect homes to the depot (jobs) or a café."))
+	var note := label(20, sheet_column, tr_text("Остановки связаны по дорожной сети, включая повороты. Полезна связь жилья с рабочими местами или кафе.", "Stops are connected through the road network, including turns. Routes are useful when they link homes to jobs or cafés."))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+func build_bus_sheet() -> void:
+	action_height = 360
+	header(tr_text("Городской автобус", "City bus"), "pin")
+	var metrics: Dictionary = game.transit_metrics()
+	label(21, sheet_column, tr_text("Маршрут: %d остановки · охват %d жителей\nПолезные связи: %d · загрузка %d/%d\nЗадержка: %.0f сек.", "Route: %d stops · coverage %d residents\nUseful links: %d · load %d/%d\nDelay: %.0f sec.") % [game.transit.stops.size(), metrics.covered, metrics.served, metrics.load, metrics.capacity, maxf(game.transit.delay, game.transit.last_delay)])
+	for index in range(game.transit.stops.size()):
+		label(18, sheet_column, tr_text("Остановка %d · дорога %s" % [index + 1, stop_label(game.transit.stops[index])], "Stop %d · road %s" % [index + 1, stop_label(game.transit.stops[index])]))
+	button(sheet_column, tr_text("Открыть транспорт", "Open transit"), open_transit)
 
 func build_stop_sheet() -> void:
 	action_height = 290
@@ -1959,8 +1995,9 @@ func begin_stop_placement() -> void:
 	moving_stop_index = -1
 	selected_stop_index = -1
 	selection_kind = "stop_place"
-	stop_candidate = 0 if game.transit.stops.is_empty() else 4
-	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
+	var candidates := valid_stop_cells()
+	stop_candidate = 0
+	set_camera_focus(Vector3(-14.4, 0, 0))
 	refresh()
 
 func begin_move_stop(index: int) -> void:
@@ -1970,22 +2007,27 @@ func begin_move_stop(index: int) -> void:
 	moving_stop_index = index
 	selected_stop_index = index
 	selection_kind = "stop_place"
-	stop_candidate = game.transit.stops[index]
-	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
+	var target_point: Vector3 = game.transit.stop_position(game.transit.stops[index], game.territory)
+	set_camera_focus(target_point + Vector3(7, 0, 7))
 	refresh()
 
 func change_stop_candidate(delta: int) -> void:
-	stop_candidate = posmod(stop_candidate + delta, 6)
-	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
+	var candidates := displayed_stop_cells()
+	if candidates.is_empty():
+		return
+	stop_candidate = posmod(stop_candidate + delta, candidates.size())
+	var cell: Vector2i = candidates[stop_candidate]
+	set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(7, 0, 7))
 	refresh()
 
-func confirm_stop(row: int = -1) -> void:
-	if row < 0:
-		row = stop_candidate
-	if not stop_candidate_valid(row):
+func confirm_stop(candidate_index: int = -1) -> void:
+	var candidates := displayed_stop_cells()
+	if candidate_index < 0:
+		candidate_index = stop_candidate
+	if candidate_index < 0 or candidate_index >= candidates.size():
 		audio.play_ui("deny")
 		return
-	var success: bool = game.move_stop(moving_stop_index, row) if moving_stop_index >= 0 else game.place_stop(row)
+	var success: bool = game.move_stop(moving_stop_index, candidates[candidate_index]) if moving_stop_index >= 0 else game.place_stop(candidates[candidate_index])
 	if success:
 		placing_stop = false
 		moving_stop_index = -1
@@ -2017,14 +2059,22 @@ func update_transit_stats() -> void:
 		transit_stats.text += tr_text("\nНет средств на обслуживание", "\nMaintenance is not funded")
 
 func redraw_transit() -> void:
-	var signature := str(game.transit.stops)
+	var show_route: bool = selection_kind in ["transit", "bus"] and game.transit.stops.size() == 2
+	var signature := str([game.transit.stops, show_route])
 	if signature == transit_signature:
 		return
 	transit_signature = signature
 	clear_children(transit_visuals)
-	for row in game.transit.stops:
-		var stop := create_object(transit_visuals, "bus_stop", "bus_stop_%d" % row, game.transit.stop_position(row))
+	for index in range(game.transit.stops.size()):
+		var stop := create_object(transit_visuals, "bus_stop", "bus_stop_%d" % index, game.transit.stop_position(game.transit.stops[index], game.territory))
 		stop.interaction_area.collision_layer = 0
+	if show_route:
+		var path: Array[Vector3] = game.transit.route_for(game.territory, 0, 1)
+		for index in range(1, path.size()):
+			var first: Vector3 = path[index - 1] + Vector3(0, 0.36, 0)
+			var second: Vector3 = path[index] + Vector3(0, 0.36, 0)
+			var edge := Art.box(transit_visuals, (first + second) / 2, Vector3(0.34, 0.08, first.distance_to(second)), Color("3daee8"))
+			edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
 
 func building_effect(kind: String, level_value: int) -> String:
 	var data := Catalog.level_data(kind, level_value)

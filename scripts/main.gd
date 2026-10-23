@@ -843,17 +843,30 @@ func redraw_territory() -> void:
 				if topology in ["corner", "tee", "cross"]:
 					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, 2.8), asphalt)
 					for offset: Vector2i in links:
-						var arm_center := center + Vector3(offset.x * 0.65, 0.14, offset.y * 0.65)
-						var arm_size := Vector3(TerritoryGrid.CELL_SIZE * 0.5 + half_road, 0.08, 2.8) if offset.x != 0 else Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE * 0.5 + half_road)
+						var arm_center := center + Vector3(offset.x * 1.35, 0.14, offset.y * 1.35)
+						var arm_size := Vector3(TerritoryGrid.CELL_SIZE * 0.5 + 0.7, 0.08, 2.8) if offset.x != 0 else Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE * 0.5 + 0.7)
 						Art.box(tile_visuals, arm_center, arm_size, asphalt)
-						# Sidewalks follow each arm. The old implementation placed four
-						# unrelated corner pads, which made turns look like broken paths.
+						# Sidewalks begin outside the central asphalt square. They never
+						# cut diagonally through the intersection.
 						if offset.x != 0:
 							for side in [-1.0, 1.0]:
-								Art.box(tile_visuals, arm_center + Vector3(0, 0.02, side * 1.85), Vector3(arm_size.x, 0.1, 0.9), concrete)
+								Art.box(tile_visuals, center + Vector3(offset.x * 1.8, 0.16, side * 1.85), Vector3(1.2, 0.1, 0.9), concrete)
 						else:
 							for side in [-1.0, 1.0]:
-								Art.box(tile_visuals, arm_center + Vector3(side * 1.85, 0.02, 0), Vector3(0.9, 0.1, arm_size.z), concrete)
+								Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, offset.y * 1.8), Vector3(0.9, 0.1, 1.2), concrete)
+						# Zebra and stop line are placed at the mouth of every arm.
+						var cross_center := center + Vector3(offset.x * 1.78, 0.23, offset.y * 1.78)
+						for stripe in range(-1, 2):
+							var stripe_center := cross_center + (Vector3(0, 0, stripe * 0.38) if offset.x != 0 else Vector3(stripe * 0.38, 0, 0))
+							var stripe_size := Vector3(0.14, 0.018, 1.75) if offset.x != 0 else Vector3(1.75, 0.018, 0.14)
+							Art.box(tile_visuals, stripe_center, stripe_size, markings)
+						var stop_center := center + Vector3(offset.x * 1.42, 0.25, offset.y * 1.42)
+						var stop_size := Vector3(0.10, 0.02, 0.68) if offset.x != 0 else Vector3(0.68, 0.02, 0.10)
+						Art.box(tile_visuals, stop_center, stop_size, Color("f4f0d8"))
+					# Four small corner pads connect the split sidewalk segments.
+					for side_x in [-1.0, 1.0]:
+						for side_z in [-1.0, 1.0]:
+							Art.box(tile_visuals, center + Vector3(side_x * 1.85, 0.16, side_z * 1.85), Vector3(1.0, 0.1, 1.0), concrete)
 				elif Vector2i.LEFT in links or Vector2i.RIGHT in links:
 					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, 2.8), asphalt)
 					for side in [-1.0, 1.0]:
@@ -865,13 +878,10 @@ func redraw_territory() -> void:
 				# Fresh expansion streets use broken centre markings; the dashes
 				# continue into each arm of a bend and stop before crosswalks.
 				for offset: Vector2i in links:
-					if topology in ["tee", "cross"]:
-						for stripe in range(3):
-							var distance := 1.05 + stripe * 0.58
-							var stripe_center := center + Vector3(-offset.x * distance, 0.205, -offset.y * distance)
-							var stripe_size := Vector3(0.14, 0.018, 3.8) if offset.x != 0 else Vector3(3.8, 0.018, 0.14)
-							Art.box(tile_visuals, stripe_center, stripe_size, markings)
-					else:
+					# Junction arms already have their own crosswalk and STOP line.
+					# Do not draw the old centre-marking fan there: in isometric view
+					# it becomes a confusing white grid over the intersection.
+					if topology not in ["tee", "cross"]:
 						for dash in range(2):
 							var distance := 0.65 + dash * 1.05
 							var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)

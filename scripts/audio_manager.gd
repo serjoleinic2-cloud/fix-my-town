@@ -46,6 +46,20 @@ func stream(sound: String, loop: bool = false) -> AudioStream:
 func play_ui(sound: String = "click") -> void:
 	play(sound, "Interface")
 
+func play_building_select(type_id: String, ruined: bool = false) -> void:
+	# Each object has a recognisable short cue, while generic UI taps use the
+	# lighter Tesla-like confirmation tone.
+	var sound: String = "deny" if ruined else {
+		"house": "select",
+		"cafe": "place",
+		"park": "leaves",
+		"fire_station": "radio_call",
+		"police_station": "warning",
+		"hospital": "success",
+		"depot": "build"
+	}.get(type_id, "tesla")
+	play_ui(sound)
+
 func play_construction(position_value: Vector3, park: bool = false) -> void:
 	play_ui("place")
 	play("build", "Effects", position_value)
@@ -146,7 +160,7 @@ func sync(game: RefCounted, zoom: float, delta: float) -> void:
 	var moving: bool = game.job != "" and game.route_index < game.route.size()
 	set_loop("engine", "engine", "Effects", moving, game.vehicle)
 	set_loop("repair", "repair", "Effects", game.job != "" and game.job_phase != "return" and not moving, game.vehicle)
-	if warning_clock >= 45 and (not game.leak_fixed or not game.signal_fixed):
+	if warning_clock >= 24 and (not game.leak_fixed or not game.signal_fixed or not game.fires.is_empty()):
 		play_ui("warning")
 		warning_clock = 0
 	last_job = game.job
@@ -211,3 +225,4 @@ func reset_state() -> void:
 
 func _exit_tree() -> void:
 	shutdown()
+

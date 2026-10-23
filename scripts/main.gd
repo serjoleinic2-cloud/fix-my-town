@@ -1115,7 +1115,7 @@ func map_input(event: InputEvent) -> void:
 	for kind in ["leak", "signal"]:
 		var fixed: bool = game.leak_fixed if kind == "leak" else game.signal_fixed
 		var marker := world.get_node("LeakMarker" if kind == "leak" else "SignalMarker") as Node3D
-		if not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
+		if game.legacy_problem_available(kind) and not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
 			select_problem(kind)
 			return
 	if selection_kind != "territory" and select_projected_building(point):
@@ -1168,7 +1168,7 @@ func map_input(event: InputEvent) -> void:
 			return
 	for kind in ["leak", "signal"]:
 		var location := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
-		if location.distance_to(hit) < 2.2:
+		if game.legacy_problem_available(kind) and location.distance_to(hit) < 2.2:
 			select_problem(kind)
 			return
 	# Pick the dedicated object volume so a tap on a roof still selects its plot.
@@ -2003,19 +2003,21 @@ func refresh() -> void:
 	completion_observed = game.completed
 	if not game.completed:
 		completion_left = 0
-	var mission_symbol := "star" if game.completed else ("drop" if not game.leak_fixed else ("hammer" if not game.signal_fixed else "pin"))
+	var leak_active := game.legacy_problem_available("leak")
+	var signal_active := game.legacy_problem_available("signal")
+	var mission_symbol := "star" if game.completed else ("drop" if leak_active else ("hammer" if signal_active else "pin"))
 	mission_icon.texture = load("res://assets/icons/ui_" + mission_symbol + ".svg")
-	var completed_steps := int(game.leak_fixed) + int(game.signal_fixed) + int(game.buildings.has("cafe") or game.buildings.has("park"))
-	objective.text = t("mission_done") if game.completed else (t("mission_water") if not game.leak_fixed else (t("mission_signal") if not game.signal_fixed else t("mission_build")))
+	var completed_steps := int(not leak_active) + int(not signal_active) + int(game.buildings.has("cafe") or game.buildings.has("park"))
+	objective.text = t("mission_done") if game.completed else (t("mission_water") if leak_active else (t("mission_signal") if signal_active else t("mission_build")))
 	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
 	progress_bar.value = completed_steps
 	redraw_plots()
 	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.update_lights()
-	leak_effect.visible = not game.leak_fixed
-	world.get_node("LeakMarker").visible = not game.leak_fixed
-	world.get_node("SignalMarker").visible = not game.signal_fixed
+	leak_effect.visible = game.legacy_problem_available("leak")
+	world.get_node("LeakMarker").visible = game.legacy_problem_available("leak")
+	world.get_node("SignalMarker").visible = game.legacy_problem_available("signal")
 	build_sheet()
 	update_preview()
 	sync_construction_site()

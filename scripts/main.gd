@@ -19,6 +19,7 @@ var world: Node3D
 var scenery: Node3D
 var plots: Node3D
 var territory_visuals: Node3D
+var fog_visuals: MultiMeshInstance3D
 var car: Node3D
 var fire_car: Node3D
 var fire_engine_nodes: Dictionary = {}
@@ -622,6 +623,7 @@ func build_world() -> void:
 	territory_visuals = Node3D.new()
 	territory_visuals.name = "ExpansionTerritory"
 	world.add_child(territory_visuals)
+	build_fog_overlay()
 	construction_root = Node3D.new()
 	construction_root.name = "ConstructionWorksite"
 	world.add_child(construction_root)
@@ -843,6 +845,36 @@ func is_in_compact_road_square(col: int, row: int) -> bool:
 					return true
 	return false
 
+func build_fog_overlay() -> void:
+	fog_visuals = MultiMeshInstance3D.new()
+	fog_visuals.name = "FogOfWar"
+	fog_visuals.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	world.add_child(fog_visuals)
+
+func update_fog_overlay() -> void:
+	if fog_visuals == null:
+		return
+	var transforms: Array[Transform3D] = []
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
+			if not game.territory.is_revealed(col, row):
+				transforms.append(Transform3D(Basis.IDENTITY, game.territory.cell_world(col, row) + Vector3(0, 6.2, 0)))
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.instance_count = transforms.size()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(TerritoryGrid.CELL_SIZE, TerritoryGrid.CELL_SIZE)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.93, 0.96, 0.96, 0.90)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	plane.material = material
+	multi.mesh = plane
+	for index in range(transforms.size()):
+		multi.set_instance_transform(index, transforms[index])
+	fog_visuals.multimesh = multi
+
 func redraw_territory() -> void:
 	var signature := JSON.stringify(game.territory.data()) + JSON.stringify(game.fire_ruins) + JSON.stringify(game.fire_damage) + str([quality_mode, game.language, game.signal_fixed, game.transit.active, game.transit.funded, game.transit.stops])
 	if signature == territory_signature:
@@ -977,6 +1009,7 @@ func redraw_territory() -> void:
 		var lot_size := territory_building_visual_size(entry)
 		Art.box(object, Vector3(0, 0.14, 0), Vector3(lot_size.x, 0.12, lot_size.y), base_color)
 	Art.batch(tile_visuals)
+	update_fog_overlay()
 
 func road_topology(links: Array[Vector2i]) -> String:
 	var horizontal := Vector2i.LEFT in links or Vector2i.RIGHT in links
@@ -1126,6 +1159,10 @@ func map_input(event: InputEvent) -> void:
 	if hit == null:
 		if selection_kind not in ["", "territory", "stop_place"]:
 			close_sheet()
+		return
+	var hit_col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
+	var hit_row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
+	if game.territory.in_bounds(hit_col, hit_row) and not game.territory.is_revealed(hit_col, hit_row):
 		return
 	if selection_kind == "territory":
 		# The visible tile is centered on `cell_world`.  Ray intersections can

@@ -994,7 +994,7 @@ func redraw_territory() -> void:
 					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
 					road_light.interaction_area.collision_layer = 0
 	for entry: Dictionary in game.territory.buildings:
-		if entry.row < TerritoryGrid.EXPANSION_ROWS.x or entry.row > TerritoryGrid.EXPANSION_ROWS.y:
+		if entry.row < game.territory.expansion_rows.x or entry.row > game.territory.expansion_rows.y:
 			continue
 		var position: Vector3 = game.territory.building_center(entry)
 		var object := create_object(territory_visuals, entry.type_id, entry.instance_id, position)
@@ -1172,7 +1172,7 @@ func map_input(event: InputEvent) -> void:
 		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
 		if game.territory.in_bounds(col, row):
 			var selected_cell := Vector2i(col, row)
-			var in_expansion := col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
+			var in_expansion := col in range(game.territory.expansion_cols.x, game.territory.expansion_cols.y + 1) and row in range(game.territory.expansion_rows.x, game.territory.expansion_rows.y + 1)
 			if in_expansion:
 				select_territory_cell(selected_cell)
 		return
@@ -1197,7 +1197,7 @@ func map_input(event: InputEvent) -> void:
 		var tapped_state: String = game.territory.state_at(picked_col, picked_row)
 		if tapped_state == "road":
 			return
-		if tapped_state in ["forest", "free"] and picked_col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and picked_row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+		if tapped_state in ["forest", "free"] and picked_col in range(game.territory.expansion_cols.x, game.territory.expansion_cols.y + 1) and picked_row in range(game.territory.expansion_rows.x, game.territory.expansion_rows.y + 1):
 			open_land_cell(tapped_cell)
 			return
 	for kind in ["leak", "signal"]:
@@ -2872,8 +2872,8 @@ func build_district_sheet() -> void:
 		for entry: Dictionary in game.all_buildings():
 			if not entry.has("legacy_plot"):
 				has_new_house = has_new_house or entry.type_id == "house"
-		for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
-			for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
+		for row in range(game.territory.expansion_rows.x, game.territory.expansion_rows.y + 1):
+			for col in range(game.territory.expansion_cols.x, game.territory.expansion_cols.y + 1):
 				if game.territory.state_at(col, row) == "road":
 					has_new_road = true
 		if not has_new_road:

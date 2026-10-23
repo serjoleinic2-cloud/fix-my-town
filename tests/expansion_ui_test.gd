@@ -39,6 +39,10 @@ func run() -> void:
 		var initial_catalog: Control = scene.sheet
 		check(initial_catalog.size.y <= 480, "Catalog with a single house stays compact and does not cover most of the map")
 		check(initial_catalog.find_child("ModelPreview_house", true, false) != null, "Building catalog uses a live VisualRoot model preview instead of a placeholder image")
+		var category_selector: OptionButton = initial_catalog.find_child("CatalogCategorySelector", true, false)
+		var category_style := category_selector.get_theme_stylebox("normal") as StyleBoxFlat
+		check(category_style != null and category_style.bg_color.g > category_style.bg_color.r * 0.95 and category_style.bg_color.g > category_style.bg_color.b, "Building category dropdown uses a light green background")
+		check(initial_catalog.find_child("CatalogItemsScroll", true, false) != null, "Building cards are hosted by a scrollable list")
 		scene.set_catalog_category("services")
 		var police_card: Button = scene.sheet.find_child("CatalogItem_police_station", true, false)
 		check(police_card != null and police_card.disabled, "Police station remains visible but locked at city level one")

@@ -110,6 +110,9 @@ var construction_bar_fill: MeshInstance3D
 var catalog_target_road := Vector2i(-1, -1)
 var catalog_scroll: ScrollContainer
 var catalog_scroll_dragging: bool = false
+var catalog_drag_start := Vector2.ZERO
+var catalog_drag_last := Vector2.ZERO
+var catalog_drag_moved: bool = false
 var selected_vehicle_type: String = ""
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
@@ -1464,10 +1467,18 @@ func build_catalog_sheet() -> void:
 	category_selector.name = "CatalogCategorySelector"
 	category_selector.custom_minimum_size.y = 48
 	category_selector.add_theme_font_size_override("font_size", 18)
+	category_selector.add_theme_stylebox_override("normal", style(Color("e3f1d8"), 12, Color("a9c98e")))
+	category_selector.add_theme_stylebox_override("hover", style(Color("d4ebc5"), 12, Color("8ebd78")))
+	category_selector.add_theme_stylebox_override("pressed", style(Color("c6e3b4"), 12, Color("78aa67")))
 	for category_index in range(CATALOG_CATEGORIES.size()):
 		var category: String = CATALOG_CATEGORIES[category_index]
 		category_selector.add_item(t("category_" + category), category_index)
 	category_selector.select(CATALOG_CATEGORIES.find(catalog_category))
+	var category_popup := category_selector.get_popup()
+	category_popup.add_theme_stylebox_override("panel", style(Color("e3f1d8"), 12, Color("a9c98e")))
+	category_popup.add_theme_color_override("font_color", INK)
+	category_popup.add_theme_color_override("font_hover_color", INK)
+	category_popup.add_theme_color_override("font_pressed_color", INK)
 	category_selector.item_selected.connect(func(index: int): set_catalog_category(CATALOG_CATEGORIES[index]))
 	sheet_column.add_child(category_selector)
 	var scroll := ScrollContainer.new()
@@ -1490,6 +1501,54 @@ func build_catalog_sheet() -> void:
 	if catalog_target_plot >= 0:
 		label(16, sheet_column, tr_text("Свободный участок №%d выбран на карте", "Vacant lot %d is selected on the map") % (catalog_target_plot + 1))
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelCatalog"
+
+func _input(event: InputEvent) -> void:
+	# Карточки каталога являются кнопками и забирают GUI-события себе. Здесь
+	# перехватываем только жест внутри списка, чтобы свайп по карточке тоже
+	# прокручивал каталог, а короткое касание по-прежнему нажимало карточку.
+	if selection_kind != "catalog" or catalog_scroll == null or not is_instance_valid(catalog_scroll) or not catalog_scroll.visible:
+		return
+	var point := Vector2.ZERO
+	var pressed := false
+	var released := false
+	var moved := false
+	if event is InputEventScreenTouch:
+		point = event.position / viewport_container.stretch_shrink
+		pressed = event.pressed
+		released = not event.pressed
+	elif event is InputEventScreenDrag:
+		point = event.position / viewport_container.stretch_shrink
+		moved = true
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		point = event.position / viewport_container.stretch_shrink
+		pressed = event.pressed
+		released = not event.pressed
+	elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+		point = event.position / viewport_container.stretch_shrink
+		moved = true
+	else:
+		return
+	if not catalog_scroll.get_global_rect().has_point(point):
+		return
+	if pressed:
+		catalog_scroll_dragging = true
+		catalog_drag_start = point
+		catalog_drag_last = point
+		catalog_drag_moved = false
+		return
+	if moved and catalog_scroll_dragging:
+		var dy := point.y - catalog_drag_last.y
+		if absf(point.y - catalog_drag_start.y) > 8.0 * render_scale:
+			catalog_drag_moved = true
+		catalog_scroll.scroll_vertical = clampi(catalog_scroll.scroll_vertical - roundi(dy), 0, int(catalog_scroll.get_v_scroll_bar().max_value))
+			get_viewport().set_input_as_handled()
+		catalog_drag_last = point
+		return
+	if released:
+		if catalog_drag_moved:
+			get_viewport().set_input_as_handled()
+		catalog_scroll_dragging = false
+		catalog_drag_moved = false
 
 func _on_catalog_scroll_input(event: InputEvent) -> void:
 	if catalog_scroll == null:

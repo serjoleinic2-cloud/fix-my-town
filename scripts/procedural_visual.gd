@@ -12,6 +12,8 @@ func _ready() -> void:
 	if visual_type == "house":
 		house(seed_value)
 		rotation.y = (seed_value % 4) * PI / 2
+	elif visual_type == "ruins":
+		ruins(seed_value)
 	elif visual_type == "cafe":
 		cafe()
 	elif visual_type == "depot":
@@ -31,6 +33,13 @@ func _ready() -> void:
 		van()
 	elif visual_type == "fire_engine":
 		fire_engine()
+	elif visual_type == "police_car":
+		civilian_vehicle(false, seed_value)
+		Art.box(self, Vector3(0, 1.34, -0.25), Vector3(1.6, 0.14, 1.9), Color("315b88"))
+		var beacon_red := Art.box(self, Vector3(-0.23, 1.92, 0.2), Vector3(0.2, 0.12, 0.12), Color("dc4242"))
+		beacon_red.name = "BeaconRed"
+		var beacon_blue := Art.box(self, Vector3(0.23, 1.92, 0.2), Vector3(0.2, 0.12, 0.12), Color("438ee8"))
+		beacon_blue.name = "BeaconBlue"
 	elif visual_type == "traffic_signal":
 		make_signals()
 	elif visual_type == "bus_stop":
@@ -180,10 +189,31 @@ func fire_engine() -> void:
 	Art.box(self, Vector3(0, 1.31, -1.78), Vector3(1.52, 0.9, 0.08), Color("dce2db"))
 	Art.box(self, Vector3(0, 1.38, -0.4), Vector3(0.15, 0.18, 1.65), Color("f3d463"))
 	Art.cylinder(self, Vector3(0, 2.02, 0.25), 0.13, 0.12, Color("4c9de0"), 1, 8)
+	var beacon_left := Art.box(self, Vector3(-0.28, 2.02, 0.25), Vector3(0.22, 0.12, 0.14), Color("dc4242"))
+	beacon_left.name = "BeaconRed"
+	var beacon_right := Art.box(self, Vector3(0.28, 2.02, 0.25), Vector3(0.22, 0.12, 0.14), Color("438ee8"))
+	beacon_right.name = "BeaconBlue"
 	for x in [-0.78, 0.78]:
 		for z in [-1.15, 0.95]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.43, z), 0.4, 0.24, Color("3a3b3a"), 0.8, 12)
 			wheel.rotation.z = PI / 2
+
+func ruins(seed_value: int) -> void:
+	Art.box(self, Vector3(0, 0.12, 0), Vector3(7.8, 0.22, 7.8), Color("827b70"))
+	for i in range(12):
+		var x := float((i * 17 + seed_value) % 65) / 10.0 - 3.2
+		var z := float((i * 23 + seed_value / 3) % 65) / 10.0 - 3.2
+		var height := 0.28 + float(i % 4) * 0.16
+		var rubble := Art.box(self, Vector3(x, 0.24 + height / 2, z), Vector3(0.6 + float(i % 3) * 0.2, height, 0.45 + float(i % 2) * 0.24), Color("9a8978") if i % 2 == 0 else Color("6e716d"))
+		rubble.rotation.y = float(i * 11 % 40) * PI / 180.0
+
+func set_emergency_lights(enabled: bool, time_value: float = 0.0) -> void:
+	var red := get_node_or_null("BeaconRed") as MeshInstance3D
+	var blue := get_node_or_null("BeaconBlue") as MeshInstance3D
+	if red != null:
+		red.visible = enabled and int(time_value * 8.0) % 2 == 0
+	if blue != null:
+		blue.visible = enabled and int(time_value * 8.0) % 2 == 1
 
 func park() -> void:
 	if visual_level >= 2:

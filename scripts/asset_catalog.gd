@@ -3,6 +3,7 @@ extends RefCounted
 # Постоянные игровые типы и единственная точка выбора визуальных сцен.
 const TYPES = {
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
+	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 220, "footprint": Vector2(9, 9)},
 	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "cost": 260, "footprint": Vector2(9, 9)},
@@ -12,6 +13,7 @@ const TYPES = {
 	"park": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/park.tscn", "cost": 100, "mood": 5, "footprint": Vector2(9, 9)},
 	"repair_van": {"scene": "res://scenes/visuals/repair_van.tscn", "footprint": Vector2(1.8, 3.0)},
 	"fire_engine": {"scene": "res://scenes/visuals/fire_engine.tscn", "footprint": Vector2(2.2, 4.2)},
+	"police_car": {"scene": "res://scenes/visuals/police_car.tscn", "footprint": Vector2(1.8, 3.0)},
 	"civilian_car": {"scene": "res://scenes/visuals/civilian_car.tscn", "footprint": Vector2(1.5, 2.6)},
 	"bus_stop": {"scene": "res://scenes/visuals/bus_stop.tscn", "cost": 40, "footprint": Vector2(8, 5)},
 	"city_bus": {"scene": "res://scenes/visuals/city_bus.tscn", "footprint": Vector2(1.8, 4.8)},

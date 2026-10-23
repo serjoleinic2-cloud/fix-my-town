@@ -10,11 +10,19 @@ func check(value: bool, message: String) -> void:
 	if not value:
 		failures.append(message)
 
+func build_service(game: RefCounted, col: int, kind: String) -> String:
+	for row in [19, 20]:
+		for x in [col, col + 1]:
+			if game.territory.state_at(x, row) == "forest":
+				game.clear_grid_cell(x, row)
+	check(game.build_grid_service(col, 19, kind), "Player can build %s on connected cleared land" % kind)
+	return str(game.territory.building_at(col, 19).instance_id)
+
 func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	for kind in ["fire_station", "fire_engine"]:
+	for kind in ["fire_station", "fire_engine", "police_station", "police_car", "ruins"]:
 		var wrapper: PackedScene = load(Catalog.scene_path(kind))
 		check(wrapper != null, "%s resolves through the visual catalog" % kind)
 		if wrapper != null:
@@ -24,71 +32,138 @@ func run() -> void:
 			await process_frame
 			check(visual.visual_root.get_child_count() > 0, "%s creates its replaceable VisualRoot model" % kind)
 			visual.queue_free()
+	var ruin_test: Node3D = GameObjectScene.instantiate()
+	root.add_child(ruin_test)
+	ruin_test.setup("house", "ruin_visual_swap")
+	ruin_test.set_ruined(true)
+	check(ruin_test.type_id == "house" and ruin_test.visual_root.get_child(0).visual_type == "ruins", "Ruin appearance swaps independently of the house gameplay type")
+	ruin_test.set_ruined(false)
+	check(ruin_test.type_id == "house" and ruin_test.visual_root.get_child(0).visual_type == "house", "Rebuilding restores the house visual without changing its stable ID")
+	ruin_test.queue_free()
 
 	var save_path := "user://fire_scenario_test.json"
 	var game = Simulation.new()
 	game.save_path = save_path
-	game.budget = 1000
-	for dy in range(2):
-		for dx in range(2):
-			check(game.clear_grid_cell(12 + dx, 19 + dy), "clear a connected lot for the player-built station")
-	check(game.build_grid_service(12, 19, "fire_station"), "player builds the fire station required for dispatch")
-	var station_id: String = game.territory.building_at(12, 19).instance_id
-	check(game.start_fire(), "one opening fire starts at its stable house ID")
-	check(not game.start_fire(), "the scenario allows only one ignition sequence")
-	check(game.fires[Simulation.FIRST_FIRE_TARGET].phase == "warning", "fire begins with a readable warning stage")
+	game.budget = 2000
+	var station_id := build_service(game, 12, "fire_station")
+	var police_id := build_service(game, 16, "police_station")
+	var income_before := game.income()
+	check(not game.has_service_building("hospital"), "Unplaced service buildings do not appear automatically")
+	check(game.job == "", "Fire warning does not dispatch a vehicle automatically")
+	check(game.start_fire(), "Opening incident starts at its stable house ID")
+	check(game.fires[Simulation.FIRST_FIRE_TARGET].phase == "warning", "Ignition begins with a visible warning stage")
 	var warning_before: float = game.fire_warning_left(Simulation.FIRST_FIRE_TARGET)
 	var offline_reload = Simulation.new()
 	offline_reload.save_path = save_path
-	check(offline_reload.load_game(), "warning state loads")
-	check(is_equal_approx(offline_reload.fire_warning_left(Simulation.FIRST_FIRE_TARGET), warning_before), "closed-game time does not advance the warning")
-	for i in range(50):
+	check(offline_reload.load_game(), "Warning state loads from the player-built station save")
+	check(is_equal_approx(offline_reload.fire_warning_left(Simulation.FIRST_FIRE_TARGET), warning_before), "Closed-game time does not advance warning")
+	for i in range(70):
 		offline_reload.tick(1.0, true)
-	check(offline_reload.fires.has(Simulation.FIRST_FIRE_NEIGHBOR), "unattended fire warns the neighboring house before spread")
-	check(offline_reload.house_damage(Simulation.FIRST_FIRE_TARGET) > 0, "active fire damages only its named building")
-	check(offline_reload.fires[Simulation.FIRST_FIRE_NEIGHBOR].phase == "burning", "neighbor warning advances to a spreading fire while ignored")
-	check(offline_reload.house_damage(Simulation.FIRST_FIRE_NEIGHBOR) > 0, "spreading fire damages the neighboring property")
-	check(offline_reload.record_residents(offline_reload.legacy_record(0)) < game.record_residents(game.legacy_record(0)), "fire damage reduces residents only in affected houses")
-	check(offline_reload.income() < game.income(), "fire damage reduces city income")
-	offline_reload.save_game()
-	check(offline_reload.dispatch_fire(), "fire station can dispatch on the shared road network")
-	check(offline_reload.job == "fire" and offline_reload.target_instance_id == Simulation.FIRST_FIRE_TARGET, "fire engine receives the stable target assignment")
-	check(offline_reload.depot_instance_id == station_id and not offline_reload.route.is_empty(), "vehicle keeps its player-built station and planned route")
+	check(offline_reload.house_damage(Simulation.FIRST_FIRE_TARGET) > 0, "Fire damages only its named building")
+	check(offline_reload.fires.has(Simulation.FIRST_FIRE_NEIGHBOR), "Unattended fire warns a nearby house before spreading")
+	check(str(offline_reload.fires.get(Simulation.FIRST_FIRE_NEIGHBOR, {}).get("phase", "")) == "burning", "The warned neighboring house becomes a second burning incident")
+	check(offline_reload.house_damage(Simulation.FIRST_FIRE_NEIGHBOR) > 0, "Spreading fire damages the neighboring property")
+	check(offline_reload.record_residents(offline_reload.legacy_record(0)) < game.record_residents(game.legacy_record(0)), "Damage reduces residents in affected homes")
+	check(offline_reload.income() < income_before, "Fire damage reduces city income")
+	check(game.start_fire(Simulation.FIRST_FIRE_NEIGHBOR), "A second house can burn at the same time")
+	check(not game.start_fire(Simulation.FIRST_FIRE_TARGET), "One house cannot receive duplicate active fire incidents")
+	check(game.fires.size() == 2, "Concurrent fire count is capped at two")
+	for identifier in game.fires:
+		game.fires[identifier].phase = "burning"
+		game.fires[identifier].warning_left = 0.0
+		game.fires[identifier].elapsed = 12.0
+		game.fires[identifier].spread_checked = true
+	game.save_game()
+	offline_reload = Simulation.new()
+	offline_reload.save_path = save_path
+	var loaded_second_scene: bool = offline_reload.load_game()
+	check(loaded_second_scene, "Two simultaneous fire states load")
+	check(offline_reload.can_dispatch_fire(Simulation.FIRST_FIRE_TARGET), "An available fire engine can be assigned to a selected fire")
+	check(offline_reload.dispatch_fire(Simulation.FIRST_FIRE_TARGET), "First fire engine dispatches on the common road network")
+	var second_dispatch: bool = offline_reload.dispatch_fire(Simulation.FIRST_FIRE_NEIGHBOR)
+	check(second_dispatch, "Second fire engine can dispatch while the first is busy")
+	if offline_reload.fire_jobs.has(Simulation.FIRST_FIRE_NEIGHBOR):
+		offline_reload.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].repair_left = 500.0
+	check(offline_reload.job == "fire" and offline_reload.target_instance_id == Simulation.FIRST_FIRE_TARGET, "Primary engine retains its own target")
+	check(offline_reload.fire_jobs.has(Simulation.FIRST_FIRE_NEIGHBOR), "Second engine retains its separate target")
+	check(offline_reload.fire_assignment(Simulation.FIRST_FIRE_TARGET).vehicle_id != offline_reload.fire_assignment(Simulation.FIRST_FIRE_NEIGHBOR).vehicle_id, "Each burning house receives a different vehicle")
+	check(offline_reload.depot_instance_id == station_id and offline_reload.fire_assignment(Simulation.FIRST_FIRE_NEIGHBOR).depot_instance_id == station_id, "Both engines dispatch from the player-built station")
+	check(not offline_reload.route.is_empty() and not offline_reload.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].route.is_empty(), "Both trucks receive saved road routes")
 
+	offline_reload.save_game()
 	var in_transit = Simulation.new()
 	in_transit.save_path = save_path
-	check(in_transit.load_game(), "active fire departure saves and loads")
-	check(in_transit.job == "fire" and in_transit.vehicle.distance_to(offline_reload.vehicle) < 0.001 and in_transit.route.size() == offline_reload.route.size(), "job phase, vehicle and route restore")
+	check(in_transit.load_game(), "Two outbound fire assignments load")
+	check(in_transit.fire_jobs.has(Simulation.FIRST_FIRE_NEIGHBOR) and in_transit.route.size() == offline_reload.route.size(), "Both vehicle routes and phases restore")
 	var ticks := 0
-	while in_transit.job_phase == "travel" and ticks < 500:
+	while (in_transit.job_phase == "travel" or in_transit.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].phase == "travel") and ticks < 400:
 		in_transit.tick(1.0, true)
 		ticks += 1
-	check(in_transit.job_phase == "repair", "engine travels along the route and reaches the burning property")
-	var damage_before := in_transit.house_damage(Simulation.FIRST_FIRE_TARGET)
-	check(damage_before > 0, "burning property accumulates damage while the engine is travelling")
+	check(in_transit.job_phase == "repair" and in_transit.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].phase == "repair", "Both engines arrive at their assigned houses")
+	in_transit.repair_left = 4.0
+	in_transit.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].repair_left = 500.0
+	in_transit.save_game()
+	check(in_transit.jam_cleared.has(Simulation.FIRST_FIRE_NEIGHBOR) and not in_transit.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR], "A stationary fire engine occupies its road until police clear it")
+	check(in_transit.dispatch_police(Simulation.FIRST_FIRE_NEIGHBOR), "Police can be called to a blocked fire location")
+	check(in_transit.police_job.depot_instance_id == police_id, "Police respond from the player-built police station")
+	var police_reload = Simulation.new()
+	police_reload.save_path = save_path
+	check(police_reload.load_game() and not police_reload.police_job.is_empty(), "Police route and clearance phase survive reload")
+	var police_ticks := 0
+	while police_reload.police_job.phase == "travel" and police_ticks < 400:
+		police_reload.tick(1.0, true)
+		police_ticks += 1
+	check(police_reload.police_job.phase == "clearing", "Police reaches the selected roadblock")
+	for i in range(4):
+		police_reload.tick(1.0, true)
+	check(police_reload.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR], "Police clears the fire-engine blockage")
+	check(police_reload.police_job.phase == "return", "Police returns to its own station after clearing the lane")
+	var clear_reload = Simulation.new()
+	clear_reload.save_path = save_path
+	var clear_loaded: bool = clear_reload.load_game()
+	check(clear_loaded, "Cleared lane and returning police state restore")
+	check(clear_reload.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR] and clear_reload.police_job.phase == "return", "The completed road clearance persists")
+	clear_reload.repair_left = 0.5
+	clear_reload.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].repair_left = 0.5
+	var return_jobs := 0
+	while not clear_reload.fire_jobs.is_empty() and return_jobs < 400:
+		clear_reload.tick(1.0, true)
+		return_jobs += 1
+	check(not clear_reload.fires.has(Simulation.FIRST_FIRE_TARGET), "Primary crew extinguishes only its assigned incident")
+	check(not clear_reload.fires.has(Simulation.FIRST_FIRE_NEIGHBOR), "Secondary crew extinguishes its own assigned incident")
+	check(clear_reload.fire_jobs.is_empty(), "Secondary crew finishes its separate return trip")
+	check(clear_reload.house_damage(Simulation.FIRST_FIRE_TARGET) > 0, "Extinguished homes remain damaged and recoverable")
+	var damage_stopped := clear_reload.house_damage(Simulation.FIRST_FIRE_TARGET)
 	for i in range(5):
-		in_transit.tick(1.0, true)
-	check(in_transit.fires.is_empty() and in_transit.job_phase == "return", "fire crew extinguishes the incident before returning")
-	check(in_transit.route.back().distance_to(Simulation.DistrictWorld.logical_position(in_transit.fire_station_world())) < 0.01, "return route ends at the fire station")
+		clear_reload.tick(1.0, true)
+	check(clear_reload.house_damage(Simulation.FIRST_FIRE_TARGET) == damage_stopped, "Extinguished house stops accumulating damage")
+	var damaged_save = Simulation.new()
+	damaged_save.save_path = save_path
+	check(damaged_save.load_game() and damaged_save.fires.is_empty(), "Extinguished state persists without replaying the incident")
+	var residents_damaged := damaged_save.population()
+	check(damaged_save.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A player can restore an extinguished home")
+	check(damaged_save.population() > residents_damaged, "Restoration returns residents")
 
-	var returning = Simulation.new()
-	returning.save_path = save_path
-	check(returning.load_game(), "extinguished damage and return trip load")
-	check(returning.job == "fire" and returning.job_phase == "return" and returning.fires.is_empty(), "return assignment survives restart without restarting fire")
-	var return_ticks := 0
-	while returning.job != "" and return_ticks < 500:
-		returning.tick(1.0, true)
-		return_ticks += 1
-	check(returning.job == "" and returning.depot_instance_id == "pine_district_legacy_2", "fire engine returns and becomes available")
-	check(returning.house_damage(Simulation.FIRST_FIRE_TARGET) > 0, "fire leaves recoverable building damage")
-	var residents_before := returning.population()
-	check(returning.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "extinguished house can be restored")
-	check(returning.population() > residents_before, "repair restores residents affected by damage")
+	# Ignore a third ignition until it reaches ruin; the result must survive a restart.
+	check(damaged_save.start_fire(Simulation.FIRST_FIRE_TARGET), "A repaired home may suffer a later incident")
+	for i in range(190):
+		damaged_save.tick(1.0, true)
+	check(damaged_save.is_ruined(Simulation.FIRST_FIRE_TARGET), "100 percent fire damage leaves persistent ruins")
+	check(damaged_save.record_residents(damaged_save.legacy_record(0)) == 0, "Destroyed house loses its residents")
+	var ruined_load = Simulation.new()
+	ruined_load.save_path = save_path
+	damaged_save.save_game()
+	check(ruined_load.load_game() and ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Ruins survive save and reload")
+	check(ruined_load.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A ruin can be explicitly rebuilt for its restoration price")
+	check(not ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Rebuild removes the ruin state")
 	var final_load = Simulation.new()
 	final_load.save_path = save_path
-	check(final_load.load_game() and final_load.house_damage(Simulation.FIRST_FIRE_TARGET) == 0, "restoration persists after reload")
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path + ".tmp"))
+	ruined_load.save_game()
+	check(final_load.load_game() and not final_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Rebuilt home is saved")
+	for suffix in ["", ".tmp"]:
+		var absolute := ProjectSettings.globalize_path(save_path + suffix)
+		if FileAccess.file_exists(absolute):
+			DirAccess.remove_absolute(absolute)
 	if failures.is_empty():
 		print("FIRE SCENARIO CHECKS: PASS")
 		quit(0)

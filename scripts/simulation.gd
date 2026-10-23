@@ -27,12 +27,17 @@ var income_clock: float = 0.0
 var completed: bool = false
 var target_instance_id: String = ""
 var depot_instance_id: String = "pine_district_legacy_2"
+var job_vehicle_id: String = ""
 const FIRE_STATION_ID := "pine_district_fire_station"
 const FIRST_FIRE_TARGET := "pine_district_legacy_0"
-const FIRST_FIRE_NEIGHBOR := "pine_district_legacy_1"
+const FIRST_FIRE_NEIGHBOR := "pine_district_legacy_4"
 var fire_triggered: bool = false
 var fires: Dictionary = {}
 var fire_damage: Dictionary = {}
+var fire_ruins: Dictionary = {}
+var fire_jobs: Dictionary = {}
+var jam_cleared: Dictionary = {}
+var police_job: Dictionary = {}
 var save_path: String = SAVE_PATH
 
 func _init() -> void:
@@ -414,15 +419,40 @@ func is_house_id(identifier: String) -> bool:
 func house_damage(identifier: String) -> int:
 	return int(fire_damage.get(identifier, 0))
 
+func is_ruined(identifier: String) -> bool:
+	return bool(fire_ruins.get(identifier, false))
+
+func fire_assignments() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if job == "fire":
+		result.append({"instance_id": target_instance_id, "vehicle_id": job_vehicle_id if job_vehicle_id != "" else depot_instance_id + "_engine_1", "depot_instance_id": depot_instance_id,
+			"phase": job_phase, "route": route, "route_index": route_index, "vehicle": vehicle, "repair_left": repair_left,
+			"primary": true, "jam_cleared": bool(jam_cleared.get(target_instance_id, false))})
+	for identifier in fire_jobs:
+		var assignment: Dictionary = fire_jobs[identifier].duplicate(false)
+		assignment.instance_id = str(identifier)
+		assignment.primary = false
+		assignment.jam_cleared = bool(jam_cleared.get(str(identifier), false))
+		result.append(assignment)
+	return result
+
+func fire_assignment(identifier: String) -> Dictionary:
+	for assignment in fire_assignments():
+		if assignment.instance_id == identifier:
+			return assignment
+	return {}
+
 func start_fire(identifier: String = FIRST_FIRE_TARGET) -> bool:
-	if fire_triggered or not fires.is_empty() or not is_house_id(identifier):
+	if fires.size() >= 2 or fires.has(identifier) or is_ruined(identifier) or not is_house_id(identifier):
 		return false
 	fire_triggered = true
-	fires[identifier] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1}
+	fires[identifier] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1, "spread_checked": false}
 	save_game()
 	return true
 
 func fire_target() -> String:
+	if fires.has(FIRST_FIRE_TARGET):
+		return FIRST_FIRE_TARGET
 	for identifier in fires:
 		return str(identifier)
 	return ""
@@ -438,32 +468,90 @@ func fire_warning_left(identifier: String) -> float:
 
 func repair_fire_damage(identifier: String) -> bool:
 	var damage := house_damage(identifier)
-	var price := 40 + damage
-	if damage <= 0 or not fires.is_empty() or job != "" or budget < price:
+	var price := 120 if is_ruined(identifier) else 40 + damage
+	if damage <= 0 or not fires.is_empty() or job != "" or not fire_jobs.is_empty() or budget < price:
 		return false
 	budget -= price
 	fire_damage.erase(identifier)
+	fire_ruins.erase(identifier)
+	jam_cleared.erase(identifier)
 	save_game()
 	return true
 
-func dispatch_fire() -> bool:
-	var identifier := fire_target()
-	var station := fire_station_record()
-	if job != "" or station.is_empty() or identifier == "" or fires[identifier].phase not in ["warning", "burning"]:
+func fire_route_from_station(station_position: Vector3, target_position: Vector3) -> Array:
+	var start := territory.nearest_road(station_position)
+	var finish := territory.nearest_road(target_position)
+	var path := territory.road_path(start, finish)
+	if path.is_empty() or territory.road_path(finish, start).is_empty():
+		return []
+	return logical_route(path)
+
+func dispatch_fire(identifier: String = "") -> bool:
+	if identifier == "":
+		for key in fires:
+			if fire_assignment(str(key)).is_empty():
+				identifier = str(key)
+				break
+	var fire: Dictionary = fires.get(identifier, {})
+	if identifier == "" or fire.is_empty() or fire.phase not in ["warning", "burning"] or fire_ruins.has(identifier) or not fire_assignment(identifier).is_empty():
 		return false
-	var planned := route_between_world(station.position, building_world_for_id(identifier))
+	var used: Dictionary = {}
+	for assignment in fire_assignments():
+		used[assignment.vehicle_id] = true
+	var selected_station: Dictionary = {}
+	var engine_id := ""
+	for station in territory.buildings:
+		if station.type_id != "fire_station":
+			continue
+		for slot in range(2):
+			var candidate_id := "%s_engine_%d" % [station.instance_id, slot + 1]
+			if not used.has(candidate_id):
+				selected_station = station.duplicate(true)
+				selected_station.position = territory.building_center(station)
+				engine_id = candidate_id
+				break
+		if engine_id != "":
+			break
+	# A pre-service-building save may still have an active legacy job, but it cannot start a new dispatch.
+	if selected_station.is_empty():
+		return false
+	var planned := fire_route_from_station(selected_station.position, building_world_for_id(identifier))
 	if planned.is_empty():
 		return false
-	job = "fire"
-	target_instance_id = identifier
-	depot_instance_id = station.instance_id
-	job_phase = "travel"
-	route = planned
-	vehicle = route[0]
-	route_index = 0
-	repair_left = 4.0
+	var assignment := {"vehicle_id": engine_id, "depot_instance_id": selected_station.instance_id, "phase": "travel",
+		"route": planned, "route_index": 0, "vehicle": planned[0], "repair_left": 4.0}
+	jam_cleared[identifier] = false
+	if job == "":
+		job = "fire"
+		target_instance_id = identifier
+		depot_instance_id = selected_station.instance_id
+		job_vehicle_id = engine_id
+		job_phase = "travel"
+		route = planned
+		vehicle = route[0]
+		route_index = 0
+		repair_left = 4.0
+	else:
+		fire_jobs[identifier] = assignment
 	save_game()
 	return true
+
+func can_dispatch_fire(identifier: String) -> bool:
+	if not fires.has(identifier) or not fire_assignment(identifier).is_empty():
+		return false
+	var used: Dictionary = {}
+	for assignment in fire_assignments():
+		used[assignment.vehicle_id] = true
+	for station in territory.buildings:
+		if station.type_id != "fire_station":
+			continue
+		var center: Vector3 = territory.building_center(station)
+		if fire_route_from_station(center, building_world_for_id(identifier)).is_empty():
+			continue
+		for slot in range(2):
+			if not used.has("%s_engine_%d" % [station.instance_id, slot + 1]):
+				return true
+	return false
 
 func dispatch_to_building(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
@@ -505,7 +593,69 @@ func dispatch(kind: String) -> bool:
 	save_game()
 	return true
 
-func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0) -> bool:
+func fire_spread_target(source_id: String) -> String:
+	var source := building_world_for_id(source_id)
+	var best_id := ""
+	var best_distance := 22.0
+	for entry in all_buildings():
+		if entry.type_id != "house" or entry.instance_id == source_id or fires.has(entry.instance_id) or is_ruined(entry.instance_id):
+			continue
+		var distance: float = entry.position.distance_to(source)
+		if distance < best_distance:
+			best_distance = distance
+			best_id = entry.instance_id
+	return best_id
+
+func return_route_for_fire(route_value: Array, station_id: String) -> Array:
+	var result: Array = route_value.duplicate()
+	result.reverse()
+	var station := territory.building_by_id(station_id)
+	if station.is_empty():
+		return result
+	var end_point := DistrictWorld.logical_position(territory.building_center(station))
+	if result.is_empty() or not result.back().is_equal_approx(end_point):
+		result.append(end_point)
+	return result
+
+func begin_primary_fire_return() -> void:
+	if job != "fire" or job_phase == "return":
+		return
+	route = return_route_for_fire(route, depot_instance_id)
+	route_index = 0
+	job_phase = "return"
+
+func begin_secondary_fire_return(identifier: String) -> void:
+	if not fire_jobs.has(identifier):
+		return
+	var assignment: Dictionary = fire_jobs[identifier]
+	if assignment.phase == "return":
+		return
+	assignment.route = return_route_for_fire(assignment.route, assignment.depot_instance_id)
+	assignment.route_index = 0
+	assignment.phase = "return"
+	fire_jobs[identifier] = assignment
+
+func dispatch_police(incident_id: String) -> bool:
+	if not jam_cleared.has(incident_id) or bool(jam_cleared[incident_id]) or not police_job.is_empty():
+		return false
+	var station: Dictionary = {}
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == "police_station":
+			station = entry.duplicate(true)
+			station.position = territory.building_center(entry)
+			break
+	if station.is_empty():
+		return false
+	var target := building_world_for_id(incident_id)
+	var planned := fire_route_from_station(station.position, target)
+	if planned.is_empty():
+		return false
+	police_job = {"incident_id": incident_id, "depot_instance_id": station.instance_id, "phase": "travel",
+		"route": planned, "route_index": 0, "vehicle": planned[0], "clear_left": 3.0}
+	save_game()
+	return true
+
+func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
 	for raw_id in fires.keys():
 		var identifier := str(raw_id)
@@ -522,8 +672,21 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 			fire.elapsed = float(fire.elapsed) + delta
 			fire_damage[identifier] = minf(100.0, float(fire_damage.get(identifier, 0.0)) + delta * 0.6)
 			fire.danger = clampi(1 + int(float(fire.elapsed) / 18.0), 1, 3)
-			if float(fire.elapsed) >= 12.0 and not fires.has(FIRST_FIRE_NEIGHBOR) and is_house_id(FIRST_FIRE_NEIGHBOR):
-				fires[FIRST_FIRE_NEIGHBOR] = {"phase": "warning", "warning_left": 16.0, "elapsed": 0.0, "danger": 1}
+			if float(fire.elapsed) >= 12.0 and not bool(fire.get("spread_checked", false)):
+				fire.spread_checked = true
+				if fires.size() < 2:
+					var neighbor := fire_spread_target(identifier)
+					if neighbor != "":
+						fires[neighbor] = {"phase": "warning", "warning_left": 16.0, "elapsed": 0.0, "danger": 1, "spread_checked": false}
+			if house_damage(identifier) >= 100:
+				fire_ruins[identifier] = true
+				fires.erase(identifier)
+				if job == "fire" and target_instance_id == identifier:
+					begin_primary_fire_return()
+				if fire_jobs.has(identifier):
+					begin_secondary_fire_return(identifier)
+				changed = true
+				continue
 		fires[identifier] = fire
 		if old_phase != fire.phase or old_warning != ceili(float(fire.warning_left)) or old_damage != house_damage(identifier) or old_severity != fire_severity(identifier):
 			changed = true
@@ -550,6 +713,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 			job = ""
 			target_instance_id = ""
 			depot_instance_id = "pine_district_legacy_2"
+			job_vehicle_id = ""
 			job_phase = "travel"
 			changed = true
 		else:
@@ -565,12 +729,80 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 					if not entry.is_empty():
 						entry.inspected = true
 				elif job == "fire":
-					fires.clear()
+					fires.erase(target_instance_id)
 				job_phase = "return"
-				route.reverse()
-				route.append(DistrictWorld.logical_position(job_depot_world()))
-				route_index = 0
+				if job == "fire":
+					route = return_route_for_fire(route, depot_instance_id)
+					route_index = 0
+				else:
+					route.reverse()
+					route.append(DistrictWorld.logical_position(job_depot_world()))
+					route_index = 0
 				check_complete()
+				changed = true
+	for identifier in fire_jobs.keys():
+		var assignment: Dictionary = fire_jobs[identifier]
+		if assignment.phase != "return" and (is_ruined(str(identifier)) or not fires.has(identifier)):
+			begin_secondary_fire_return(str(identifier))
+			assignment = fire_jobs[identifier]
+		if int(assignment.route_index) < assignment.route.size():
+			if movement_allowed:
+				var target_point: Vector3 = assignment.route[int(assignment.route_index)]
+				var current_point: Vector3 = assignment.vehicle
+				var fraction: float = clampf(float(fire_motion.get(str(identifier), 1.0)), 0, 1)
+				assignment.vehicle = current_point.move_toward(target_point, delta * 2.6 * fraction)
+				if assignment.vehicle.distance_to(target_point) < 0.01:
+					assignment.route_index = int(assignment.route_index) + 1
+					if int(assignment.route_index) >= assignment.route.size() and assignment.phase == "travel":
+						assignment.phase = "repair"
+						changed = true
+		else:
+			if assignment.phase == "return":
+				jam_cleared.erase(str(identifier))
+				fire_jobs.erase(identifier)
+				changed = true
+				continue
+			if assignment.phase == "travel":
+				assignment.phase = "repair"
+				changed = true
+			else:
+				assignment.repair_left = float(assignment.repair_left) - delta
+				if float(assignment.repair_left) <= 0:
+					fires.erase(identifier)
+					assignment.route = return_route_for_fire(assignment.route, assignment.depot_instance_id)
+					assignment.route_index = 0
+					assignment.phase = "return"
+					changed = true
+		fire_jobs[identifier] = assignment
+	if not police_job.is_empty():
+		if police_job.route_index < police_job.route.size():
+			if movement_allowed:
+				var police_target: Vector3 = police_job.route[int(police_job.route_index)]
+				var police_position: Vector3 = police_job.vehicle
+				var police_fraction: float = clampf(float(fire_motion.get("police", 1.0)), 0, 1)
+				police_job.vehicle = police_position.move_toward(police_target, delta * 2.8 * police_fraction)
+				if police_job.vehicle.distance_to(police_target) < 0.01:
+					police_job.route_index += 1
+					if int(police_job.route_index) >= police_job.route.size():
+						police_job.phase = "clearing"
+						changed = true
+		else:
+			if police_job.phase == "travel":
+				police_job.phase = "clearing"
+				changed = true
+			elif police_job.phase == "clearing":
+				police_job.clear_left = float(police_job.clear_left) - delta
+				if police_job.clear_left <= 0:
+					jam_cleared[police_job.incident_id] = true
+					police_job.route.reverse()
+					var return_station := territory.building_by_id(str(police_job.depot_instance_id))
+					if not return_station.is_empty():
+						police_job.route.append(DistrictWorld.logical_position(territory.building_center(return_station)))
+					police_job.route_index = 0
+					police_job.phase = "return"
+					changed = true
+			else:
+				police_job = {}
 				changed = true
 	if changed:
 		save_game()
@@ -587,11 +819,30 @@ func save_game() -> void:
 	var active_fires: Array = []
 	for identifier in fires:
 		var fire: Dictionary = fires[identifier]
-		active_fires.append({"id": str(identifier), "phase": fire.phase, "warning_left": fire.warning_left, "elapsed": fire.elapsed, "danger": fire.danger})
-	var data := {"version": 4, "levels": levels, "completed": completed, "city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
+		active_fires.append({"id": str(identifier), "phase": fire.phase, "warning_left": fire.warning_left, "elapsed": fire.elapsed, "danger": fire.danger, "spread_checked": bool(fire.get("spread_checked", false))})
+	var encoded_fire_jobs: Dictionary = {}
+	for identifier in fire_jobs:
+		var assignment: Dictionary = fire_jobs[identifier].duplicate(true)
+		var fire_points: Array = []
+		for point: Vector3 in assignment.route:
+			fire_points.append([point.x, point.y, point.z])
+		assignment.route = fire_points
+		var assigned_vehicle: Vector3 = assignment.vehicle
+		assignment.vehicle = [assigned_vehicle.x, assigned_vehicle.y, assigned_vehicle.z]
+		encoded_fire_jobs[str(identifier)] = assignment
+	var encoded_police_job := police_job.duplicate(true)
+	if not encoded_police_job.is_empty():
+		var police_points: Array = []
+		for point: Vector3 in encoded_police_job.route:
+			police_points.append([point.x, point.y, point.z])
+		encoded_police_job.route = police_points
+		var police_position: Vector3 = encoded_police_job.vehicle
+		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
+	var data := {"version": 6, "levels": levels, "completed": completed, "city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
-		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage}
+		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
+		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
 		return
@@ -606,7 +857,7 @@ func load_game() -> bool:
 	if file == null:
 		return false
 	var data = JSON.parse_string(file.get_as_text())
-	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4]:
+	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6]:
 		return false
 	var stored = data.get("buildings", [])
 	if not stored is Array or stored.size() != 24:
@@ -700,7 +951,9 @@ func load_game() -> bool:
 		for key in ["warning_left", "elapsed", "danger"]:
 			if not (row.get(key) is int or row.get(key) is float) or not is_finite(float(row[key])) or float(row[key]) < 0:
 				return false
-		loaded_fires[row.id] = {"phase": row.phase, "warning_left": clampf(float(row.warning_left), 0, 18), "elapsed": clampf(float(row.elapsed), 0, 100000), "danger": clampi(int(row.danger), 1, 3)}
+		if row.has("spread_checked") and typeof(row.spread_checked) != TYPE_BOOL:
+			return false
+		loaded_fires[row.id] = {"phase": row.phase, "warning_left": clampf(float(row.warning_left), 0, 18), "elapsed": clampf(float(row.elapsed), 0, 100000), "danger": clampi(int(row.danger), 1, 3), "spread_checked": bool(row.get("spread_checked", false))}
 	var loaded_damage: Dictionary = {}
 	var raw_damage: Variant = data.get("fire_damage", {})
 	if not raw_damage is Dictionary or raw_damage.size() > 24 + TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT:
@@ -710,6 +963,94 @@ func load_game() -> bool:
 		if not is_house_id_in(str(identifier), stored, loaded_territory) or not (value is int or value is float) or not is_finite(float(value)) or float(value) < 0 or float(value) > 100:
 			return false
 		loaded_damage[str(identifier)] = float(value)
+	var loaded_ruins: Dictionary = {}
+	var raw_ruins: Variant = data.get("fire_ruins", {})
+	if not raw_ruins is Dictionary or raw_ruins.size() > 24 + TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT:
+		return false
+	for identifier in raw_ruins:
+		if typeof(raw_ruins[identifier]) != TYPE_BOOL or not raw_ruins[identifier] or not is_house_id_in(str(identifier), stored, loaded_territory) or float(loaded_damage.get(str(identifier), 0.0)) < 100.0:
+			return false
+		loaded_ruins[str(identifier)] = true
+	if int(data.version) < 5:
+		for identifier in loaded_damage:
+			if float(loaded_damage[identifier]) >= 100.0:
+				loaded_ruins[str(identifier)] = true
+	var loaded_fire_jobs: Dictionary = {}
+	var raw_fire_jobs: Variant = data.get("fire_jobs", {})
+	if not raw_fire_jobs is Dictionary or raw_fire_jobs.size() > 2:
+		return false
+	for identifier in raw_fire_jobs:
+		var assignment: Variant = raw_fire_jobs[identifier]
+		if not assignment is Dictionary or not is_house_id_in(str(identifier), stored, loaded_territory) or loaded_ruins.has(str(identifier)):
+			return false
+		if str(identifier) == stored_target and stored_job == "fire" or not loaded_fires.has(str(identifier)) and assignment.get("phase") != "return":
+			return false
+		var station_id: String = str(assignment.get("depot_instance_id", ""))
+		var station := loaded_territory.building_by_id(station_id)
+		var vehicle_id: String = str(assignment.get("vehicle_id", ""))
+		if station.is_empty() or station.type_id != "fire_station" or not vehicle_id.begins_with(station_id + "_engine_") or assignment.get("phase") not in ["travel", "repair", "return"]:
+			return false
+		var raw_assignment_route: Variant = assignment.get("route", [])
+		var raw_assignment_vehicle: Variant = assignment.get("vehicle", [])
+		if not raw_assignment_route is Array or raw_assignment_route.is_empty() or raw_assignment_route.size() > TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT + 2 or not valid_point(raw_assignment_vehicle):
+			return false
+		var assignment_route: Array = []
+		for point in raw_assignment_route:
+			if not valid_point(point):
+				return false
+			assignment_route.append(Vector3(point[0], point[1], point[2]))
+		for key in ["route_index", "repair_left"]:
+			var value: Variant = assignment.get(key, null)
+			if not (value is int or value is float) or not is_finite(float(value)):
+				return false
+		if int(assignment.route_index) < 0 or int(assignment.route_index) > assignment_route.size() or float(assignment.repair_left) < 0:
+			return false
+		var normalized_assignment: Dictionary = assignment.duplicate(true)
+		normalized_assignment.route = assignment_route
+		normalized_assignment.vehicle = Vector3(raw_assignment_vehicle[0], raw_assignment_vehicle[1], raw_assignment_vehicle[2])
+		loaded_fire_jobs[str(identifier)] = normalized_assignment
+	var loaded_jam_cleared: Dictionary = {}
+	var raw_jam_cleared: Variant = data.get("jam_cleared", {})
+	if not raw_jam_cleared is Dictionary:
+		return false
+	for identifier in raw_jam_cleared:
+		if typeof(raw_jam_cleared[identifier]) != TYPE_BOOL or not is_house_id_in(str(identifier), stored, loaded_territory):
+			return false
+		loaded_jam_cleared[str(identifier)] = raw_jam_cleared[identifier]
+	var loaded_job_vehicle_id: String = str(data.get("job_vehicle_id", stored_depot_id + "_engine_1" if stored_job == "fire" else ""))
+	if stored_job == "fire" and not loaded_job_vehicle_id.begins_with(stored_depot_id + "_engine_"):
+		return false
+	var assigned_vehicle_ids: Dictionary = {}
+	if stored_job == "fire":
+		assigned_vehicle_ids[loaded_job_vehicle_id] = true
+	for identifier in loaded_fire_jobs:
+		var vehicle_id: String = str(loaded_fire_jobs[identifier].vehicle_id)
+		if assigned_vehicle_ids.has(vehicle_id):
+			return false
+		assigned_vehicle_ids[vehicle_id] = true
+	var loaded_police_job: Dictionary = {}
+	var raw_police_job: Variant = data.get("police_job", {})
+	if not raw_police_job is Dictionary:
+		return false
+	if not raw_police_job.is_empty():
+		var police_station := loaded_territory.building_by_id(str(raw_police_job.get("depot_instance_id", "")))
+		var incident_id := str(raw_police_job.get("incident_id", ""))
+		var phase_value: Variant = raw_police_job.get("phase", "")
+		var police_route: Variant = raw_police_job.get("route", [])
+		var police_position: Variant = raw_police_job.get("vehicle", [])
+		if police_station.is_empty() or police_station.type_id != "police_station" or not loaded_jam_cleared.has(incident_id) or (loaded_jam_cleared[incident_id] and phase_value != "return") or phase_value not in ["travel", "clearing", "return"] or not police_route is Array or police_route.is_empty() or not valid_point(police_position):
+			return false
+		var normalized_police: Dictionary = raw_police_job.duplicate(true)
+		var restored_police_route: Array = []
+		for point in police_route:
+			if not valid_point(point):
+				return false
+			restored_police_route.append(Vector3(point[0], point[1], point[2]))
+		if not (normalized_police.get("route_index") is int or normalized_police.get("route_index") is float) or int(normalized_police.route_index) < 0 or int(normalized_police.route_index) > restored_police_route.size() or not (normalized_police.get("clear_left") is int or normalized_police.get("clear_left") is float):
+			return false
+		normalized_police.route = restored_police_route
+		normalized_police.vehicle = Vector3(police_position[0], police_position[1], police_position[2])
+		loaded_police_job = normalized_police
 	if stored_job == "fire" and stored_phase != "return" and (not loaded_fires.has(stored_target) or loaded_fires.is_empty()):
 		return false
 	var triggered: Variant = data.get("fire_triggered", not loaded_fires.is_empty())
@@ -727,10 +1068,15 @@ func load_game() -> bool:
 	job = stored_job
 	target_instance_id = stored_target
 	depot_instance_id = str(data.get("depot_instance_id", "pine_district_legacy_2"))
+	job_vehicle_id = loaded_job_vehicle_id
 	job_phase = stored_phase
 	fire_triggered = triggered
 	fires = loaded_fires
 	fire_damage = loaded_damage
+	fire_ruins = loaded_ruins
+	fire_jobs = loaded_fire_jobs
+	jam_cleared = loaded_jam_cleared
+	police_job = loaded_police_job
 	route = loaded_route
 	route_index = clampi(int(data.route_index), 0, route.size())
 	vehicle = Vector3(stored_vehicle[0], stored_vehicle[1], stored_vehicle[2])

@@ -12,6 +12,7 @@ var serviced_value: bool = true
 var language_value: String = "ru"
 var traffic_horizontal: String = "red"
 var traffic_vertical: String = "red"
+var visual_override: String = ""
 
 func setup(object_type: String, persistent_id: String) -> void:
 	type_id = object_type
@@ -58,11 +59,18 @@ func replace_visual(alternate: bool = false) -> void:
 	for child in visual_root.get_children():
 		visual_root.remove_child(child)
 		child.queue_free()
-	var scene := load(Catalog.scene_path(type_id, alternate, level)) as PackedScene
+	var scene := load(Catalog.scene_path(visual_override if visual_override != "" else type_id, alternate, level)) as PackedScene
 	visual_root.add_child(scene.instantiate())
 	set_serviced(serviced_value)
 	set_language(language_value)
 	set_traffic_state(traffic_horizontal, traffic_vertical)
+
+func set_ruined(value: bool) -> void:
+	var desired := "ruins" if value else ""
+	if visual_override == desired:
+		return
+	visual_override = desired
+	replace_visual()
 
 func set_serviced(value: bool) -> void:
 	serviced_value = value
@@ -83,6 +91,12 @@ func set_traffic_state(horizontal: String, vertical: String) -> void:
 	var model := visual_root.get_child(0)
 	if model.has_method("set_signal_states"):
 		model.set_signal_states(horizontal, vertical)
+
+func set_emergency_lights(enabled: bool, time_value: float = 0.0) -> void:
+	if visual_root.get_child_count() > 0:
+		var model := visual_root.get_child(0)
+		if model.has_method("set_emergency_lights"):
+			model.set_emergency_lights(enabled, time_value)
 
 func set_level(value: int) -> void:
 	value = clampi(value, 1, 3) if Catalog.LEVELS.has(type_id) else 1

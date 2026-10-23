@@ -50,7 +50,7 @@ func capture() -> void:
 		scene.game.signal_fixed = true
 		scene.game.buildings[9] = "park"
 		scene.game.check_complete()
-	if mode in ["fire_before", "fire_during"]:
+	if mode in ["fire_before", "fire_during", "fire_alert", "fire_two"]:
 		scene.game.leak_fixed = true
 		scene.game.signal_fixed = true
 		scene.game.buildings[9] = "cafe"
@@ -60,14 +60,30 @@ func capture() -> void:
 		scene.completion_observed = true
 		scene.completion_left = 0
 		var target_id: String = scene.game.FIRST_FIRE_TARGET
-		if mode == "fire_during":
+		if mode in ["fire_during", "fire_alert", "fire_two"]:
 			scene.game.fires[target_id] = {"phase": "burning", "warning_left": 0.0, "elapsed": 26.0, "danger": 2}
 			scene.game.fires[scene.game.FIRST_FIRE_NEIGHBOR] = {"phase": "warning", "warning_left": 11.0, "elapsed": 0.0, "danger": 1}
 			scene.game.fire_damage[target_id] = 14.0
+			scene.notified_fire_ids.clear()
 			scene.select_problem("fire")
 		else:
 			scene.selection_kind = ""
 		scene.set_camera_focus(scene.game.building_world_for_id(target_id) + Vector3(7, 0, 7))
+		if mode == "fire_two":
+			scene.game.budget = 2000
+			for row in [19, 20]:
+				for col in [12, 13]:
+					scene.game.clear_grid_cell(col, row)
+			scene.game.build_grid_service(12, 19, "fire_station")
+			scene.game.dispatch_fire(target_id)
+			scene.game.dispatch_fire(scene.game.FIRST_FIRE_NEIGHBOR)
+			if scene.game.fire_jobs.has(scene.game.FIRST_FIRE_NEIGHBOR):
+				scene.game.fire_jobs[scene.game.FIRST_FIRE_NEIGHBOR].repair_left = 500.0
+			var arrival_ticks := 0
+			while (scene.game.job_phase == "travel" or scene.game.fire_jobs[scene.game.FIRST_FIRE_NEIGHBOR].phase == "travel") and arrival_ticks < 500:
+				scene.game.tick(1.0, true)
+				arrival_ticks += 1
+			scene.set_camera_focus((scene.game.building_world_for_id(target_id) + scene.game.building_world_for_id(scene.game.FIRST_FIRE_NEIGHBOR)) / 2 + Vector3(7, 0, 7))
 	if mode in ["leak", "signal"]:
 		scene.select_problem(mode)
 	if mode in ["build", "en", "park"]:
@@ -148,6 +164,8 @@ func capture() -> void:
 	if mode == "safe":
 		scene.safe_override = Vector4(0, 36, 0, 38)
 	scene.refresh()
+	if mode == "fire_two":
+		scene.sync_fire_engine_nodes()
 	if mode in ["upgrade", "upgrade_en"]:
 		scene.begin_upgrade()
 	if mode == "demolition":

@@ -18,6 +18,7 @@ var clock: float = 0
 var signal_fixed: bool = false
 var service_position := Vector3(1000, 0, 1000)
 var service_active: bool = false
+var blocking_positions: Array[Dictionary] = []
 var wait_times: Dictionary = {}
 var reservations: Dictionary = {}
 var last_states: Dictionary = {}
@@ -122,11 +123,13 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
 			distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
 	var position_value := lane_position(vehicle)
+	var blockers := blocking_positions.duplicate()
 	if service_active:
-		var lateral: float = absf(service_position.z - position_value.z) if vehicle.axis == "H" else absf(service_position.x - position_value.x)
-		var gap: float = ((service_position.x - position_value.x) if vehicle.axis == "H" else (service_position.z - position_value.z)) * vehicle.direction
-		# Служебная машина занимает ширину обеих полос, пока стоит на проезжей части.
-		# Останавливаем потоки с обеих сторон, чтобы машины не проходили сквозь неё.
+		blockers.append({"id": "primary_service", "position": service_position})
+	for blocker: Dictionary in blockers:
+		var block_position: Vector3 = blocker.position
+		var lateral: float = absf(block_position.z - position_value.z) if vehicle.axis == "H" else absf(block_position.x - position_value.x)
+		var gap: float = ((block_position.x - position_value.x) if vehicle.axis == "H" else (block_position.z - position_value.z)) * vehicle.direction
 		if lateral < 1.8 and gap > 0 and gap < vehicle.spacing + distance:
 			distance = maxf(0, gap - maxf(vehicle.spacing, 3.8))
 	for intersection: Dictionary in intersections:
@@ -143,14 +146,8 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	return distance
 
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
-	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
-	for other: Dictionary in vehicles:
-		if not other.node.visible or other.id == actor or other.axis == axis:
-			continue
-		var point := lane_position(other)
-		var clearance: float = 4.6 if other.node.type_id == "city_bus" else 3.5
-		if absf(point.x - intersection.x) < clearance and absf(point.z - intersection.z) < clearance:
-			return false
+	if not cross_traffic_clear(intersection, axis, actor):
+		return false
 	if not is_broken(intersection):
 		return phase(axis, clock + intersection.offset) == "green"
 	var wait_key: String = intersection.key + ":" + actor
@@ -161,6 +158,17 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 		return false
 	# Сломанный узел пропускает машины по очереди после паузы.
 	reservations[intersection.key] = {"actor": actor, "remaining": 5.0}
+	return true
+
+func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
+	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
+	for other: Dictionary in vehicles:
+		if not other.node.visible or other.id == actor or other.axis == axis:
+			continue
+		var point := lane_position(other)
+		var clearance: float = 4.6 if other.node.type_id == "city_bus" else 3.5
+		if absf(point.x - intersection.x) < clearance and absf(point.z - intersection.z) < clearance:
+			return false
 	return true
 
 func lane_position(vehicle: Dictionary) -> Vector3:
@@ -179,7 +187,7 @@ static func stop_distance_for(type_id: String) -> float:
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
 
-func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0") -> float:
+func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0", emergency: bool = false, ignore_incident_id: String = "") -> float:
 	var direction_value := proposed - current
 	var distance := direction_value.length()
 	if distance < 0.0001:
@@ -195,6 +203,21 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		var gap: float = (other.coordinate - (current.x if axis == "H" else current.z)) * direction
 		if gap > 0:
 			distance = minf(distance, maxf(0, gap - other.spacing))
+	var blockers := blocking_positions.duplicate()
+	if service_active:
+		blockers.append({"id": "primary_service", "position": service_position})
+	for blocker: Dictionary in blockers:
+		if ignore_incident_id != "" and str(blocker.get("incident_id", "")) == ignore_incident_id:
+			continue
+		if str(blocker.get("id", "")) == "primary_service" and actor_id in ["crew_0", "fire_engine_1", "fire_engine_2"]:
+			continue
+		if str(blocker.get("id", "")) == actor_id:
+			continue
+		var block_position: Vector3 = blocker.position
+		var lateral: float = absf((current.z - block_position.z) if axis == "H" else (current.x - block_position.x))
+		var ahead_to_blocker: float = ((block_position.x - current.x) if axis == "H" else (block_position.z - current.z)) * direction
+		if lateral < 1.7 and ahead_to_blocker > 0 and ahead_to_blocker < distance + 4.5:
+			distance = minf(distance, maxf(0, ahead_to_blocker - 4.5))
 	var stop_distance := stop_distance_for("repair_van")
 	for intersection: Dictionary in intersections:
 		var lateral: float = absf((current.z - intersection.z) if axis == "H" else (current.x - intersection.x))
@@ -203,8 +226,10 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
 		if ahead < stop_distance - 0.01:
 			wait_times.erase(intersection.key + ":" + actor_id)
-		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01 and not permission(intersection, axis, actor_id, delta):
-			distance = minf(distance, maxf(0, ahead - stop_distance))
+		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01:
+			var may_pass := cross_traffic_clear(intersection, axis, actor_id) if emergency else permission(intersection, axis, actor_id, delta)
+			if not may_pass:
+				distance = minf(distance, maxf(0, ahead - stop_distance))
 	return distance
 
 func set_active_count(count: int) -> void:

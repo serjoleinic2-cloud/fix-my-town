@@ -1713,11 +1713,19 @@ func request_road_demolition() -> void:
 	dialog.name = "RoadDemolitionConfirmation"
 	dialog.theme = ui_theme
 	dialog.title = t("demolish_confirm_title")
-	dialog.dialog_text = t("road_confirm_body") + "\n" + t("construction_duration")
+	# Короткое предупреждение оставляет место двум крупным кнопкам даже на
+	# портретном экране. Детали шестисекундной работы уже показаны в карточке.
+	dialog.dialog_text = t("road_confirm_body")
 	dialog.ok_button_text = t("demolish_road")
 	dialog.cancel_button_text = t("cancel")
 	add_child(dialog)
 	decorate_dialog(dialog)
+	dialog.get_label().autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dialog.get_label().custom_minimum_size = Vector2(0, 72)
+	dialog.get_ok_button().custom_minimum_size = Vector2(0, 64)
+	dialog.get_cancel_button().custom_minimum_size = Vector2(0, 64)
+	dialog.get_ok_button().add_theme_font_size_override("font_size", 19)
+	dialog.get_cancel_button().add_theme_font_size_override("font_size", 19)
 	dialog.confirmed.connect(func():
 		if game.start_road_demolition(road_selected_cell.x, road_selected_cell.y):
 			selection_kind = "construction_job"
@@ -1725,9 +1733,8 @@ func request_road_demolition() -> void:
 		dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
 	dialog.close_requested.connect(dialog.queue_free)
-	var dialog_width := clampi(int(screen.size.x - safe_left - safe_right - 24), 300, 440)
-	var dialog_height := clampi(int(screen.size.y * 0.32), 260, 360)
-	dialog.get_label().autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var dialog_width := clampi(int(screen.size.x - safe_left - safe_right - 24), 300, 420)
+	var dialog_height := clampi(int(screen.size.y * 0.25), 240, 300)
 	dialog.popup_centered(Vector2i(dialog_width, dialog_height))
 
 func build_construction_job_sheet() -> void:

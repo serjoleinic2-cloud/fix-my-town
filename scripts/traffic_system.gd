@@ -169,20 +169,22 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	var distance := SPEED * delta * float(vehicle.get("speed_factor", 1.0))
 	var current_position := lane_position(vehicle)
 	for other: Dictionary in vehicles:
-		if other.id == vehicle.id or not other.node.visible or other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
-			# Same-lane following is handled below; the general footprint check
-			# also prevents cars from passing through one another at a junction.
-			if other.id == vehicle.id or not other.node.visible:
-				continue
-			var other_position := lane_position(other)
-			var proposed_position := current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0)
-			if proposed_position.distance_to(other_position) < 2.8:
-				distance = minf(distance, maxf(0.0, current_position.distance_to(other_position) - 2.8))
-			if other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
-				continue
-		var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
-		if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
-			distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
+		if other.id == vehicle.id or not other.node.visible:
+			continue
+		var same_lane: bool = other.axis == vehicle.axis and other.direction == vehicle.direction and is_equal_approx(float(other.road), float(vehicle.road))
+		if same_lane:
+			var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
+			if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
+				distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
+			continue
+		# Different lanes only interact when both cars are actually approaching
+		# the same crossing. A stable id priority prevents mutual deadlock.
+		if other.axis == vehicle.axis:
+			continue
+		var other_position: Vector3 = lane_position(other)
+		var proposed_position: Vector3 = current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0)
+		if proposed_position.distance_to(other_position) < 2.8 and current_position.distance_to(other_position) < 7.0 and str(other.id) < str(vehicle.id):
+			distance = 0.0
 	var position_value := lane_position(vehicle)
 	var blockers := blocking_positions.duplicate()
 	if service_active:

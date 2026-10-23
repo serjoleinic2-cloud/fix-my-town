@@ -300,7 +300,7 @@ func building_contour(entry: Dictionary) -> Array[Vector2i]:
 		for dx in range(entry.width):
 			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 				var cell := Vector2i(entry.col + dx, entry.row + dy) + offset
-				var inside := cell.x >= entry.col and cell.x < entry.col + entry.width and cell.y >= entry.row and cell.y < entry.row + entry.height
+				var inside: bool = cell.x >= entry.col and cell.x < entry.col + entry.width and cell.y >= entry.row and cell.y < entry.row + entry.height
 				if inside or not in_bounds(cell.x, cell.y) or seen.has(cell):
 					continue
 				seen[cell] = true

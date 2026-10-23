@@ -431,9 +431,19 @@ func _start_construction(fields: Dictionary) -> bool:
 				truck_start_cell = candidate
 				break
 	var truck_start := territory.cell_world(truck_start_cell.x, truck_start_cell.y) if truck_start_cell.x >= 0 else truck_target
-	data.truck_start_position = [truck_start.x, truck_start.y, truck_start.z]
-	data.truck_target_position = [truck_target.x, truck_target.y, truck_target.z]
+	var road_route: Array = []
+	if road_cell.x >= 0:
+		for route_cell: Vector2i in territory.path_to_city(road_cell.x, road_cell.y):
+			var route_point := territory.cell_world(route_cell.x, route_cell.y)
+			road_route.append([route_point.x, route_point.y, route_point.z])
+	if road_route.size() < 2:
+		road_route = [[truck_start.x, truck_start.y, truck_start.z], [truck_target.x, truck_target.y, truck_target.z]]
+	data.truck_route = road_route
+	data.truck_start_position = road_route[0].duplicate()
+	data.truck_target_position = road_route[road_route.size() - 1].duplicate()
 	data.truck_position = data.truck_start_position.duplicate()
+	truck_start = Vector3(data.truck_start_position[0], data.truck_start_position[1], data.truck_start_position[2])
+	truck_target = Vector3(data.truck_target_position[0], data.truck_target_position[1], data.truck_target_position[2])
 	var digger_start := truck_start
 	var digger_target := truck_target
 	if truck_start_cell.x != road_cell.x or truck_start_cell.y != road_cell.y:
@@ -443,6 +453,7 @@ func _start_construction(fields: Dictionary) -> bool:
 	data.excavator_start_position = [digger_start.x, digger_start.y, digger_start.z]
 	data.excavator_target_position = [digger_target.x, digger_target.y, digger_target.z]
 	data.excavator_position = data.excavator_start_position.duplicate()
+	data.excavator_route = road_route.duplicate(true)
 	data.arrival_duration = 0.8
 	construction_job = data
 	save_game()
@@ -495,17 +506,34 @@ func normalize_construction_vehicle_paths(task: Dictionary, grid: RefCounted) ->
 		"excavator_start_position": [excavator_start.x, excavator_start.y, excavator_start.z],
 		"excavator_target_position": [excavator_target.x, excavator_target.y, excavator_target.z]
 	}
+	var road_route: Array = []
+	for route_cell: Vector2i in path:
+		var route_point: Vector3 = grid.cell_world(route_cell.x, route_cell.y)
+		road_route.append([route_point.x, route_point.y, route_point.z])
+	if road_route.size() < 2:
+		road_route = [[truck_start.x, truck_start.y, truck_start.z], [truck_target.x, truck_target.y, truck_target.z]]
+	rebuilt.truck_route = road_route
+	rebuilt.excavator_route = road_route.duplicate(true)
 	var arrival_ratio := clampf((float(task.get("total", 0.0)) - float(task.get("remaining", 0.0))) / maxf(0.1, float(task.get("arrival_duration", 0.8))), 0.0, 1.0)
 	for machine in [
-		["truck_position", "truck_start_position", "truck_target_position"],
-		["excavator_position", "excavator_start_position", "excavator_target_position"]
+		["truck_position", "truck_start_position", "truck_target_position", "truck_route"],
+		["excavator_position", "excavator_start_position", "excavator_target_position", "excavator_route"]
 	]:
 		var from: Array = rebuilt[machine[1]]
 		var to: Array = rebuilt[machine[2]]
-		var current := Vector3(float(from[0]), float(from[1]), float(from[2])).lerp(Vector3(float(to[0]), float(to[1]), float(to[2])), arrival_ratio)
+		var current: Vector3
+		var route: Array = rebuilt[machine[3]]
+		if route.size() >= 2:
+			var route_index_float := arrival_ratio * float(route.size() - 1)
+			var route_index := mini(int(floor(route_index_float)), route.size() - 2)
+			var route_fraction := route_index_float - float(route_index)
+			current = Vector3(route[route_index][0], route[route_index][1], route[route_index][2]).lerp(Vector3(route[route_index + 1][0], route[route_index + 1][1], route[route_index + 1][2]), route_fraction)
+		else:
+			current = Vector3(float(from[0]), float(from[1]), float(from[2])).lerp(Vector3(float(to[0]), float(to[1]), float(to[2])), arrival_ratio)
 		task[machine[0]] = [current.x, current.y, current.z]
 		task[machine[1]] = from
 		task[machine[2]] = to
+		task[machine[3]] = route
 
 func construction_progress() -> float:
 	if construction_job.is_empty():
@@ -1076,13 +1104,23 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		construction_job.remaining = maxf(0.0, float(construction_job.remaining) - delta)
 		var elapsed_work := float(construction_job.total) - float(construction_job.remaining)
 		var arrival_ratio := clampf(elapsed_work / maxf(0.1, float(construction_job.get("arrival_duration", 0.8))), 0.0, 1.0)
-		for moving_machine in [["excavator_position", "excavator_start_position", "excavator_target_position"], ["truck_position", "truck_start_position", "truck_target_position"]]:
+		for moving_machine in [["excavator_position", "excavator_start_position", "excavator_target_position", "excavator_route"], ["truck_position", "truck_start_position", "truck_target_position", "truck_route"]]:
 			var from_point: Array = construction_job.get(moving_machine[1], construction_job.get(moving_machine[0], []))
 			var to_point: Array = construction_job.get(moving_machine[2], construction_job.get(moving_machine[0], []))
-			if valid_point(from_point) and valid_point(to_point):
-				var from_world := Vector3(from_point[0], from_point[1], from_point[2])
-				var to_world := Vector3(to_point[0], to_point[1], to_point[2])
-				var current_world := from_world.lerp(to_world, arrival_ratio)
+			var current_world: Vector3
+			var saved_route: Variant = construction_job.get(moving_machine[3], [])
+			if saved_route is Array and saved_route.size() >= 2:
+				var route_index_float := arrival_ratio * float(saved_route.size() - 1)
+				var route_index := mini(int(floor(route_index_float)), saved_route.size() - 2)
+				var route_fraction := route_index_float - float(route_index)
+				var route_from: Array = saved_route[route_index]
+				var route_to: Array = saved_route[route_index + 1]
+				current_world = Vector3(route_from[0], route_from[1], route_from[2]).lerp(Vector3(route_to[0], route_to[1], route_to[2]), route_fraction)
+			elif valid_point(from_point) and valid_point(to_point):
+				current_world = Vector3(from_point[0], from_point[1], from_point[2]).lerp(Vector3(to_point[0], to_point[1], to_point[2]), arrival_ratio)
+			else:
+				continue
+			if true:
 				construction_job[moving_machine[0]] = [current_world.x, current_world.y, current_world.z]
 		if float(construction_job.remaining) <= 0.0:
 			_finish_construction()

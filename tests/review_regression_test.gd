@@ -41,6 +41,9 @@ func run() -> void:
 	check(neglected.house_damage("pine_district_legacy_12") > 0, "Long-unresolved water failure damages affected homes")
 	game.leak_fixed = true
 	game.signal_fixed = true
+	# Transit regression uses an explicitly prepared road network; a new city
+	# itself must remain roadless until the first building is placed.
+	game.territory.reset()
 	game.build(9, "cafe")
 	game.place_stop(0)
 	game.place_stop(4)

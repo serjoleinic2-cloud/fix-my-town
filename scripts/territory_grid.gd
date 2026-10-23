@@ -142,7 +142,13 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 				if in_bounds(next.x, next.y) and cells[next.y][next.x] == "road" and connected_road(next.x, next.y):
 					has_access = true
 	if not has_access and type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
-		return false
+		var entry_for_access := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
+		var automatic_path := auto_access_path(entry_for_access)
+		if automatic_path.is_empty():
+			return false
+		for path_cell: Vector2i in automatic_path:
+			if state_at(path_cell.x, path_cell.y) == "free":
+				cells[path_cell.y][path_cell.x] = "road"
 	for dy in range(footprint.y):
 		for dx in range(footprint.x):
 			cells[row + dy][col + dx] = "occupied"
@@ -241,6 +247,40 @@ func access_path(entry: Dictionary, start: Vector2i) -> Array[Vector2i]:
 					best = path
 	return best
 
+func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
+	# Find a short cleared corridor from the building edge to the existing
+	# connected network. The corridor becomes the building's automatic road
+	# contour when placement is confirmed.
+	var queue: Array[Vector2i] = []
+	var previous: Dictionary = {}
+	for dy in range(entry.height):
+		for dx in range(entry.width):
+			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var edge := Vector2i(entry.col + dx, entry.row + dy) + offset
+				var inside: bool = edge.x >= entry.col and edge.x < entry.col + entry.width and edge.y >= entry.row and edge.y < entry.row + entry.height
+				if not inside and in_bounds(edge.x, edge.y) and state_at(edge.x, edge.y) == "free" and not previous.has(edge):
+					queue.append(edge)
+					previous[edge] = Vector2i(-1, -1)
+	var cursor := 0
+	while cursor < queue.size():
+		var current := queue[cursor]
+		cursor += 1
+		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var next := current + offset
+			if not in_bounds(next.x, next.y) or previous.has(next):
+				continue
+			if state_at(next.x, next.y) == "road" and connected_road(next.x, next.y):
+				var path: Array[Vector2i] = [current]
+				var step := current
+				while previous[step].x >= 0:
+					step = previous[step]
+					path.push_front(step)
+				return path
+			if state_at(next.x, next.y) == "free":
+				previous[next] = current
+				queue.append(next)
+	return []
+
 func placement_reason(col: int, row: int, tool: String) -> String:
 	var footprint := Vector2i.ONE if tool in ["clear", "road", "landscaping"] or tool in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
 	# Старые улицы тоже можно перестраивать: строительство дороги является
@@ -260,7 +300,7 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 	if tool in ["landscaping", "lawn", "flower_bed", "street_tree", "bush"]:
 		return ""
 	var entry := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
-	return "" if not access_path(entry, Vector2i(12, 18)).is_empty() else "no_road"
+	return "" if not access_path(entry, Vector2i(12, 18)).is_empty() or not auto_access_path(entry).is_empty() else "no_road"
 
 func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
 	if state_at(col, row) != "road":

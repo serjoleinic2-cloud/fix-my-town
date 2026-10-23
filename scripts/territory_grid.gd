@@ -50,6 +50,7 @@ func migrate_legacy(legacy_buildings: Array) -> void:
 					cells[row + dy][col + dx] = cells_to_mark
 		if kind != "empty":
 			buildings.append({"type_id": kind, "instance_id": "pine_district_legacy_%d" % index, "col": col, "row": row, "width": 2, "height": 2, "legacy_plot": index})
+			reveal_area(col, row, 3)
 
 func reset_visibility() -> void:
 	revealed.clear()
@@ -99,6 +100,7 @@ func clear_cell(col: int, row: int) -> bool:
 	if not in_bounds(col, row) or cells[row][col] != "forest":
 		return false
 	cells[row][col] = "free"
+	reveal_area(col, row, 1)
 	return true
 
 func connected_road(col: int, row: int) -> bool:
@@ -278,6 +280,31 @@ func access_path(entry: Dictionary, start: Vector2i) -> Array[Vector2i]:
 				if not path.is_empty() and (best.is_empty() or path.size() < best.size()):
 					best = path
 	return best
+
+func has_constructed_network() -> bool:
+	for row in cells:
+		for state in row:
+			if state == "road":
+				return true
+	for entry: Dictionary in buildings:
+		if entry.type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
+			return true
+	return false
+
+func building_contour(entry: Dictionary) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var seen: Dictionary = {}
+	for dy in range(entry.height):
+		for dx in range(entry.width):
+			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var cell := Vector2i(entry.col + dx, entry.row + dy) + offset
+				var inside := cell.x >= entry.col and cell.x < entry.col + entry.width and cell.y >= entry.row and cell.y < entry.row + entry.height
+				if inside or not in_bounds(cell.x, cell.y) or seen.has(cell):
+					continue
+				seen[cell] = true
+				if state_at(cell.x, cell.y) == "free":
+					result.append(cell)
+	return result
 
 func has_constructed_network() -> bool:
 	for row in cells:

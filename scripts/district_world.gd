@@ -15,6 +15,14 @@ static func world_position(point: Vector3) -> Vector3:
 		x = lerpf(-14.4, -7.2, (point.x + 7) / 4)
 	return Vector3(x, point.y, point.z * 4.8)
 
+static func logical_position(point: Vector3) -> Vector3:
+	var x := point.x / 2.4
+	if point.x >= -21.6 and point.x <= -14.4:
+		x = -9 + (point.x + 21.6) / 3.6
+	elif point.x > -14.4 and point.x <= -7.2:
+		x = -7 + (point.x + 14.4) / 1.8
+	return Vector3(x, point.y, point.z / 4.8)
+
 func build() -> void:
 	Art.box(self, Vector3(0, -0.5, 0), Vector3(150, 0.9, 170), Color("8eaa69"))
 	# Р’РѕРґР° Рё РЅР°Р±РµСЂРµР¶РЅР°СЏ РЅР° РїСЂР°РІРѕР№ РіСЂР°РЅРёС†Рµ СЂР°Р№РѕРЅР°.

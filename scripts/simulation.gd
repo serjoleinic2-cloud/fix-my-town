@@ -8,6 +8,7 @@ const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
 
 const Catalog = preload("res://scripts/asset_catalog.gd")
+const DistrictWorld = preload("res://scripts/district_world.gd")
 
 const SAVE_PATH = "user://progress.json"
 var budget: int = 300
@@ -24,6 +25,8 @@ var vehicle: Vector3 = Vector3(3, 0, -6)
 var repair_left: float = 4.0
 var income_clock: float = 0.0
 var completed: bool = false
+var target_instance_id: String = ""
+var depot_instance_id: String = "pine_district_legacy_2"
 var save_path: String = SAVE_PATH
 
 func _init() -> void:
@@ -45,27 +48,46 @@ func happiness() -> int:
 
 func placement_bonus(index: int, kind: String) -> int:
 	var bonus := 0
-	for i in range(24):
-		if i != index and building_world(i).distance_to(building_world(index)) < AMENITY_RADIUS:
-			if buildings[i] == "house":
-				bonus += 2 * building_level(i)
-			if (kind == "cafe" and buildings[i] == "park") or (kind == "park" and buildings[i] == "cafe"):
-				bonus += 3 * building_level(i)
+	for entry: Dictionary in all_buildings():
+		if entry.get("legacy_plot", -1) != index and entry.position.distance_to(building_world(index)) < AMENITY_RADIUS:
+			if entry.type_id == "house":
+				bonus += 2 * entry.level
+			if (kind == "cafe" and entry.type_id == "park") or (kind == "park" and entry.type_id == "cafe"):
+				bonus += 3 * entry.level
 	return bonus
 
 func house_residents(index: int) -> int:
-	if buildings[index] != "house":
+	return record_residents(legacy_record(index))
+
+func legacy_record(index: int) -> Dictionary:
+	return {"instance_id": "pine_district_legacy_%d" % index, "type_id": buildings[index], "legacy_plot": index, "level": building_level(index), "position": building_world(index)}
+
+func all_buildings() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for index in range(24):
+		if buildings[index] != "empty":
+			result.append(legacy_record(index))
+	for entry: Dictionary in territory.buildings:
+		if not entry.has("legacy_plot"):
+			var record := entry.duplicate(true)
+			record.position = territory.building_center(entry)
+			record.level = int(entry.get("level", 1))
+			result.append(record)
+	return result
+
+func record_water(entry: Dictionary) -> bool:
+	return has_water(entry.legacy_plot) if entry.has("legacy_plot") else true
+
+func record_residents(entry: Dictionary) -> int:
+	if entry.type_id != "house":
 		return 0
-	var capacity: int = Catalog.level_data("house", building_level(index)).residents
-	return capacity if has_water(index) else capacity / 2
+	var capacity: int = Catalog.level_data("house", entry.level).residents
+	return capacity if record_water(entry) else capacity / 2
 
 func population() -> int:
 	var total := 0
-	for index in range(24):
-		total += house_residents(index)
-	for building in territory.buildings:
-		if building.type_id == "house" and not building.has("legacy_plot"):
-			total += 8
+	for entry: Dictionary in all_buildings():
+		total += record_residents(entry)
 	return total
 
 func has_water(index: int) -> bool:
@@ -78,30 +100,35 @@ func transit_metrics() -> Dictionary:
 	var covered := 0
 	var served := 0
 	var demand := 0.0
-	for i in range(24):
-		if buildings[i] != "house":
+	for entry: Dictionary in all_buildings():
+		if entry.type_id != "house":
 			continue
-		if transit.stops.any(func(row): return transit.in_range(building_world(i), row)):
-			covered += house_residents(i)
-		if house_transit(i):
-			served += house_residents(i)
-			demand += house_residents(i) * (0.25 + 0.05 * (house_destination_level(i) - 1))
+		var residents := record_residents(entry)
+		if transit.stops.any(func(row): return transit.in_range(entry.position, row)):
+			covered += residents
+		var destination := record_destination_level(entry)
+		if destination > 0:
+			served += residents
+			demand += residents * (0.25 + 0.05 * (destination - 1))
 	return {"covered": covered, "served": served, "demand": ceili(demand), "load": mini(Transit.CAPACITY, ceili(demand)), "capacity": Transit.CAPACITY}
 
 func house_transit(index: int) -> bool:
 	return house_destination_level(index) > 0
 
 func house_destination_level(index: int) -> int:
+	return record_destination_level(legacy_record(index))
+
+func record_destination_level(entry: Dictionary) -> int:
 	if not transit.active or not transit.funded or transit.stops.size() != 2:
 		return 0
 	var best := 0
-	var point := building_world(index)
+	var point: Vector3 = entry.position
 	for j in range(2):
 		if not transit.in_range(point, transit.stops[j]):
 			continue
-		for i in range(24):
-			if buildings[i] in ["cafe", "depot"] and transit.in_range(building_world(i), transit.stops[1 - j]):
-				best = maxi(best, building_level(i))
+		for destination: Dictionary in all_buildings():
+			if destination.type_id in ["cafe", "depot"] and transit.in_range(destination.position, transit.stops[1 - j]):
+				best = maxi(best, destination.level)
 	return best
 
 func place_stop(row: int) -> bool:
@@ -140,14 +167,19 @@ func start_transit() -> bool:
 	return true
 
 func house_quality(index: int) -> Dictionary:
-	var water := has_water(index)
-	var point := building_world(index)
+	return record_quality(legacy_record(index))
+
+func record_quality(entry: Dictionary) -> Dictionary:
+	var water := record_water(entry)
+	var point: Vector3 = entry.position
 	var services := signal_fixed or point.x >= 0 or point.z < 0
-	var transport := house_transit(index)
+	if not entry.has("legacy_plot"):
+		services = not service_route(entry.instance_id).is_empty() and services
+	var transport := record_destination_level(entry) > 0
 	var environment := 12
-	for i in range(24):
-		if buildings[i] in ["cafe", "park"] and building_world(i).distance_to(point) < AMENITY_RADIUS:
-			environment += Catalog.level_data(buildings[i], building_level(i)).environment
+	for neighbor: Dictionary in all_buildings():
+		if neighbor.type_id in ["cafe", "park"] and neighbor.position.distance_to(point) < AMENITY_RADIUS:
+			environment += Catalog.level_data(neighbor.type_id, neighbor.level).environment
 	var score := (30 if water else 0) + (20 if services else 10) + (20 if transport else 0) + mini(environment, 30)
 	if not water:
 		score = mini(score, 19)
@@ -156,9 +188,9 @@ func house_quality(index: int) -> Dictionary:
 func district_quality() -> float:
 	var total := 0
 	var weighted := 0
-	for i in range(24):
-		var residents := house_residents(i)
-		weighted += residents * house_quality(i).score
+	for entry: Dictionary in all_buildings():
+		var residents := record_residents(entry)
+		weighted += residents * record_quality(entry).score
 		total += residents
 	return float(weighted) / total if total > 0 else -1.0
 
@@ -167,31 +199,64 @@ static func quality_band(score: float) -> int:
 
 func income() -> int:
 	var total := 0
-	for i in range(24):
-		total += building_income(i)
-	for building in territory.buildings:
-		if building.type_id == "house" and not building.has("legacy_plot"):
-			total += 1
+	for entry: Dictionary in all_buildings():
+		if Catalog.LEVELS.has(entry.type_id):
+			var amount: int = Catalog.level_data(entry.type_id, entry.level).income
+			total += amount / 2 if entry.type_id == "house" and not record_water(entry) else amount
 	return maxi(4, total)
 
 func clear_grid_cell(col: int, row: int) -> bool:
-	if budget < 5 or not territory.clear_cell(col, row):
+	if budget < 5 or territory.placement_reason(col, row, "clear") != "" or not territory.clear_cell(col, row):
 		return false
 	budget -= 5
 	save_game()
 	return true
 
 func build_grid_road(col: int, row: int) -> bool:
-	if budget < 12 or not territory.place_road(col, row):
+	if budget < 12 or territory.placement_reason(col, row, "road") != "" or not territory.place_road(col, row):
 		return false
 	budget -= 12
 	save_game()
 	return true
 
 func build_grid_house(col: int, row: int) -> bool:
-	if budget < Catalog.cost("house") or not territory.build_house(col, row):
+	if budget < Catalog.cost("house") or territory.placement_reason(col, row, "house") != "" or not territory.build_house(col, row):
 		return false
 	budget -= Catalog.cost("house")
+	save_game()
+	return true
+
+func upgrade_grid_house(identifier: String) -> bool:
+	var entry := territory.building_by_id(identifier)
+	if entry.is_empty() or entry.has("legacy_plot"):
+		return false
+	var level_value := int(entry.get("level", 1))
+	var price: int = Catalog.level_data(entry.type_id, level_value).upgrade_cost
+	if level_value >= 3 or budget < price:
+		return false
+	budget -= price
+	entry.level = level_value + 1
+	save_game()
+	return true
+
+func grid_demolition_refund(identifier: String) -> int:
+	var entry := territory.building_by_id(identifier)
+	if entry.is_empty():
+		return 0
+	var value := Catalog.cost(entry.type_id)
+	for previous in range(1, int(entry.get("level", 1))):
+		value += Catalog.level_data(entry.type_id, previous).upgrade_cost
+	return value / 4
+
+func demolish_grid_house(identifier: String) -> bool:
+	var entry := territory.building_by_id(identifier)
+	if entry.is_empty() or entry.has("legacy_plot") or (job != "" and target_instance_id == identifier):
+		return false
+	budget += grid_demolition_refund(identifier)
+	for dy in range(entry.height):
+		for dx in range(entry.width):
+			territory.cells[entry.row + dy][entry.col + dx] = "free"
+	territory.buildings.erase(entry)
 	save_game()
 	return true
 
@@ -208,6 +273,56 @@ func build(index: int, kind: String) -> bool:
 	save_game()
 	return true
 
+func depot_world() -> Vector3:
+	return DistrictWorld.world_position(Vector3(3, 0, -6))
+
+func service_route(identifier: String) -> Array:
+	var entry := territory.building_by_id(identifier)
+	if entry.is_empty():
+		return []
+	var start := territory.nearest_road(depot_world())
+	var path := territory.access_path(entry, start)
+	if path.is_empty() or territory.road_path(path[-1], start).is_empty():
+		return []
+	return logical_route(path)
+
+func logical_route(path: Array[Vector2i]) -> Array:
+	# Сохраняем повороты и крайние точки; путь остаётся на дорожных клетках.
+	var result: Array = []
+	for index in range(path.size()):
+		if index == 0 or index == path.size() - 1 or path[index] - path[index - 1] != path[index + 1] - path[index]:
+			result.append(DistrictWorld.logical_position(territory.cell_world(path[index].x, path[index].y)))
+	return result
+
+func route_to_world(point: Vector3) -> Array:
+	var start := territory.nearest_road(depot_world())
+	var goal := territory.nearest_road(point)
+	var path := territory.road_path(start, goal)
+	if path.is_empty() or territory.road_path(goal, start).is_empty():
+		return []
+	var result := logical_route(path)
+	var end := DistrictWorld.logical_position(point)
+	if result.is_empty() or not result[-1].is_equal_approx(end):
+		result.append(end)
+	return result
+
+func dispatch_to_building(identifier: String) -> bool:
+	var entry := territory.building_by_id(identifier)
+	if job != "" or entry.is_empty() or entry.type_id != "house" or entry.has("legacy_plot"):
+		return false
+	var planned := service_route(identifier)
+	if planned.is_empty():
+		return false
+	job = "inspection"
+	job_phase = "travel"
+	target_instance_id = identifier
+	vehicle = Vector3(3, 0, -6)
+	route = planned
+	route_index = 0
+	repair_left = 4.0
+	save_game()
+	return true
+
 func dispatch(kind: String) -> bool:
 	if job != "" or kind not in ["signal", "leak"]:
 		return false
@@ -216,14 +331,16 @@ func dispatch(kind: String) -> bool:
 	var cost := Catalog.cost("traffic_signal" if kind == "signal" else "water_leak")
 	if budget < cost:
 		return false
+	var destination := Vector3(-14.4, 0, 0) if kind == "signal" else DistrictWorld.world_position(Vector3(-9, 0, 6))
+	var planned := route_to_world(destination)
+	if planned.is_empty():
+		return false
 	budget -= cost
 	job = kind
+	target_instance_id = "signal_0" if kind == "signal" else "leak_0"
 	job_phase = "travel"
 	vehicle = Vector3(3, 0, -6)
-	route = [Vector3(-7, 0, -6), Vector3(-7, 0, -3), Vector3(-7, 0, 0)]
-	if kind == "leak":
-		route.append(Vector3(-7, 0, 6))
-		route.append(Vector3(-9, 0, 6))
+	route = planned
 	route_index = 0
 	repair_left = 4.0
 	save_game()
@@ -252,6 +369,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 					route_index += 1
 		elif job_phase == "return":
 			job = ""
+			target_instance_id = ""
 			job_phase = "travel"
 			changed = true
 		else:
@@ -260,8 +378,12 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 			if repair_left <= 0:
 				if job == "signal":
 					signal_fixed = true
-				else:
+				elif job == "leak":
 					leak_fixed = true
+				elif job == "inspection":
+					var entry := territory.building_by_id(target_instance_id)
+					if not entry.is_empty():
+						entry.inspected = true
 				job_phase = "return"
 				route.reverse()
 				route.append(Vector3(3, 0, -6))
@@ -281,7 +403,7 @@ func save_game() -> void:
 	for point: Vector3 in route:
 		points.append([point.x, point.y, point.z])
 	var data := {"version": 3, "levels": levels, "completed": completed, "city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
-		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points,
+		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
 		"repair_left": repair_left, "income_clock": income_clock, "transit": transit.data()}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
@@ -324,16 +446,16 @@ func load_game() -> bool:
 	if data.has("completed") and typeof(data.completed) != TYPE_BOOL:
 		return false
 	var stored_job = data.get("job", "")
-	if stored_job not in ["", "signal", "leak"]:
+	if stored_job not in ["", "signal", "leak", "inspection"]:
 		return false
 	var stored_phase = data.get("job_phase", "travel")
 	if stored_phase not in ["travel", "repair", "return"]:
 		return false
-	var expected_target := "traffic_signal" if stored_job == "signal" else ("water_leak" if stored_job == "leak" else "")
+	var expected_target := "traffic_signal" if stored_job == "signal" else ("water_leak" if stored_job == "leak" else ("house" if stored_job == "inspection" else ""))
 	if data.get("vehicle_type_id", "repair_van") != "repair_van" or data.get("target_type_id", expected_target) != expected_target:
 		return false
 	var stored_route = data.get("route", [])
-	if not stored_route is Array or stored_route.size() > 8:
+	if not stored_route is Array or stored_route.size() > TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT + 2:
 		return false
 	if stored_job != "" and stored_route.is_empty():
 		return false
@@ -361,6 +483,11 @@ func load_game() -> bool:
 	else:
 		loaded_territory = TerritoryGrid.new(stored)
 	loaded_territory.sync_legacy(stored)
+	var stored_target: String = str(data.get("target_instance_id", ""))
+	if stored_job == "inspection" and loaded_territory.building_by_id(stored_target).is_empty():
+		return false
+	if data.get("depot_instance_id", "pine_district_legacy_2") != "pine_district_legacy_2":
+		return false
 	transit = loaded_transit
 	territory = loaded_territory
 	budget = clampi(int(data.budget), 0, 1000000)
@@ -371,6 +498,7 @@ func load_game() -> bool:
 	levels = loaded_levels
 	completed = data.get("completed", false)
 	job = stored_job
+	target_instance_id = stored_target
 	job_phase = stored_phase
 	route = loaded_route
 	route_index = clampi(int(data.route_index), 0, route.size())
@@ -390,7 +518,7 @@ func valid_point(point: Variant) -> bool:
 
 
 func target_type_id() -> String:
-	return "traffic_signal" if job == "signal" else ("water_leak" if job == "leak" else "")
+	return "traffic_signal" if job == "signal" else ("water_leak" if job == "leak" else ("house" if job == "inspection" else ""))
 
 func building_level(index: int) -> int:
 	return int(levels[index])

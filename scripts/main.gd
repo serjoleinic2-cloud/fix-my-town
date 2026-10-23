@@ -84,6 +84,7 @@ var moving_stop_index: int = -1
 var territory_tool: String = "clear"
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
+var grid_selected_id: String = ""
 var last_quality: float = -1
 var quality_trend: String = "→"
 const QUALITY_COLORS = [Color("df6356"), Color("e9994f"), Color("d8bd57"), Color("9fc76e"), Color("59a675")]
@@ -94,6 +95,7 @@ const TEXT = {
 	"done": ["Квартал ожил! Сценарий завершён.\nПродолжайте обустраивать район.", "The neighborhood is thriving! Scenario complete.\nKeep improving your district."],
 	"stats": ["Бюджет  %d   •   Жители  %d\nНастроение  %d%%   •   Доход  +%d / 12 сек.", "Budget  %d   •   Residents  %d\nHappiness  %d%%   •   Income  +%d / 12 sec"],
 	"signal": ["Светофор", "Traffic signal"], "leak": ["Протечка", "Water leak"],
+	"inspection": ["Проверка обслуживания", "Service inspection"],
 	"signal_info": ["Сломанный перекрёсток\nЗадерживает машину. Ремонт: %d монет.", "Broken intersection\nSlows the service van. Repair: %d coins."],
 	"leak_info": ["Протечка у жилого дома\nСнижает заселение и доход. Ремонт: %d монет.", "Leak near a residential building\nReduces occupancy and income. Repair: %d coins."],
 	"repair": ["Отправить бригаду", "Dispatch crew"], "fixed": ["Обслуживание восстановлено", "Service restored"],
@@ -502,7 +504,7 @@ func redraw_plots() -> void:
 	redraw_territory()
 
 func redraw_territory() -> void:
-	var signature := JSON.stringify(game.territory.data())
+	var signature := JSON.stringify(game.territory.data()) + str([quality_mode, game.language, game.signal_fixed, game.transit.active, game.transit.funded, game.transit.stops])
 	if signature == territory_signature:
 		return
 	territory_signature = signature
@@ -519,12 +521,23 @@ func redraw_territory() -> void:
 			if state == "forest":
 				Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9, true, row * 53 + col)
 			elif state == "road":
-				Art.box(tile_visuals, center + Vector3(0, 0.1, 0), Vector3(0.16, 0.025, 1.0), Color("d1d1c5"))
+				var horizontal: bool = game.territory.state_at(col - 1, row) == "road" or game.territory.state_at(col + 1, row) == "road"
+				var vertical: bool = game.territory.state_at(col, row - 1) == "road" or game.territory.state_at(col, row + 1) == "road"
+				if horizontal != vertical:
+					Art.box(tile_visuals, center + Vector3(0, 0.1, 0), Vector3(1.0, 0.025, 0.16) if horizontal else Vector3(0.16, 0.025, 1.0), Color("d1d1c5"))
 	for entry: Dictionary in game.territory.buildings:
 		if entry.row < TerritoryGrid.EXPANSION_ROWS.x or entry.row > TerritoryGrid.EXPANSION_ROWS.y:
 			continue
 		var position: Vector3 = game.territory.cell_world(entry.col, entry.row) + Vector3(TerritoryGrid.CELL_SIZE / 2, 0, TerritoryGrid.CELL_SIZE / 2)
-		create_object(territory_visuals, entry.type_id, "district_%s_%s_%s" % [entry.type_id, entry.col, entry.row], position)
+		var object := create_object(territory_visuals, entry.type_id, entry.instance_id, position)
+		object.set_meta("grid_instance_id", entry.instance_id)
+		object.set_level(int(entry.get("level", 1)))
+		object.set_language(game.language)
+		var record: Dictionary = entry.duplicate(true)
+		record.position = position
+		record.level = int(entry.get("level", 1))
+		var base_color := quality_color(game.record_quality(record).score) if quality_mode else Color("91a66f")
+		Art.box(object, Vector3(0, 0.14, 0), Vector3(9, 0.12, 9), base_color)
 	Art.batch(tile_visuals)
 
 func set_camera_focus(point: Vector3) -> void:
@@ -608,8 +621,7 @@ func map_input(event: InputEvent) -> void:
 		var col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
 		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
 		if col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
-			territory_cell = Vector2i(col, row)
-			apply_territory_tool()
+			select_territory_cell(Vector2i(col, row))
 		return
 	if placing_stop:
 		var nearest := INF
@@ -636,11 +648,26 @@ func map_input(event: InputEvent) -> void:
 		if object != null and object.name.begins_with("plot_"):
 			select_plot(int(object.name.trim_prefix("plot_")))
 			return
+		if object != null and object.has_meta("grid_instance_id"):
+			select_grid_house(str(object.get_meta("grid_instance_id")))
+			return
 	for i in range(24):
 		var location := map_position(game.plot_position(i))
 		if absf(location.x - hit.x) <= 4.6 and absf(location.z - hit.z) <= 4.6:
 			select_plot(i)
 			return
+	var cell := Vector2i(roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE), roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE))
+	var entry: Dictionary = game.territory.building_at(cell.x, cell.y)
+	if not entry.is_empty() and not entry.has("legacy_plot"):
+		select_grid_house(entry.instance_id)
+
+func select_grid_house(identifier: String) -> void:
+	grid_selected_id = identifier
+	selection_kind = "grid_house"
+	selected = -1
+	active_tab = "district"
+	audio.play_ui("select")
+	refresh()
 
 func select_plot(index: int) -> void:
 	if index < 0 or index >= game.buildings.size():
@@ -693,11 +720,18 @@ func open_territory() -> void:
 	selection_kind = "territory"
 	selected = -1
 	territory_tool = "clear"
-	set_camera_focus(game.territory.cell_world(12, 22) + Vector3(5, 0, 12))
+	territory_cell = Vector2i(-1, -1)
+	set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
+	refresh()
+
+func select_territory_cell(cell: Vector2i) -> void:
+	territory_cell = cell
+	if territory_tool == "house":
+		set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(9.4, 0, 9.4))
 	refresh()
 
 func build_territory_sheet() -> void:
-	action_height = 370
+	action_height = 380
 	header(tr_text("Освоение территории", "Expand the city"))
 	for tool in ["clear", "road", "house"]:
 		var title := tr_text("Расчистить", "Clear") if tool == "clear" else (tr_text("Дорога", "Road") if tool == "road" else tr_text("Дом", "House"))
@@ -706,12 +740,38 @@ func build_territory_sheet() -> void:
 		choice.add_theme_font_size_override("font_size", 19)
 		if territory_tool == tool:
 			choice.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
-	var note := label(20, sheet_column, tr_text("Расчистка: 5 монет за клетку. Дорога: 12. Дом занимает 2×2 клетки и стоит 80.", "Clear: 5 coins per cell. Road: 12. A house occupies 2×2 cells and costs 80."))
+	var note := label(20, sheet_column, tr_text("Выберите клетку на карте, проверьте контур и подтвердите. Дом занимает 2×2 клетки.", "Select a map cell, check the outline, then confirm. A home occupies 2×2 cells."))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var cell_text := tr_text("Клетка %d, %d · %s" % [territory_cell.x, territory_cell.y, game.territory.state_at(territory_cell.x, territory_cell.y)], "Cell %d, %d · %s" % [territory_cell.x, territory_cell.y, game.territory.state_at(territory_cell.x, territory_cell.y)]) if territory_cell.x >= 0 else tr_text("Выберите клетку на северной границе леса.", "Select a cell at the northern forest edge.")
-	label(19, sheet_column, cell_text)
+	var reason := territory_reason()
+	var hint := label(20, sheet_column, placement_hint(reason))
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_color_override("font_color", Color("41875a") if reason == "" else INK)
+	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost("house"))
+	var verb := tr_text("Расчистить", "Clear") if territory_tool == "clear" else (tr_text("Проложить дорогу", "Build road") if territory_tool == "road" else tr_text("Построить дом", "Build home"))
+	var confirm := button(sheet_column, verb + " · %d" % cost, apply_territory_tool, true)
+	confirm.name = "ConfirmTerritory"
+	confirm.disabled = reason != ""
 	var done := button(sheet_column, tr_text("Готово", "Done"), close_sheet)
 	done.custom_minimum_size.y = 72
+
+func territory_reason() -> String:
+	if territory_cell.x < 0:
+		return "select"
+	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool)
+	if reason != "":
+		return reason
+	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost("house"))
+	return "" if game.budget >= cost else "budget"
+
+func placement_hint(reason: String) -> String:
+	match reason:
+		"select": return tr_text("Начните у края существующей дороги.", "Start at an existing road edge.")
+		"outside": return tr_text("Весь участок должен быть в области освоения.", "The whole footprint must fit the expansion area.")
+		"not_forest": return tr_text("Здесь уже нет леса. Выберите зелёную клетку.", "No forest here. Select a green cell.")
+		"clear_first": return tr_text("Сначала расчистите весь отмеченный участок.", "Clear the entire highlighted footprint first.")
+		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
+		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
+	return tr_text("Можно разместить. Дорога и обратный путь доступны.", "Ready to place. Road access and a return path are available.") if territory_tool != "clear" else tr_text("Дерево будет убрано, клетка освободится.", "The tree will be removed, freeing the cell.")
 
 func set_territory_tool(tool: String) -> void:
 	territory_tool = tool
@@ -728,6 +788,9 @@ func apply_territory_tool() -> void:
 	if success:
 		audio.play_ui("success")
 		territory_signature = ""
+		if territory_tool == "house":
+			select_grid_house(game.territory.building_at(territory_cell.x, territory_cell.y).instance_id)
+			return
 	else:
 		audio.play_ui("deny")
 	refresh()
@@ -814,6 +877,10 @@ func build_sheet() -> void:
 		build_district_sheet()
 	elif selection_kind == "territory":
 		build_territory_sheet()
+	elif selection_kind == "grid_house":
+		build_grid_house_sheet()
+	elif selection_kind == "grid_upgrade":
+		build_grid_upgrade_sheet()
 	elif selection_kind == "transit":
 		build_transit_sheet()
 	elif selection_kind in ["signal", "leak"]:
@@ -908,6 +975,38 @@ func update_preview() -> void:
 		preview.queue_free()
 		preview = null
 	clear_children(highlights)
+	if selection_kind == "territory" and territory_cell.x >= 0:
+		var color := Color("8ed6f8") if territory_reason() == "" else Color("e18470")
+		var size_value := 2 if territory_tool == "house" else 1
+		for dy in range(size_value):
+			for dx in range(size_value):
+				var point: Vector3 = game.territory.cell_world(territory_cell.x + dx, territory_cell.y + dy)
+				for side in [-1, 1]:
+					Art.box(highlights, point + Vector3(side * 2.3, 0.3, 0), Vector3(0.15, 0.08, 4.6), color)
+					Art.box(highlights, point + Vector3(0, 0.3, side * 2.3), Vector3(4.6, 0.08, 0.15), color)
+		if territory_tool == "house":
+			var point: Vector3 = game.territory.cell_world(territory_cell.x, territory_cell.y) + Vector3(2.4, 0.2, 2.4)
+			preview = create_object(world, "house", "grid_house_preview", point)
+			make_ghost(preview, color)
+		return
+	if selection_kind in ["grid_house", "grid_upgrade"]:
+		var entry: Dictionary = game.territory.building_by_id(grid_selected_id)
+		if entry.is_empty():
+			return
+		var point: Vector3 = game.territory.building_center(entry)
+		outline(point, Color("8ed6f8"))
+		if selection_kind == "grid_upgrade":
+			preview = create_object(world, "house", "grid_upgrade_preview", point)
+			preview.set_level(mini(3, int(entry.get("level", 1)) + 1))
+			make_ghost(preview, Color("8ed6f8"))
+		else:
+			var route: Array = game.service_route(grid_selected_id)
+			for index in range(1, route.size()):
+				var first := map_position(route[index - 1]) + Vector3(0, 0.3, 0)
+				var second := map_position(route[index]) + Vector3(0, 0.3, 0)
+				var edge := Art.box(highlights, (first + second) / 2, Vector3(0.17, 0.06, first.distance_to(second)), Color("8ed6f8"))
+				edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
+		return
 	if placing_stop:
 		var point: Vector3 = game.transit.stop_position(stop_candidate)
 		for i in range(4):
@@ -916,9 +1015,9 @@ func update_preview() -> void:
 			var length := first.distance_to(second)
 			var edge := Art.box(highlights, (first + second) / 2, Vector3(0.18, 0.08, length), Color("8ed6f8"))
 			edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
-		for i in range(24):
-			if game.buildings[i] == "house" and game.transit.in_range(map_position(game.plot_position(i)), stop_candidate):
-				outline(map_position(game.plot_position(i)), Color("a7f384"))
+		for entry: Dictionary in game.all_buildings():
+			if entry.type_id == "house" and game.transit.in_range(entry.position, stop_candidate):
+				outline(entry.position, Color("a7f384"))
 		preview = create_object(world, "bus_stop", "stop_preview", point)
 		preview.interaction_area.collision_layer = 0
 		return
@@ -952,6 +1051,16 @@ func update_preview() -> void:
 	for i in range(24):
 		if i != selected and (game.buildings[i] in ["cafe", "park"] if preview_kind == "house" else game.buildings[i] == "house") and game.building_world(i).distance_to(game.building_world(selected)) < Simulation.AMENITY_RADIUS:
 			outline(map_position(game.plot_position(i)), Color("a7f384"))
+
+func make_ghost(object: Node3D, color: Color) -> void:
+	object.interaction_area.collision_layer = 0
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(color, 0.42)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for item in object.visual_root.find_children("*", "GeometryInstance3D", true, false):
+		item.material_override = material
+		item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 func dispatch() -> void:
 	if game.dispatch(selection_kind):
@@ -1236,6 +1345,95 @@ func house_problems(index: int) -> Array:
 
 func build_house_sheet() -> void:
 	build_building_sheet()
+
+func selected_grid_record() -> Dictionary:
+	for entry: Dictionary in game.all_buildings():
+		if entry.instance_id == grid_selected_id:
+			return entry
+	return {}
+
+func build_grid_house_sheet() -> void:
+	var entry := selected_grid_record()
+	if entry.is_empty():
+		return
+	action_height = 430
+	header(t("house") + " · %d/3" % entry.level)
+	var data: Dictionary = game.record_quality(entry)
+	var condition := label(25, sheet_column, "● " + quality_name(data.score), true)
+	condition.add_theme_color_override("font_color", quality_color(data.score))
+	if not data.transport:
+		var issue := label(20, sheet_column, tr_text("Нет транспорта — нужна остановка на полезном маршруте", "No transit — a stop on a useful route is needed"))
+		issue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if not data.services:
+		label(20, sheet_column, tr_text("Службы задерживаются — проверьте дорогу и светофор", "Services delayed — check the road and signal")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label(20, sheet_column, t("residents") % [game.record_residents(entry), Catalog.level_data("house", entry.level).income])
+	var row := hbox(sheet_column)
+	var price: int = Catalog.level_data("house", entry.level).upgrade_cost
+	var improve := button(row, tr_text("Улучшить · %d", "Upgrade · %d") % price if entry.level < 3 else tr_text("Максимум", "Maximum"), func():
+		selection_kind = "grid_upgrade"
+		refresh(), true)
+	improve.name = "UpgradeButton"
+	improve.disabled = entry.level >= 3
+	button(row, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
+	var inspected: bool = bool(entry.get("inspected", false))
+	var inspect_button := button(sheet_column, tr_text("Обслуживание проверено", "Service access checked") if inspected else tr_text("Проверить выезд бригады", "Check crew access"), dispatch_grid_inspection)
+	inspect_button.name = "InspectGridHouse"
+	inspect_button.disabled = inspected or game.job != "" or game.service_route(grid_selected_id).is_empty()
+	status = label(19, sheet_column)
+	update_crew_status()
+
+func dispatch_grid_inspection() -> void:
+	if game.dispatch_to_building(grid_selected_id):
+		audio.play("siren", "Effects", game.vehicle)
+	else:
+		audio.play_ui("deny")
+	refresh()
+
+func build_grid_upgrade_sheet() -> void:
+	var entry := selected_grid_record()
+	if entry.is_empty():
+		return
+	action_height = 320
+	header(tr_text("Предпросмотр · %d/3", "Preview · %d/3") % mini(3, entry.level + 1))
+	label(22, sheet_column, building_effect("house", mini(3, entry.level + 1))).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var price: int = Catalog.level_data("house", entry.level).upgrade_cost
+	var confirm := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % price, func():
+		if game.upgrade_grid_house(grid_selected_id):
+			audio.play_ui("success")
+		selection_kind = "grid_house"
+		refresh(), true)
+	confirm.name = "ConfirmGridUpgrade"
+	confirm.disabled = entry.level >= 3 or game.budget < price
+	button(sheet_column, t("cancel"), func():
+		selection_kind = "grid_house"
+		refresh())
+
+func open_grid_more() -> void:
+	var entry := selected_grid_record()
+	if entry.is_empty():
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "GridDemolitionConfirmation"
+	dialog.theme = ui_theme
+	dialog.title = tr_text("Подтвердите снос", "Confirm demolition")
+	dialog.ok_button_text = tr_text("Снести", "Demolish")
+	dialog.cancel_button_text = t("cancel")
+	dialog.dialog_text = tr_text("Дом исчезнет, четыре клетки освободятся.\nЖители: −%d · доход: −%d/12 сек.\nТранспортный спрос и качество пересчитаются.\nВозврат: %d", "The home will be removed, freeing four cells.\nResidents: −%d · income: −%d/12 sec.\nTransit demand and quality will be recalculated.\nRefund: %d") % [game.record_residents(entry), Catalog.level_data("house", entry.level).income, game.grid_demolition_refund(grid_selected_id)]
+	var identifier := grid_selected_id
+	var busy: bool = game.job != "" and game.target_instance_id == identifier
+	if busy:
+		dialog.dialog_text = tr_text("Дождитесь возвращения бригады в депо.", "Wait for the crew to return to the depot.")
+	add_child(dialog)
+	decorate_dialog(dialog)
+	dialog.get_ok_button().disabled = busy
+	dialog.confirmed.connect(func():
+		if game.demolish_grid_house(identifier):
+			audio.play_ui("success")
+			close_sheet()
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(480, 330))
 
 func build_building_sheet() -> void:
 	action_height = 430

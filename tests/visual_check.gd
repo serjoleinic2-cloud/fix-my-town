@@ -26,6 +26,23 @@ func capture() -> void:
 	scene.apply_quality()
 	if mode == "en":
 		scene.game.language = "en"
+	if mode.begins_with("expansion"):
+		scene.game.budget = 5000
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22), Vector2i(15, 21), Vector2i(16, 21), Vector2i(15, 22), Vector2i(16, 22)]:
+			scene.game.clear_grid_cell(cell.x, cell.y)
+		for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22)]:
+			scene.game.build_grid_road(cell.x, cell.y)
+		scene.open_territory()
+		scene.territory_tool = "house"
+		scene.select_territory_cell(Vector2i(15, 21))
+		if mode in ["expansion_house", "expansion_condition"]:
+			scene.game.build_grid_house(15, 21)
+			scene.select_grid_house(scene.game.territory.building_at(15, 21).instance_id)
+			scene.quality_mode = mode == "expansion_condition"
+		if mode == "expansion_en":
+			scene.game.language = "en"
 	if mode == "done":
 		scene.game.leak_fixed = true
 		scene.game.signal_fixed = true

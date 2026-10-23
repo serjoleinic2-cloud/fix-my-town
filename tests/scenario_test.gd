@@ -132,11 +132,9 @@ func run() -> void:
 	check(scene.selected == 7, "Map picking")
 	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-9, 0, 6))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
-	print("DEBUG leak map selection=", scene.selection_kind, " selected=", scene.selected)
 	check(scene.selection_kind == "leak", "Leak on map opens action panel")
 	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-6.3, 0, 0))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
-	print("DEBUG signal map selection=", scene.selection_kind, " selected=", scene.selected)
 	check(scene.selection_kind == "signal", "Signal on map opens action panel")
 	# Tap projected roof positions (not ground centers) across the full row set.
 	for index in range(24):

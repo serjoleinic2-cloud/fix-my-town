@@ -64,7 +64,12 @@ func play(sound: String, channel: String, position_value: Variant = null) -> voi
 	player.stream = stream(sound)
 	player.pitch_scale = randf_range(0.96, 1.04)
 	voices.append(player)
-	player.finished.connect(player.queue_free)
+	# Сначала отвязываем playback от дерева: мобильный микшер ещё может
+	# завершать последний блок, когда очередь удаления уже обработана.
+	player.finished.connect(func():
+		player.stop()
+		player.stream = null
+		player.queue_free())
 	player.play()
 
 func clean_voices() -> void:
@@ -74,6 +79,7 @@ func set_loop(key: String, sound: String, channel: String, enabled: bool, positi
 	if not enabled:
 		if loops.has(key):
 			loops[key].stop()
+			loops[key].stream = null
 			loops[key].queue_free()
 			loops.erase(key)
 		return

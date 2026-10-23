@@ -247,7 +247,13 @@ func t(key: String) -> String:
 	return TEXT[key][0 if game.language == "ru" else 1]
 
 func _ready() -> void:
-	game.load_game()
+	var restored := game.load_game()
+	# A clean Android install is the test entry point: start with an empty
+	# district instead of showing the legacy showcase houses. Existing saves
+	# still take precedence and are restored normally.
+	if OS.has_feature("android") and not restored and not FileAccess.file_exists(game.save_path):
+		game.start_empty_city()
+		game.save_game()
 	for identifier in game.fires:
 		notified_fire_ids[str(identifier)] = true
 	if OS.is_debug_build() and OS.has_feature("android"):

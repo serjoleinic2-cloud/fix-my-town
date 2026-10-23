@@ -7,7 +7,7 @@ const ORIGIN := Vector3(-57.6, 0, -43.2) # world-space centre of cell (0, 0)
 const EXPANSION_COLS := Vector2i(8, 17)
 const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
-const BUILDINGS = ["house", "cafe", "park", "depot", "fire_station", "police_station", "hospital"]
+const BUILDINGS = ["house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
 
@@ -110,27 +110,28 @@ func build_house(col: int, row: int) -> bool:
 	return place_building(col, row, "house")
 
 func place_building(col: int, row: int, type_id: String) -> bool:
-	if type_id not in ["house", "fire_station", "police_station", "hospital", "depot"]:
+	if type_id not in BUILDINGS:
 		return false
-	if not in_bounds(col, row) or not in_bounds(col + 1, row + 1):
+	var footprint := Vector2i.ONE if type_id in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
+	if not in_bounds(col, row) or not in_bounds(col + footprint.x - 1, row + footprint.y - 1):
 		return false
 	var has_access := false
-	for dy in range(2):
-		for dx in range(2):
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
 			if cells[row + dy][col + dx] != "free":
 				return false
 			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 				var next: Vector2i = Vector2i(col + dx, row + dy) + offset
 				if in_bounds(next.x, next.y) and cells[next.y][next.x] == "road" and connected_road(next.x, next.y):
 					has_access = true
-	if not has_access:
+	if not has_access and type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
 		return false
-	for dy in range(2):
-		for dx in range(2):
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
 			cells[row + dy][col + dx] = "occupied"
 	var prefix := "pine_district_%s" % type_id
-	var entry := {"type_id": type_id, "instance_id": "%s_%d_%d" % [prefix, col, row], "col": col, "row": row, "width": 2, "height": 2, "level": 1, "inspected": false}
-	if type_id != "house":
+	var entry := {"type_id": type_id, "instance_id": "%s_%d_%d" % [prefix, col, row], "col": col, "row": row, "width": footprint.x, "height": footprint.y, "level": 1, "inspected": false}
+	if type_id in ["depot", "fire_station", "police_station", "hospital"]:
 		entry.service_building = true
 	buildings.append(entry)
 	return true
@@ -224,17 +225,37 @@ func access_path(entry: Dictionary, start: Vector2i) -> Array[Vector2i]:
 	return best
 
 func placement_reason(col: int, row: int, tool: String) -> String:
-	var footprint := 2 if tool in ["house", "fire_station", "police_station", "hospital", "depot", "service"] else 1
-	if col < EXPANSION_COLS.x or col + footprint - 1 > EXPANSION_COLS.y or row < EXPANSION_ROWS.x or row + footprint - 1 > EXPANSION_ROWS.y:
+	var footprint := Vector2i.ONE if tool in ["clear", "road", "landscaping"] or tool in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
+	if col < EXPANSION_COLS.x or col + footprint.x - 1 > EXPANSION_COLS.y or row < EXPANSION_ROWS.x or row + footprint.y - 1 > EXPANSION_ROWS.y:
 		return "outside"
 	if tool == "clear":
 		return "" if state_at(col, row) == "forest" else "not_forest"
-	for dy in range(footprint):
-		for dx in range(footprint):
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
 			if state_at(col + dx, row + dy) != "free":
 				return "clear_first"
-	var entry := {"col": col, "row": row, "width": footprint, "height": footprint}
+	if tool in ["landscaping", "lawn", "flower_bed", "street_tree", "bush"]:
+		return ""
+	var entry := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
 	return "" if not access_path(entry, Vector2i(12, 18)).is_empty() else "no_road"
+
+func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
+	if state_at(col, row) != "road" or Vector2i(col, row) == Vector2i(12, 18):
+		return false
+	if transit != null:
+		for stop in transit.stops:
+			if transit.stop_cell(stop, self) == Vector2i(col, row):
+				return false
+	cells[row][col] = "free"
+	var connected := true
+	for entry: Dictionary in buildings:
+		if entry.type_id in ["lawn", "flower_bed", "street_tree", "bush"]:
+			continue
+		if access_path(entry, Vector2i(12, 18)).is_empty():
+			connected = false
+			break
+	cells[row][col] = "road"
+	return connected
 
 func data() -> Dictionary:
 	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true)}
@@ -254,7 +275,10 @@ func restore(value: Variant) -> bool:
 				return false
 	var identifiers: Dictionary = {}
 	for building in new_buildings:
-		if not building is Dictionary or building.get("type_id") not in BUILDINGS or str(building.get("instance_id", "")) == "" or int(building.get("col", -1)) < 0 or int(building.get("row", -1)) < 0 or int(building.get("width", 0)) != 2 or int(building.get("height", 0)) != 2 or int(building.get("col", -1)) + 2 > WIDTH or int(building.get("row", -1)) + 2 > HEIGHT:
+		if not building is Dictionary or building.get("type_id") not in BUILDINGS or str(building.get("instance_id", "")) == "" or int(building.get("col", -1)) < 0 or int(building.get("row", -1)) < 0:
+			return false
+		var expected_footprint := Vector2i.ONE if building.type_id in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
+		if int(building.get("width", 0)) != expected_footprint.x or int(building.get("height", 0)) != expected_footprint.y or int(building.col) + expected_footprint.x > WIDTH or int(building.row) + expected_footprint.y > HEIGHT:
 			return false
 		var identifier: String = building.instance_id
 		var level_value: Variant = building.get("level", 1)
@@ -265,8 +289,8 @@ func restore(value: Variant) -> bool:
 		if identifiers.has(identifier):
 			return false
 		identifiers[identifier] = true
-		for dy in range(2):
-			for dx in range(2):
+		for dy in range(expected_footprint.y):
+			for dx in range(expected_footprint.x):
 				if new_cells[building.row + dy][building.col + dx] != "occupied":
 					return false
 	cells = new_cells.duplicate(true)

@@ -16,7 +16,8 @@ func build_service(game: RefCounted, col: int, kind: String) -> String:
 			if game.territory.state_at(x, row) == "forest":
 				game.clear_grid_cell(x, row)
 	check(game.build_grid_service(col, 19, kind), "Player can build %s on connected cleared land" % kind)
-	return str(game.territory.building_at(col, 19).instance_id)
+	var entry: Dictionary = game.territory.building_at(col, 19)
+	return str(entry.get("instance_id", ""))
 
 func _initialize() -> void:
 	call_deferred("run")
@@ -44,7 +45,9 @@ func run() -> void:
 	var save_path := "user://fire_scenario_test.json"
 	var game = Simulation.new()
 	game.save_path = save_path
-	game.budget = 2000
+	game.budget = 5000
+	game.leak_fixed = true
+	game.signal_fixed = true
 	var station_id := build_service(game, 12, "fire_station")
 	var police_id := build_service(game, 16, "police_station")
 	var income_before := game.income()
@@ -104,25 +107,29 @@ func run() -> void:
 	in_transit.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].repair_left = 500.0
 	in_transit.save_game()
 	check(in_transit.jam_cleared.has(Simulation.FIRST_FIRE_NEIGHBOR) and not in_transit.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR], "A stationary fire engine occupies its road until police clear it")
-	check(in_transit.dispatch_police(Simulation.FIRST_FIRE_NEIGHBOR), "Police can be called to a blocked fire location")
-	check(in_transit.police_job.depot_instance_id == police_id, "Police respond from the player-built police station")
+	var police_dispatched: bool = in_transit.dispatch_police(Simulation.FIRST_FIRE_NEIGHBOR)
+	check(police_dispatched, "Police can be called to a blocked fire location")
+	if police_dispatched:
+		check(in_transit.police_job.depot_instance_id == police_id, "Police respond from the player-built police station")
 	var police_reload = Simulation.new()
 	police_reload.save_path = save_path
-	check(police_reload.load_game() and not police_reload.police_job.is_empty(), "Police route and clearance phase survive reload")
+	var police_loaded: bool = police_reload.load_game() and not police_reload.police_job.is_empty()
+	check(police_loaded, "Police route and clearance phase survive reload")
 	var police_ticks := 0
-	while police_reload.police_job.phase == "travel" and police_ticks < 400:
+	while police_loaded and police_reload.police_job.phase == "travel" and police_ticks < 400:
 		police_reload.tick(1.0, true)
 		police_ticks += 1
-	check(police_reload.police_job.phase == "clearing", "Police reaches the selected roadblock")
-	for i in range(4):
-		police_reload.tick(1.0, true)
-	check(police_reload.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR], "Police clears the fire-engine blockage")
-	check(police_reload.police_job.phase == "return", "Police returns to its own station after clearing the lane")
+	if police_loaded:
+		check(police_reload.police_job.phase == "clearing", "Police reaches the selected roadblock")
+		for i in range(4):
+			police_reload.tick(1.0, true)
+		check(police_reload.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR], "Police clears the fire-engine blockage")
+		check(police_reload.police_job.phase == "return", "Police returns to its own station after clearing the lane")
 	var clear_reload = Simulation.new()
 	clear_reload.save_path = save_path
 	var clear_loaded: bool = clear_reload.load_game()
 	check(clear_loaded, "Cleared lane and returning police state restore")
-	check(clear_reload.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR] and clear_reload.police_job.phase == "return", "The completed road clearance persists")
+	check(clear_reload.jam_cleared.get(Simulation.FIRST_FIRE_NEIGHBOR, false) and str(clear_reload.police_job.get("phase", "")) == "return", "The completed road clearance persists")
 	clear_reload.repair_left = 0.5
 	clear_reload.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].repair_left = 0.5
 	var return_jobs := 0

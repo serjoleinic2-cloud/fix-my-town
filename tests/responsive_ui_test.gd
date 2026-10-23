@@ -105,7 +105,12 @@ func run() -> void:
 		var build_button = scene.action_box.get_child(0)
 		click(viewport, build_button.get_global_transform_with_canvas() * (build_button.size / 2))
 		await process_frame
-		check(scene.game.buildings[9] == "cafe", "Actual touch/mouse build button works")
+		check(scene.game.buildings[9] == "empty" and scene.game.construction_job.kind == "build_legacy", "Actual touch/mouse build button starts a saved worksite")
+		var construction_task: Dictionary = scene.game.construction_job.duplicate(true)
+		scene.game.tick(6.1)
+		scene.handle_construction_finish(construction_task)
+		scene.refresh()
+		check(scene.game.buildings[9] == "cafe", "Building appears when the work bar completes")
 		check(scene.game.budget == 180, "Construction button charges once")
 		scene.game.fire_triggered = true
 		scene.game.fires[Simulation.FIRST_FIRE_TARGET] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1}

@@ -123,6 +123,11 @@ func run() -> void:
 	scene.selected = 3
 	scene.selection_kind = "plot"
 	scene.construct("cafe")
+	check(not scene.game.completed and not scene.game.construction_job.is_empty(), "Construction starts as a saved worksite before the building appears")
+	var cafe_task: Dictionary = scene.game.construction_job.duplicate(true)
+	scene.game.tick(6.1)
+	scene.handle_construction_finish(cafe_task)
+	scene.refresh()
 	check(scene.game.completed, "UI complete scenario with cafe")
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT

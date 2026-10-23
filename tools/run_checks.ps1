@@ -28,4 +28,5 @@ Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--scr
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/expansion_scenario_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/expansion_ui_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/fire_scenario_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/construction_work_test.gd')
 Write-Host 'Все проверки пройдены.'

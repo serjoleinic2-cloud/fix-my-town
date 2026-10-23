@@ -25,6 +25,20 @@ func run() -> void:
 		scene.game = Simulation.new()
 		scene.game.save_path = "user://expansion_ui_test.json"
 		scene.game.budget = 5000
+		scene.open_catalog()
+		scene.set_catalog_category("services")
+		var police_card: Button = scene.sheet.find_child("CatalogItem_police_station", true, false)
+		check(police_card != null and police_card.disabled, "Police station remains visible but locked at city level one")
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		scene.refresh()
+		check(scene.game.city_level() >= 2 and not scene.sheet.find_child("CatalogItem_police_station", true, false).disabled, "City growth unlocks the next service tier")
+		var budget_before_cancel: int = scene.game.budget
+		scene.sheet.find_child("CatalogItem_fire_station", true, false).pressed.emit()
+		await process_frame
+		check(scene.selection_kind == "territory" and scene.territory_tool == "fire_station", "Selecting a catalog card enters placement mode")
+		scene.cancel_catalog_placement()
+		check(scene.selection_kind == "catalog" and scene.game.budget == budget_before_cancel and scene.game.construction_job.is_empty(), "Cancel returns to catalog without reserving money or starting work")
 		scene.game.clear_grid_cell(9, 19)
 		scene.game.build_grid_road(9, 19)
 		for dy in range(2):
@@ -50,7 +64,12 @@ func run() -> void:
 		# Подтверждение добавляет дом и открывает его собственную карточку.
 		scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
 		await process_frame
-		check(scene.selection_kind == "grid_house", "Construction opens the new home's card")
+		check(scene.selection_kind == "construction_job" and not scene.game.construction_job.is_empty() and scene.game.territory.building_at(10, 19).is_empty(), "Confirmed construction reserves funds and saves a worksite before the lot is occupied")
+		var house_task: Dictionary = scene.game.construction_job.duplicate(true)
+		scene.game.tick(6.1)
+		scene.handle_construction_finish(house_task)
+		scene.refresh()
+		check(scene.selection_kind == "grid_house", "Finished construction opens the new home's card")
 		for frame in range(3):
 			await physics_frame
 		var entry: Dictionary = scene.selected_grid_record()
@@ -86,7 +105,12 @@ func run() -> void:
 		await process_frame
 		scene.sheet.find_child("ConfirmGridUpgrade", true, false).pressed.emit()
 		await process_frame
-		check(scene.selected_grid_record().level == 2, "Confirmed upgrade changes the expansion level")
+		var grid_upgrade_task: Dictionary = scene.game.construction_job.duplicate(true)
+		check(grid_upgrade_task.get("kind", "") == "upgrade_grid" and scene.selected_grid_record().level == 1, "Confirming upgrade starts a saved worksite without changing the level early")
+		scene.game.tick(6.1)
+		scene.handle_construction_finish(grid_upgrade_task)
+		scene.refresh()
+		check(scene.selected_grid_record().level == 2, "Completed upgrade changes the expansion level")
 		check(scene.preview == null and scene.territory_visuals.get_node(NodePath(entry.instance_id)).visual_root.visible, "After confirmation only the upgraded real model remains")
 		scene.game.territory.building_by_id(entry.instance_id).inspected = true
 		scene.refresh()
@@ -109,10 +133,17 @@ func run() -> void:
 		scene.set_territory_tool("clear")
 		for dy in range(2):
 			for dx in range(2):
+				scene.open_territory()
+				scene.set_territory_tool("clear")
 				scene.territory_cell = Vector2i(12 + dx, 19 + dy)
 				scene.refresh()
 				scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
 				await process_frame
+				var clear_task: Dictionary = scene.game.construction_job.duplicate(true)
+				scene.game.tick(6.1)
+				scene.handle_construction_finish(clear_task)
+				scene.refresh()
+		scene.open_territory()
 		scene.set_territory_tool("service")
 		scene.set_service_type("fire_station")
 		scene.territory_cell = Vector2i(12, 19)
@@ -121,7 +152,12 @@ func run() -> void:
 		var service_valid: bool = scene.territory_reason() == "" and not scene.sheet.find_child("ConfirmTerritory", true, false).disabled
 		scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
 		await process_frame
-		check(service_choice_visible and service_valid and scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(13, 20) == "occupied", "Service menu offers player-placed fire station on a connected cleared footprint and reserves every cell")
+		check(service_valid and not scene.game.construction_job.is_empty() and scene.game.construction_job.type_id == "fire_station" and scene.game.territory.state_at(13, 20) == "free", "Service selection starts a worksite without occupying its lot early")
+		var service_task: Dictionary = scene.game.construction_job.duplicate(true)
+		scene.game.tick(6.1)
+		scene.handle_construction_finish(service_task)
+		scene.refresh()
+		check(scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(13, 20) == "occupied", "Finished player-placed fire station occupies its full footprint")
 		scene.game.buildings[3] = "cafe"
 		scene.select_plot(3)
 		check(scene.action_height < 430 and scene.sheet.get_global_rect().end.y <= scene.navbar.position.y + 1, "Café card fits its content without a fixed empty footer")

@@ -26,9 +26,29 @@ func _ready() -> void:
 		service_station(Color("e6e5dc"), Color("62a9a0"), "БОЛЬНИЦА")
 	elif visual_type == "park":
 		park()
+	elif visual_type == "lawn":
+		Art.box(self, Vector3(0, 0.05, 0), Vector3(4.25, 0.1, 4.25), Color("83ad62"))
+	elif visual_type == "flower_bed":
+		Art.box(self, Vector3(0, 0.08, 0), Vector3(4.2, 0.16, 3.6), Color("5c7550"))
+		for x in [-1.4, -0.7, 0, 0.7, 1.4]:
+			for z in [-0.9, 0, 0.9]:
+				Art.cylinder(self, Vector3(x, 0.42, z), 0.12, 0.56, Color("4f8652"))
+				var flower_colors := [Color("edc75b"), Color("d97f78"), Color("c58bc0")]
+				var color_index := posmod(roundi(absf(x * 3 + z)), flower_colors.size())
+				Art.sphere(self, Vector3(x, 0.77, z), 0.23, flower_colors[color_index])
+	elif visual_type == "street_tree":
+		Art.box(self, Vector3(0, 0.08, 0), Vector3(2.5, 0.16, 2.5), Color("879d66"))
+		Art.tree(self, Vector3.ZERO, 0.85, false, seed_value % 4)
+	elif visual_type == "bush":
+		Art.box(self, Vector3(0, 0.06, 0), Vector3(3.9, 0.12, 3.9), Color("879d66"))
+		for x in [-0.9, 0, 0.9]:
+			for z in [-0.65, 0.45]:
+				Art.hedge(self, Vector3(x, 0.45, z), Vector3(0.68, 0.62, 0.7))
 	elif visual_type == "empty":
 		for i in range(3):
 			Art.hedge(self, Vector3(-3 + i * 2.5, 0.24, -3.6), Vector3(0.7, 0.45, 0.55))
+	elif visual_type in ["excavator", "dump_truck"]:
+		construction_vehicle()
 	elif visual_type == "repair_van":
 		van()
 	elif visual_type == "fire_engine":
@@ -259,6 +279,31 @@ func van() -> void:
 		Art.box(self, Vector3(x, 0.7, 1.29), Vector3(0.28, 0.23, 0.06), Color("fff0be"))
 	Art.box(self, Vector3(0, 0.37, 1.35), Vector3(1.65, 0.18, 0.13), Color("566971"))
 	Art.cylinder(self, Vector3(0, 1.68, 0.7), 0.15, 0.24, Color("efb545"), 1, 10)
+
+func construction_vehicle() -> void:
+	var excavator := visual_type == "excavator"
+	var yellow := Color("e5a932")
+	Art.box(self, Vector3(0, 0.55, 0), Vector3(2.2, 0.75, 3.6), Color("444b4d"))
+	for side in [-1, 1]:
+		Art.box(self, Vector3(side * 1.12, 0.48, 0), Vector3(0.28, 0.72, 3.8), Color("343a3b"))
+		for z in [-1.25, -0.65, 0, 0.65, 1.25]:
+			var roller := Art.cylinder(self, Vector3(side * 1.28, 0.45, z), 0.25, 0.12, Color("656c6d"), 0.0, 10)
+			roller.rotation.z = PI / 2
+	if excavator:
+		Art.box(self, Vector3(0, 1.1, -0.25), Vector3(1.45, 0.65, 1.65), yellow)
+		Art.box(self, Vector3(0, 1.75, -0.3), Vector3(1.25, 1.15, 1.2), yellow)
+		Art.box(self, Vector3(0, 2.0, 0.3), Vector3(1.05, 0.65, 0.12), Color("80a8ad"))
+		var upper_arm := Art.box(self, Vector3(-0.85, 2.15, 0.95), Vector3(0.42, 0.42, 2.1), yellow)
+		upper_arm.rotation.x = -0.32
+		var lower_arm := Art.box(self, Vector3(-1.25, 1.57, 2.15), Vector3(0.32, 0.32, 1.55), yellow)
+		lower_arm.rotation.x = 0.4
+		Art.box(self, Vector3(-1.35, 0.95, 2.8), Vector3(0.72, 0.42, 0.62), Color("474d4e"))
+	else:
+		Art.box(self, Vector3(0, 1.05, -0.25), Vector3(1.55, 0.7, 1.75), yellow)
+		Art.box(self, Vector3(0, 1.75, 0.25), Vector3(1.45, 1.1, 1.15), Color("e9b43b"))
+		Art.box(self, Vector3(0, 1.95, 0.86), Vector3(1.1, 0.62, 0.08), Color("83a9ad"))
+		var bed := Art.box(self, Vector3(0, 1.35, -1.35), Vector3(1.9, 0.14, 1.8), Color("a85b42"))
+		bed.rotation.x = -0.13
 
 func set_serviced(value: bool) -> void:
 	for item: MeshInstance3D in windows:

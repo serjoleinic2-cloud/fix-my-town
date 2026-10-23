@@ -134,6 +134,15 @@ func run() -> void:
 	queued_vehicle.road = -1.0
 	queued_vehicle.coordinate = -6.0
 	check(traffic.travel_distance(queued_vehicle, 0.5) <= 2.2, "Civilian traffic queues behind a stopped fire engine")
+	traffic.blocking_positions = [{"id": "construction_dump_truck", "position": Vector3(0, 0.18, 0)}]
+	var works_vehicle: Dictionary = traffic.vehicles[0]
+	works_vehicle.node.show()
+	works_vehicle.axis = "H"
+	works_vehicle.direction = 1
+	works_vehicle.road = -1.0
+	works_vehicle.coordinate = -6.0
+	check(traffic.travel_distance(works_vehicle, 0.5) <= 2.2, "Civilian traffic queues behind the construction dump truck")
+	traffic.blocking_positions = [{"id": "fire_engine_test", "incident_id": "fire_incident", "position": Vector3(0, 0.18, 0)}]
 	var following_service := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "repair_crew", true)
 	check(following_service < 2.0, "A roadblock delays another service vehicle too")
 	var police_clearance := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "police", false, "fire_incident")

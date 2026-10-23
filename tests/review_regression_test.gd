@@ -17,6 +17,16 @@ func run() -> void:
 	var game := Simulation.new()
 	game.save_path = "user://review_regression_test.json"
 	game.budget = 5000
+	check(game.incident_penalty() == 5 and game.net_income() == game.income() - 5, "Unresolved service failures reduce periodic net income")
+	game.budget = 0
+	game.tick(12.0, false)
+	check(game.budget > 0, "Zero budget receives a small operating subsidy instead of causing a loss state")
+	game.budget = 5000
+	var neglected := Simulation.new()
+	neglected.save_path = "user://neglect_test.json"
+	neglected.signal_fixed = true
+	neglected.tick(72.0, false)
+	check(neglected.house_damage("pine_district_legacy_12") > 0, "Long-unresolved water failure damages affected homes")
 	game.leak_fixed = true
 	game.signal_fixed = true
 	game.build(9, "cafe")
@@ -59,5 +69,7 @@ func run() -> void:
 	traffic.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(game.save_path)
+	DirAccess.remove_absolute(neglected.save_path)
 	print("REVIEW REGRESSIONS: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
+

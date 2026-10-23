@@ -46,6 +46,32 @@ func run() -> void:
 	scene.game.save_path = "user://map_interaction_test.json"
 	for frame in range(12):
 		await process_frame
+	var original_zoom: float = scene.camera.size
+	var pinch_start := InputEventScreenTouch.new()
+	var pinch_second := InputEventScreenTouch.new()
+	var pinch_move := InputEventScreenDrag.new()
+	pinch_start.index = 0
+	pinch_start.position = Vector2(200, 400)
+	pinch_start.pressed = true
+	scene.handle_map_gesture(pinch_start)
+	pinch_second.index = 1
+	pinch_second.position = Vector2(400, 400)
+	pinch_second.pressed = true
+	scene.handle_map_gesture(pinch_second)
+	var zoom_before_pinch: float = scene.camera.size
+	pinch_move.index = 1
+	pinch_move.position = Vector2(600, 400)
+	scene.handle_map_gesture(pinch_move)
+	check(scene.camera.size < zoom_before_pinch, "Moving two fingers apart zooms the camera in")
+	pinch_move.position = Vector2(300, 400)
+	scene.handle_map_gesture(pinch_move)
+	check(scene.camera.size > 45.0, "Moving two fingers together zooms the camera back out")
+	pinch_second.pressed = false
+	scene.handle_map_gesture(pinch_second)
+	pinch_start.pressed = false
+	scene.handle_map_gesture(pinch_start)
+	check(scene.selection_kind == "", "A pinch gesture does not tap-select a map object")
+	scene.camera.size = original_zoom
 	var checked := 0
 	for index in range(scene.game.buildings.size()):
 		if scene.game.buildings[index] == "empty":

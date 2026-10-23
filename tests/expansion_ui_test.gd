@@ -25,7 +25,20 @@ func run() -> void:
 		scene.game = Simulation.new()
 		scene.game.save_path = "user://expansion_ui_test.json"
 		scene.game.budget = 5000
+		var straight_links: Array[Vector2i] = [Vector2i.LEFT, Vector2i.RIGHT]
+		var corner_links: Array[Vector2i] = [Vector2i.LEFT, Vector2i.UP]
+		var tee_links: Array[Vector2i] = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP]
+		var cross_links: Array[Vector2i] = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
+		check(scene.road_topology(straight_links) == "straight", "New road has a straight marking layout")
+		check(scene.road_topology(corner_links) == "corner", "A 90-degree connection gets a dedicated corner layout")
+		check(scene.road_topology(tee_links) == "tee", "A three-way intersection gets a dedicated crossing layout")
+		check(scene.road_topology(cross_links) == "cross", "A four-way intersection gets a dedicated crossing layout")
 		scene.open_catalog()
+		for frame in range(3):
+			await process_frame
+		var initial_catalog: Control = scene.sheet
+		check(initial_catalog.size.y <= 480, "Catalog with a single house stays compact and does not cover most of the map")
+		check(initial_catalog.find_child("ModelPreview_house", true, false) != null, "Building catalog uses a live VisualRoot model preview instead of a placeholder image")
 		scene.set_catalog_category("services")
 		var police_card: Button = scene.sheet.find_child("CatalogItem_police_station", true, false)
 		check(police_card != null and police_card.disabled, "Police station remains visible but locked at city level one")
@@ -33,7 +46,32 @@ func run() -> void:
 		scene.game.signal_fixed = true
 		scene.refresh()
 		check(scene.game.city_level() >= 2 and not scene.sheet.find_child("CatalogItem_police_station", true, false).disabled, "City growth unlocks the next service tier")
+		var land_cell := Vector2i(14, 21)
+		scene.open_land_cell(land_cell)
+		check(scene.selection_kind == "land_cell" and scene.sheet.find_child("ClearLandCell", true, false) != null,
+			"Tapping a forest tile opens immediate land actions")
+		scene.sheet.find_child("ClearLandCell", true, false).pressed.emit()
+		await process_frame
+		check(scene.selection_kind == "territory" and scene.territory_tool == "clear" and scene.territory_cell == land_cell,
+			"Forest action enters placement mode for the exact tapped tile")
+		scene.close_sheet()
+		check(scene.game.territory.clear_cell(land_cell.x, land_cell.y), "Prepare a free landscaping tile for the interaction regression")
+		scene.open_land_cell(land_cell)
+		scene.sheet.find_child("LandscapeLandCell", true, false).pressed.emit()
+		await process_frame
+		check(scene.selection_kind == "catalog" and scene.catalog_category == "landscaping" and scene.catalog_grid_target == land_cell,
+			"A tapped free tile opens the landscaping catalog targeted to that tile")
+		scene.sheet.find_child("CatalogItem_lawn", true, false).pressed.emit()
+		await process_frame
+		check(scene.selection_kind == "territory" and scene.territory_cell == land_cell and scene.territory_tool == "lawn",
+			"Choosing lawn keeps the original tap location as the placement preview")
+		var one_cell_size: Vector2 = scene.territory_building_visual_size({"width": 1, "height": 1})
+		check(one_cell_size.is_equal_approx(Vector2(4.6, 4.6)), "Landscaping ground visual stays inside its one-cell footprint")
+		scene.close_sheet()
 		var budget_before_cancel: int = scene.game.budget
+		scene.open_catalog()
+		scene.set_catalog_category("services")
+		await process_frame
 		scene.sheet.find_child("CatalogItem_fire_station", true, false).pressed.emit()
 		await process_frame
 		check(scene.selection_kind == "territory" and scene.territory_tool == "fire_station", "Selecting a catalog card enters placement mode")

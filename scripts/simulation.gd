@@ -344,22 +344,31 @@ func _start_construction(fields: Dictionary) -> bool:
 	data.remaining = CONSTRUCTION_DURATION
 	data.position = _construction_position(data)
 	var site := Vector3(data.position[0], data.position[1], data.position[2])
-	var digger_target := site + Vector3(-2.1, 0.05, -1.2)
-	var digger_start := digger_target + Vector3(-4.0, 0, -3.2)
-	data.excavator_start_position = [digger_start.x, digger_start.y, digger_start.z]
-	data.excavator_target_position = [digger_target.x, digger_target.y, digger_target.z]
-	data.excavator_position = data.excavator_start_position.duplicate()
 	var road_cell: Vector2i = territory.nearest_road(site)
 	var truck_target := territory.cell_world(road_cell.x, road_cell.y) if road_cell.x >= 0 else site
 	var truck_start_cell := road_cell
-	if road_cell.x >= 0:
-		var access_path := territory.road_path(Vector2i(12, 18), road_cell)
-		if access_path.size() > 1:
-			truck_start_cell = access_path[access_path.size() - 2]
+	var access_path := territory.path_to_city(road_cell.x, road_cell.y) if road_cell.x >= 0 else []
+	if access_path.size() > 1:
+		truck_start_cell = access_path[access_path.size() - 2]
+	elif road_cell.x >= 0:
+		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var candidate := road_cell + offset
+			if territory.state_at(candidate.x, candidate.y) == "road" and territory.connected_road(candidate.x, candidate.y):
+				truck_start_cell = candidate
+				break
 	var truck_start := territory.cell_world(truck_start_cell.x, truck_start_cell.y) if truck_start_cell.x >= 0 else truck_target
 	data.truck_start_position = [truck_start.x, truck_start.y, truck_start.z]
 	data.truck_target_position = [truck_target.x, truck_target.y, truck_target.z]
 	data.truck_position = data.truck_start_position.duplicate()
+	var digger_start := truck_start
+	var digger_target := truck_target
+	if truck_start_cell.x != road_cell.x or truck_start_cell.y != road_cell.y:
+		var lateral := Vector3(0, 0, 0.82) if truck_start_cell.y == road_cell.y else Vector3(0.82, 0, 0)
+		digger_start += lateral
+		digger_target += lateral
+	data.excavator_start_position = [digger_start.x, digger_start.y, digger_start.z]
+	data.excavator_target_position = [digger_target.x, digger_target.y, digger_target.z]
+	data.excavator_position = data.excavator_start_position.duplicate()
 	data.arrival_duration = 0.8
 	construction_job = data
 	save_game()
@@ -375,6 +384,54 @@ func _construction_position(data: Dictionary) -> Array:
 		var size := Catalog.footprint_cells(str(data.get("type_id", "house")))
 		point += Vector3((size.x - 1) * TerritoryGrid.CELL_SIZE * 0.5, 0.0, (size.y - 1) * TerritoryGrid.CELL_SIZE * 0.5)
 	return [point.x, point.y, point.z]
+
+func normalize_construction_vehicle_paths(task: Dictionary, grid: RefCounted) -> void:
+	if task.is_empty():
+		return
+	var stored_site: Array = task.get("position", [])
+	if stored_site.size() != 3:
+		return
+	var site := Vector3(float(stored_site[0]), float(stored_site[1]), float(stored_site[2]))
+	var road_cell: Vector2i = grid.nearest_road(site)
+	if road_cell.x < 0:
+		return
+	var road_target: Vector3 = grid.cell_world(road_cell.x, road_cell.y)
+	var start_cell := road_cell
+	var path: Array = grid.path_to_city(road_cell.x, road_cell.y)
+	if path.size() > 1:
+		start_cell = path[path.size() - 2]
+	else:
+		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var candidate := road_cell + offset
+			if grid.state_at(candidate.x, candidate.y) == "road" and grid.connected_road(candidate.x, candidate.y):
+				start_cell = candidate
+				break
+	var road_start: Vector3 = grid.cell_world(start_cell.x, start_cell.y)
+	var truck_start := road_start
+	var truck_target := road_target
+	var excavator_start := road_start
+	var excavator_target := road_target
+	if start_cell.x != road_cell.x or start_cell.y != road_cell.y:
+		var lateral := Vector3(0, 0, 0.82) if start_cell.y == road_cell.y else Vector3(0.82, 0, 0)
+		excavator_start += lateral
+		excavator_target += lateral
+	var rebuilt := {
+		"truck_start_position": [truck_start.x, truck_start.y, truck_start.z],
+		"truck_target_position": [truck_target.x, truck_target.y, truck_target.z],
+		"excavator_start_position": [excavator_start.x, excavator_start.y, excavator_start.z],
+		"excavator_target_position": [excavator_target.x, excavator_target.y, excavator_target.z]
+	}
+	var arrival_ratio := clampf((float(task.get("total", 0.0)) - float(task.get("remaining", 0.0))) / maxf(0.1, float(task.get("arrival_duration", 0.8))), 0.0, 1.0)
+	for machine in [
+		["truck_position", "truck_start_position", "truck_target_position"],
+		["excavator_position", "excavator_start_position", "excavator_target_position"]
+	]:
+		var from: Array = rebuilt[machine[1]]
+		var to: Array = rebuilt[machine[2]]
+		var current := Vector3(float(from[0]), float(from[1]), float(from[2])).lerp(Vector3(float(to[0]), float(to[1]), float(to[2])), arrival_ratio)
+		task[machine[0]] = [current.x, current.y, current.z]
+		task[machine[1]] = from
+		task[machine[2]] = to
 
 func construction_progress() -> float:
 	if construction_job.is_empty():
@@ -1322,6 +1379,7 @@ func load_game() -> bool:
 			if raw_construction.has(position_key) and not valid_point(raw_construction[position_key]):
 				return false
 		loaded_construction = raw_construction.duplicate(true)
+		normalize_construction_vehicle_paths(loaded_construction, loaded_territory)
 	if stored_job == "fire" and stored_phase != "return" and (not loaded_fires.has(stored_target) or loaded_fires.is_empty()):
 		return false
 	var triggered: Variant = data.get("fire_triggered", not loaded_fires.is_empty())

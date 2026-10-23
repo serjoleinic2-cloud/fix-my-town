@@ -40,10 +40,12 @@ func run() -> void:
 	check(game.start_grid_construction(12, 19, "house"), "Start a grid house worksite")
 	check(game.budget == starting_budget - Catalog.cost("house"), "Construction cost is reserved at dispatch")
 	check(game.territory.building_at(12, 19).is_empty(), "Lot remains free until work completes")
+	check_construction_vehicles_on_roads(game, "Before arrival")
 	var excavator_start: Array = game.construction_job.excavator_position.duplicate()
 	game.tick(0.4)
 	var excavator_moved: Array = game.construction_job.excavator_position
 	check(not Vector3(exact_float(excavator_start, 0), exact_float(excavator_start, 1), exact_float(excavator_start, 2)).is_equal_approx(Vector3(exact_float(excavator_moved, 0), exact_float(excavator_moved, 1), exact_float(excavator_moved, 2))), "Excavator visibly approaches the work area")
+	check_construction_vehicles_on_roads(game, "During arrival")
 	game.tick(1.6)
 	var first_progress := game.construction_progress()
 	game.save_game()
@@ -104,3 +106,20 @@ func run() -> void:
 
 func exact_float(point: Array, index: int) -> float:
 	return float(point[index])
+
+func check_construction_vehicles_on_roads(game: RefCounted, phase: String) -> void:
+	for vehicle in [["truck_position", "truck_start_position", "truck_target_position"], ["excavator_position", "excavator_start_position", "excavator_target_position"]]:
+		var raw: Array = game.construction_job[vehicle[0]]
+		var raw_start: Array = game.construction_job[vehicle[1]]
+		var raw_target: Array = game.construction_job[vehicle[2]]
+		var point := Vector3(float(raw[0]), float(raw[1]), float(raw[2]))
+		var start := Vector3(float(raw_start[0]), float(raw_start[1]), float(raw_start[2]))
+		var target := Vector3(float(raw_target[0]), float(raw_target[1]), float(raw_target[2]))
+		var start_cell: Vector2i = game.territory.nearest_road(start)
+		var target_cell: Vector2i = game.territory.nearest_road(target)
+		var segment: Vector3 = target - start
+		var fraction: float = clampf((point - start).dot(segment) / maxf(0.01, segment.length_squared()), 0.0, 1.0)
+		var on_segment: Vector3 = start.lerp(target, fraction)
+		check(start_cell.x >= 0 and target_cell.x >= 0 and game.territory.state_at(start_cell.x, start_cell.y) == "road" and game.territory.state_at(target_cell.x, target_cell.y) == "road" and
+			(start_cell.x == target_cell.x or start_cell.y == target_cell.y) and point.distance_to(on_segment) <= 0.9,
+			"Construction vehicle follows a connected road segment " + phase + ": " + str(vehicle[0]))

@@ -40,6 +40,13 @@ func run() -> void:
 		check(scene.district_label.text == "Сосновый район" and not scene.district_label.clip_text, "District name remains complete in the top bar")
 		var map_tools: Control = scene.screen.get_node("MapTools")
 		check(map_tools.size.y <= 140 and map_tools.get_global_rect().end.y < scene.navbar.position.y, "Compact map actions leave the map visible")
+		var settings_rect: Rect2 = scene.audio_button.get_global_rect()
+		var condition_rect: Rect2 = scene.state_button.get_global_rect()
+		var bus_rect: Rect2 = scene.transit_button.get_global_rect()
+		check(map_tools.position.y >= scene.hud.get_global_rect().end.y and settings_rect.position.y == condition_rect.position.y and bus_rect.position.y > condition_rect.position.y,
+			"BUS is placed on the third line below the condition button")
+		check(absf(condition_rect.position.x - bus_rect.position.x) <= 1 and bus_rect.end.x <= scene.screen.size.x - scene.safe_right + 1,
+			"BUS aligns beneath Condition and remains within the safe area")
 		scene.open_territory()
 		scene.set_territory_tool("service")
 		check(not scene.mode_switcher.get_global_rect().intersects(map_tools.get_global_rect()), "Four land-mode buttons never overlap floating map controls")
@@ -139,9 +146,10 @@ func run() -> void:
 		outside_tap.button_index = MOUSE_BUTTON_LEFT
 		outside_tap.pressed = true
 		scene.set_camera_focus(Vector3(40, 0, 75))
-		outside_tap.position = scene.screen.size / 2 * scene.viewport_container.stretch_shrink
+		var landscape_point: Vector3 = scene.game.territory.cell_world(14, 21)
+		outside_tap.position = scene.camera.unproject_position(landscape_point) * scene.viewport_container.stretch_shrink
 		scene.map_input(outside_tap)
-		check(scene.selection_kind == "" and not scene.sheet.visible, "Tapping an unoccupied map area dismisses the current card")
+		check(scene.selection_kind == "land_cell" and scene.sheet.visible, "Tapping an unoccupied landscape cell opens its available actions")
 		scene.select_plot(0)
 		for i in range(2):
 			await process_frame

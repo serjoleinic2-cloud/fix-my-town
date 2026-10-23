@@ -7,6 +7,7 @@ const Simulation = preload("res://scripts/simulation.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
 const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 const Art = preload("res://scripts/art.gd")
+const CitizenPool = preload("res://scripts/citizen_pool.gd")
 const INK = Color("252c38")
 const BLUE = Color("258ed2")
 const PAPER = Color("fbf9f4")
@@ -71,6 +72,9 @@ var drag_start := Vector2.ZERO
 var drag_previous := Vector2.ZERO
 var dragging: bool = false
 var drag_moved: bool = false
+var touch_points: Dictionary = {}
+var pinch_distance: float = 0.0
+var pinching: bool = false
 var safe_override := Vector4.ZERO
 var safe_top: float = 16
 var safe_bottom: float = 12
@@ -87,6 +91,7 @@ var transit_visuals: Node3D
 var stop_candidate_visuals: Node3D
 var transit_signature: String = ""
 var transit_stats: Label
+var citizen_pool: Node3D
 var stop_candidate: int = 0
 var placing_stop: bool = false
 var moving_stop_index: int = -1
@@ -97,6 +102,7 @@ var territory_tool: String = "clear"
 var service_type: String = "fire_station"
 var catalog_category: String = "residential"
 var catalog_target_plot: int = -1
+var catalog_grid_target := Vector2i(-1, -1)
 var road_selected_cell := Vector2i(-1, -1)
 var construction_root: Node3D
 var construction_objects: Dictionary = {}
@@ -376,17 +382,29 @@ func build_ui() -> void:
 	var rating_row := hbox(rating_card, 5)
 	icon(rating_row, "star", 26)
 	rating_label = label(18, rating_row, "", true)
-	var tools := GridContainer.new()
+	var tools := VBoxContainer.new()
 	tools.name = "MapTools"
 	tools.add_theme_constant_override("separation", 4)
 	screen.add_child(tools)
-	tools.columns = 2
-	language_button = button(tools, "EN", switch_language)
+	var controls_row := HBoxContainer.new()
+	controls_row.name = "MapControlsRow"
+	controls_row.add_theme_constant_override("separation", 4)
+	tools.add_child(controls_row)
+	language_button = button(screen, "EN", switch_language)
 	language_button.hide()
-	audio_button = button(tools, "☷", open_settings)
-	state_button = button(tools, "", toggle_quality)
+	audio_button = button(controls_row, "☷", open_settings)
+	state_button = button(controls_row, "", toggle_quality)
 	state_button.add_theme_font_size_override("font_size", 18)
-	transit_button = button(tools, "BUS", open_transit)
+	var bus_row := HBoxContainer.new()
+	bus_row.name = "BusControlRow"
+	bus_row.add_theme_constant_override("separation", 4)
+	tools.add_child(bus_row)
+	var bus_alignment := Control.new()
+	bus_alignment.name = "BusAlignmentSpacer"
+	# Align the BUS button under the second map action (State), with its 4 px row gap.
+	bus_alignment.custom_minimum_size = Vector2(103, 62)
+	bus_row.add_child(bus_alignment)
+	transit_button = button(bus_row, "BUS", open_transit)
 	mode_switcher.hide()
 	quality_legend = card(screen)
 	var legend_column := VBoxContainer.new()
@@ -399,10 +417,10 @@ func build_ui() -> void:
 	button(tools, "+", change_zoom.bind(-7.0)).hide()
 	button(tools, "−", change_zoom.bind(7.0)).hide()
 	button(tools, "⌖", focus_problem).hide()
-	for child in tools.get_children():
-		child.custom_minimum_size = Vector2(68, 62)
-		child.add_theme_font_size_override("font_size", 17)
-		child.add_theme_stylebox_override("normal", style(Color(0.98, 0.97, 0.94, 0.93), 14))
+	for map_button in [audio_button, state_button, transit_button]:
+		map_button.custom_minimum_size = Vector2(68, 62)
+		map_button.add_theme_font_size_override("font_size", 17)
+		map_button.add_theme_stylebox_override("normal", style(Color(0.98, 0.97, 0.94, 0.93), 14))
 	state_button.add_theme_font_size_override("font_size", 15)
 	mission = card(screen)
 	var mission_row := hbox(mission, 14)
@@ -485,9 +503,9 @@ func update_layout() -> void:
 	hud.position = Vector2(safe_left, safe_top + 10)
 	hud.size = Vector2(size_value.x - safe_left - safe_right, 56)
 	var tools := screen.get_node("MapTools") as Control
-	var tools_width := maxf(140, tools.get_combined_minimum_size().x)
+	var tools_width := maxf(220, tools.get_combined_minimum_size().x)
 	tools.position = Vector2(size_value.x - safe_right - tools_width, safe_top + 84)
-	tools.custom_minimum_size.x = 140
+	tools.custom_minimum_size.x = 220
 	tools.size.x = tools_width
 	quality_legend.position = Vector2(safe_left, safe_top + 84)
 	quality_legend.size = Vector2(size_value.x - safe_left - safe_right - tools_width - 16, 150)
@@ -599,6 +617,10 @@ func build_world() -> void:
 	world.add_child(stop_candidate_visuals)
 	highlights = Node3D.new()
 	world.add_child(highlights)
+	citizen_pool = CitizenPool.new()
+	citizen_pool.name = "CitizenPool"
+	world.add_child(citizen_pool)
+	citizen_pool.setup(game, quality, Callable(self, "map_position"), scenery.traffic_controller)
 
 func create_object(parent: Node3D, type_id: String, persistent_id: String, point: Vector3) -> Node3D:
 	var object := GameObjectScene.instantiate()
@@ -790,25 +812,51 @@ func redraw_territory() -> void:
 			if state == "forest":
 				Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9, true, row * 53 + col)
 			elif state == "road":
-				# Asphalt top is y=0.18, matching the legacy road surface exactly.
-				Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, TerritoryGrid.CELL_SIZE - 0.04), Color("777d80"))
 				var links: Array[Vector2i] = []
 				for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 					if game.territory.state_at(col + offset.x, row + offset.y) == "road":
 						links.append(offset)
-				var horizontal: bool = Vector2i.LEFT in links or Vector2i.RIGHT in links
-				var vertical: bool = Vector2i.UP in links or Vector2i.DOWN in links
-				if horizontal and not vertical:
-					Art.box(tile_visuals, center + Vector3(0, 0.185, 0), Vector3(3.4, 0.012, 0.055), Color("d1d1c5"))
-				elif vertical and not horizontal:
-					Art.box(tile_visuals, center + Vector3(0, 0.185, 0), Vector3(0.055, 0.012, 3.4), Color("d1d1c5"))
-				if links.size() >= 3:
+				var topology := road_topology(links)
+				var asphalt := Color("777d80")
+				var concrete := Color("b6b2a3")
+				var markings := Color("e4e1d0")
+				var half_road := 1.4
+				# Each tile uses a topology-specific road surface. Turns and junctions
+				# are assembled from the connected arms instead of covering the tile.
+				if topology in ["corner", "tee", "cross"]:
+					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, 2.8), asphalt)
 					for offset: Vector2i in links:
+						var arm_center := center + Vector3(offset.x * 0.65, 0.14, offset.y * 0.65)
+						var arm_size := Vector3(TerritoryGrid.CELL_SIZE * 0.5 + half_road, 0.08, 2.8) if offset.x != 0 else Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE * 0.5 + half_road)
+						Art.box(tile_visuals, arm_center, arm_size, asphalt)
+					# Corner pads meet the sidewalks entering from every connected arm.
+					for side_x in [-1.0, 1.0]:
+						for side_z in [-1.0, 1.0]:
+							Art.box(tile_visuals, center + Vector3(side_x * 1.85, 0.16, side_z * 1.85), Vector3(1.1, 0.1, 1.1), concrete)
+				elif Vector2i.LEFT in links or Vector2i.RIGHT in links:
+					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, 2.8), asphalt)
+					for side in [-1.0, 1.0]:
+						Art.box(tile_visuals, center + Vector3(0, 0.16, side * 1.85), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.1, 0.9), concrete)
+				else:
+					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE - 0.04), asphalt)
+					for side in [-1.0, 1.0]:
+						Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, 0), Vector3(0.9, 0.1, TerritoryGrid.CELL_SIZE - 0.04), concrete)
+				# Fresh expansion streets use broken centre markings; the dashes
+				# continue into each arm of a bend and stop before crosswalks.
+				for offset: Vector2i in links:
+					if topology in ["tee", "cross"]:
 						for stripe in range(3):
-							var distance := 1.15 + stripe * 0.62
+							var distance := 1.05 + stripe * 0.58
 							var stripe_center := center + Vector3(-offset.x * distance, 0.205, -offset.y * distance)
-							var stripe_size := Vector3(0.16, 0.018, 3.8) if offset.x != 0 else Vector3(3.8, 0.018, 0.16)
-							Art.box(tile_visuals, stripe_center, stripe_size, Color("e4e1d0"))
+							var stripe_size := Vector3(0.14, 0.018, 3.8) if offset.x != 0 else Vector3(3.8, 0.018, 0.14)
+							Art.box(tile_visuals, stripe_center, stripe_size, markings)
+					else:
+						for dash in range(2):
+							var distance := 0.65 + dash * 1.05
+							var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)
+							var dash_size := Vector3(0.62, 0.018, 0.055) if offset.x != 0 else Vector3(0.055, 0.018, 0.62)
+							Art.box(tile_visuals, dash_center, dash_size, markings)
+				if topology in ["tee", "cross"]:
 					var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
 					road_light.set_meta("expansion_intersection", true)
 					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
@@ -826,8 +874,26 @@ func redraw_territory() -> void:
 		record.position = position
 		record.level = int(entry.get("level", 1))
 		var base_color := quality_color(game.record_quality(record).score) if quality_mode else Color("91a66f")
-		Art.box(object, Vector3(0, 0.14, 0), Vector3(9, 0.12, 9), base_color)
+		var lot_size := territory_building_visual_size(entry)
+		Art.box(object, Vector3(0, 0.14, 0), Vector3(lot_size.x, 0.12, lot_size.y), base_color)
 	Art.batch(tile_visuals)
+
+func road_topology(links: Array[Vector2i]) -> String:
+	var horizontal := Vector2i.LEFT in links or Vector2i.RIGHT in links
+	var vertical := Vector2i.UP in links or Vector2i.DOWN in links
+	if links.size() >= 4:
+		return "cross"
+	if links.size() == 3:
+		return "tee"
+	if links.size() == 2 and horizontal and vertical:
+		return "corner"
+	if links.size() == 1:
+		return "dead_end"
+	return "straight"
+
+func territory_building_visual_size(entry: Dictionary) -> Vector2:
+	return Vector2(float(entry.get("width", 1)) * TerritoryGrid.CELL_SIZE - 0.2,
+		float(entry.get("height", 1)) * TerritoryGrid.CELL_SIZE - 0.2)
 
 func set_camera_focus(point: Vector3) -> void:
 	focus_point = Vector3(clampf(point.x, -55, 65), 0, clampf(point.z, -80, 105))
@@ -844,20 +910,41 @@ func change_zoom(amount: float) -> void:
 
 func handle_map_gesture(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
-		if event.index != 0:
-			drag_moved = true
-			return
 		if event.pressed:
-			dragging = true
-			drag_moved = false
-			drag_start = event.position
-			drag_previous = event.position
+			touch_points[event.index] = event.position
+			if touch_points.size() >= 2:
+				pinching = true
+				dragging = false
+				drag_moved = true
+				pinch_distance = _touch_distance()
+				return
+			if event.index == 0:
+				dragging = true
+				drag_moved = false
+				drag_start = event.position
+				drag_previous = event.position
 		else:
-			if dragging and not drag_moved:
+			touch_points.erase(event.index)
+			if pinching:
+				if touch_points.size() < 2:
+					pinching = false
+					dragging = false
+					drag_moved = true
+					pinch_distance = 0.0
+				return
+			if event.index == 0 and dragging and not drag_moved:
 				map_input(event)
-			dragging = false
+			if event.index == 0:
+				dragging = false
 		return
 	if event is InputEventScreenDrag:
+		if pinching:
+			touch_points[event.index] = event.position
+			var current_distance := _touch_distance()
+			if pinch_distance > 0.0 and current_distance > 1.0:
+				camera.size = clampf(camera.size * pinch_distance / current_distance, 45.0, 110.0)
+			pinch_distance = current_distance
+			return
 		var motion := InputEventMouseMotion.new()
 		motion.position = event.position
 		_handle_mouse_gesture(motion)
@@ -866,6 +953,12 @@ func handle_map_gesture(event: InputEvent) -> void:
 	if OS.has_feature("android"):
 		return
 	_handle_mouse_gesture(event)
+
+func _touch_distance() -> float:
+	if touch_points.size() < 2:
+		return 0.0
+	var points: Array = touch_points.values()
+	return (points[0] as Vector2).distance_to(points[1])
 
 func _handle_mouse_gesture(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -956,9 +1049,15 @@ func map_input(event: InputEvent) -> void:
 		return
 	var picked_col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
 	var picked_row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
-	if picked_col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and picked_row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1) and game.territory.state_at(picked_col, picked_row) == "road":
-		open_grid_road_card(Vector2i(picked_col, picked_row))
-		return
+	if picked_col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and picked_row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+		var tapped_cell := Vector2i(picked_col, picked_row)
+		var tapped_state: String = game.territory.state_at(picked_col, picked_row)
+		if tapped_state == "road":
+			open_grid_road_card(tapped_cell)
+			return
+		if tapped_state in ["forest", "free"]:
+			open_land_cell(tapped_cell)
+			return
 	for kind in ["leak", "signal"]:
 		var location := map_position(Vector3(-9, 0, 6)) if kind == "leak" else Vector3(-14.4, 0, 0)
 		if location.distance_to(hit) < 2.2:
@@ -1134,6 +1233,7 @@ func open_catalog(target_plot: int = -1) -> void:
 	active_tab = "build_tab"
 	catalog_target_plot = target_plot if target_plot >= 0 and target_plot < game.buildings.size() and game.buildings[target_plot] == "empty" else -1
 	catalog_category = "residential"
+	catalog_grid_target = Vector2i(-1, -1)
 	selection_kind = "catalog"
 	selected = catalog_target_plot
 	territory_cell = Vector2i(-1, -1)
@@ -1152,7 +1252,33 @@ func close_sheet() -> void:
 	placing_stop = false
 	selection_kind = ""
 	selected = -1
+	catalog_grid_target = Vector2i(-1, -1)
 	active_tab = "district"
+	refresh()
+
+func open_land_cell(cell: Vector2i) -> void:
+	territory_cell = cell
+	selection_kind = "land_cell"
+	selected = -1
+	active_tab = "district"
+	refresh()
+
+func open_land_catalog(cell: Vector2i) -> void:
+	active_tab = "build_tab"
+	catalog_target_plot = -1
+	catalog_grid_target = cell
+	catalog_category = "landscaping"
+	territory_cell = cell
+	selection_kind = "catalog"
+	selected = -1
+	set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(5, 0, 5))
+	refresh()
+
+func clear_selected_land_cell() -> void:
+	if territory_cell.x < 0 or game.territory.state_at(territory_cell.x, territory_cell.y) != "forest":
+		return
+	territory_tool = "clear"
+	selection_kind = "territory"
 	refresh()
 
 func open_territory() -> void:
@@ -1223,7 +1349,7 @@ func catalog_item_unlocked(type_id: String) -> bool:
 func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	var item := Button.new()
 	item.name = "CatalogItem_" + type_id
-	item.custom_minimum_size.y = 148
+	item.custom_minimum_size.y = 96
 	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item.disabled = not catalog_item_unlocked(type_id)
 	item.add_theme_stylebox_override("normal", style(Color("f3f2ed"), 12, Color("deddd6")))
@@ -1236,17 +1362,25 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	var row := hbox(item, 10)
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	row.offset_left = 10
-	row.offset_top = 8
+	row.offset_top = 4
 	row.offset_right = -10
-	row.offset_bottom = -8
+	row.offset_bottom = -4
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var image := TextureRect.new()
-	image.texture = load(catalog_icon(type_id))
-	image.custom_minimum_size = Vector2(64, 64)
-	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	var image: Control
+	if Catalog.TYPES.has(type_id):
+		image = catalog_model_preview(type_id)
+	else:
+		var icon_image := TextureRect.new()
+		icon_image.texture = load(catalog_icon(type_id))
+		icon_image.custom_minimum_size = Vector2(64, 64)
+		icon_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		image = icon_image
+	image.custom_minimum_size = Vector2(68, 68)
+	image.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(image)
 	var info := VBoxContainer.new()
@@ -1254,12 +1388,12 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	info.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(info)
-	var name_label := label(19, info, t(type_id), true)
+	var name_label := label(18, info, t(type_id), true)
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var size_label := label(15, info, t("catalog_size") % catalog_size(type_id))
+	var size_label := label(14, info, t("catalog_size") % catalog_size(type_id))
 	size_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	size_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var requirement := label(14, info, t("catalog_requires") % catalog_requirement(type_id))
+	var requirement := label(13, info, t("catalog_requires") % catalog_requirement(type_id))
 	requirement.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	requirement.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var cost_label := label(17, row, t("catalog_price") % catalog_cost(type_id), true)
@@ -1275,27 +1409,68 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	parent.add_child(item)
 	return item
 
+func catalog_model_preview(type_id: String) -> Control:
+	var preview_box := SubViewportContainer.new()
+	preview_box.name = "ModelPreview_" + type_id
+	preview_box.stretch = true
+	var preview_viewport := SubViewport.new()
+	preview_viewport.size = Vector2i(128, 112)
+	preview_viewport.own_world_3d = true
+	preview_viewport.transparent_bg = true
+	preview_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	preview_box.add_child(preview_viewport)
+	var preview_world := Node3D.new()
+	preview_world.name = "PreviewWorld"
+	preview_viewport.add_child(preview_world)
+	var preview_object := GameObjectScene.instantiate()
+	preview_world.add_child(preview_object)
+	preview_object.setup(type_id, "catalog_preview_" + type_id)
+	preview_object.interaction_area.collision_layer = 0
+	preview_object.rotation.y = -0.45
+	var key_light := DirectionalLight3D.new()
+	key_light.rotation = Vector3(deg_to_rad(-38), deg_to_rad(35), 0)
+	key_light.light_energy = 1.25
+	preview_world.add_child(key_light)
+	var fill_light := DirectionalLight3D.new()
+	fill_light.rotation = Vector3(deg_to_rad(-18), deg_to_rad(-145), 0)
+	fill_light.light_energy = 0.4
+	preview_world.add_child(fill_light)
+	var camera_preview := Camera3D.new()
+	camera_preview.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera_preview.size = 13.2
+	camera_preview.position = Vector3(12, 11, 14)
+	camera_preview.look_at_from_position(camera_preview.position, Vector3(0, 2.0, 0), Vector3.UP)
+	camera_preview.current = true
+	preview_world.add_child(camera_preview)
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	environment.environment.background_mode = Environment.BG_COLOR
+	environment.environment.background_color = Color(0, 0, 0, 0)
+	preview_world.add_child(environment)
+	return preview_box
+
 func build_catalog_sheet() -> void:
-	action_height = minf(650, maxf(420, navbar.position.y - safe_top - 28))
+	var list_count := catalog_items_for(catalog_category).size()
+	var list_height := minf(210, maxf(82, float(list_count) * 96.0))
+	action_height = minf(560, maxf(270, 185 + list_height))
 	header(t("catalog_title"))
 	var level_line := label(18, sheet_column, t("catalog_level") % game.city_level(), true)
 	level_line.name = "CityLevel"
-	var categories := GridContainer.new()
-	categories.name = "CatalogCategories"
-	categories.columns = 3
-	categories.add_theme_constant_override("h_separation", 6)
-	categories.add_theme_constant_override("v_separation", 4)
-	sheet_column.add_child(categories)
-	for category in CATALOG_CATEGORIES:
-		var category_button := button(categories, t("category_" + category), set_catalog_category.bind(category))
-		category_button.name = "Category_" + category
-		category_button.custom_minimum_size.y = 58
-		category_button.add_theme_font_size_override("font_size", 16)
-		if catalog_category == category:
-			category_button.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
+	if catalog_grid_target.x >= 0:
+		label(16, sheet_column, tr_text("Клетка %d,%d выбрана на карте", "Cell %d,%d selected on the map") % [catalog_grid_target.x + 1, catalog_grid_target.y + 1])
+	var category_selector := OptionButton.new()
+	category_selector.name = "CatalogCategorySelector"
+	category_selector.custom_minimum_size.y = 48
+	category_selector.add_theme_font_size_override("font_size", 18)
+	for category_index in range(CATALOG_CATEGORIES.size()):
+		var category: String = CATALOG_CATEGORIES[category_index]
+		category_selector.add_item(t("category_" + category), category_index)
+	category_selector.select(CATALOG_CATEGORIES.find(catalog_category))
+	category_selector.item_selected.connect(func(index: int): set_catalog_category(CATALOG_CATEGORIES[index]))
+	sheet_column.add_child(category_selector)
 	var scroll := ScrollContainer.new()
 	scroll.name = "CatalogItemsScroll"
-	scroll.custom_minimum_size.y = maxf(200, action_height - 250)
+	scroll.custom_minimum_size.y = list_height
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	sheet_column.add_child(scroll)
@@ -1310,6 +1485,27 @@ func build_catalog_sheet() -> void:
 		label(16, sheet_column, tr_text("Свободный участок №%d выбран на карте", "Vacant lot %d is selected on the map") % (catalog_target_plot + 1))
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelCatalog"
 
+func build_land_cell_sheet() -> void:
+	action_height = 235
+	var state: String = game.territory.state_at(territory_cell.x, territory_cell.y)
+	header(tr_text("Земля района", "District land"))
+	label(20, sheet_column, tr_text("Клетка %d,%d · %s", "Cell %d,%d · %s") % [territory_cell.x + 1, territory_cell.y + 1, t(state)])
+	if state == "forest":
+		label(18, sheet_column, tr_text("Освободите место, чтобы проложить дорогу или построить объект.", "Clear this tile before adding a road or placing an object."))
+		var clear_button := button(sheet_column, tr_text("Расчистить участок · 5", "Clear tile · 5"), clear_selected_land_cell, true)
+		clear_button.name = "ClearLandCell"
+		clear_button.disabled = game.budget < 5 or not game.construction_job.is_empty()
+	else:
+		label(18, sheet_column, tr_text("Выберите, как использовать свободное место.", "Choose how to use this free space."))
+		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"
+		button(sheet_column, tr_text("Открыть каталог строительства", "Open building catalog"), func():
+			catalog_grid_target = territory_cell
+			active_tab = "build_tab"
+			catalog_category = "residential"
+			selection_kind = "catalog"
+			refresh(), true).name = "BuildOnLandCell"
+	button(sheet_column, t("cancel"), close_sheet).name = "CancelLandCell"
+
 func select_catalog_item(type_id: String) -> void:
 	if not catalog_items_for(catalog_category).has(type_id) or not catalog_item_unlocked(type_id):
 		return
@@ -1321,15 +1517,16 @@ func select_catalog_item(type_id: String) -> void:
 	else:
 		catalog_target_plot = -1
 		selected = -1
-		territory_cell = Vector2i(-1, -1)
+		territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
 		selection_kind = "territory"
-		set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
+		if territory_cell.x < 0:
+			set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
 	refresh()
 
 func cancel_catalog_placement() -> void:
 	selection_kind = "catalog"
 	selected = catalog_target_plot
-	territory_cell = Vector2i(-1, -1)
+	territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
 	refresh()
 
 func build_legacy_catalog_placement_sheet() -> void:
@@ -1464,9 +1661,12 @@ func handle_construction_finish(task: Dictionary) -> void:
 	elif kind == "demolish_legacy":
 		open_catalog()
 	elif kind == "road" or kind == "clear" or kind == "demolish_road":
-		open_catalog()
-		catalog_category = "infrastructure" if kind != "clear" else "residential"
-		refresh()
+		if kind == "clear":
+			open_land_catalog(Vector2i(int(task.get("col", -1)), int(task.get("row", -1))))
+		else:
+			open_catalog()
+			catalog_category = "infrastructure"
+			refresh()
 
 func territory_reason() -> String:
 	if territory_cell.x < 0:
@@ -1611,6 +1811,8 @@ func build_sheet() -> void:
 		build_legacy_catalog_placement_sheet()
 	elif selection_kind == "territory":
 		build_territory_sheet()
+	elif selection_kind == "land_cell":
+		build_land_cell_sheet()
 	elif selection_kind == "construction_job":
 		build_construction_job_sheet()
 	elif selection_kind == "grid_road":
@@ -1758,6 +1960,13 @@ func outline(point: Vector3, color: Color) -> void:
 	for x in [-4.5, 4.5]:
 		Art.box(highlights, point + Vector3(x, 0.26, 0), Vector3(0.13, 0.08, 9.1), color)
 
+func outline_land_cell(point: Vector3, color: Color) -> void:
+	var half_cell := TerritoryGrid.CELL_SIZE * 0.5
+	for z in [-half_cell, half_cell]:
+		Art.box(highlights, point + Vector3(0, 0.26, z), Vector3(TerritoryGrid.CELL_SIZE, 0.08, 0.13), color)
+	for x in [-half_cell, half_cell]:
+		Art.box(highlights, point + Vector3(x, 0.26, 0), Vector3(0.13, 0.08, TerritoryGrid.CELL_SIZE), color)
+
 func influence_targets(index: int, kind: String) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	var point: Vector3 = game.building_world(index)
@@ -1792,6 +2001,10 @@ func update_preview() -> void:
 			var point: Vector3 = game.territory.cell_world(territory_cell.x, territory_cell.y) + Vector3((footprint.x - 1) * TerritoryGrid.CELL_SIZE / 2, 0.2, (footprint.y - 1) * TerritoryGrid.CELL_SIZE / 2)
 			preview = create_object(world, selected_type, "grid_build_preview", point)
 			make_ghost(preview, color)
+		return
+	if selection_kind == "land_cell" and territory_cell.x >= 0:
+		var selected_center: Vector3 = game.territory.cell_world(territory_cell.x, territory_cell.y)
+		outline_land_cell(selected_center, Color("8ed6f8"))
 		return
 	if selection_kind in ["grid_house", "grid_upgrade"]:
 		var entry: Dictionary = game.territory.building_by_id(grid_selected_id)
@@ -2005,7 +2218,7 @@ func _process(delta: float) -> void:
 		diagnostic_clock += delta
 		if diagnostic_clock >= 5:
 			diagnostic_clock = 0
-			print("FMT_METRICS ", JSON.stringify({"quality": quality, "fps": Engine.get_frames_per_second(), "map_size": str(viewport_container.get_child(0).size), "draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), "safe_top": safe_top, "safe_bottom": safe_bottom, "selection": selection_kind, "job": game.job, "leak_fixed": game.leak_fixed, "signal_fixed": game.signal_fixed}))
+			print("FMT_METRICS ", JSON.stringify({"quality": quality, "fps": Engine.get_frames_per_second(), "citizens_pool": citizen_pool.get_child_count() if citizen_pool != null else 0, "citizens_on_screen": on_screen_citizen_count(), "map_size": str(viewport_container.get_child(0).size), "draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), "safe_top": safe_top, "safe_bottom": safe_bottom, "selection": selection_kind, "job": game.job, "leak_fixed": game.leak_fixed, "signal_fixed": game.signal_fixed}))
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.service_position = car.position
 	scenery.traffic_controller.service_active = game.job != ""
@@ -2039,6 +2252,8 @@ func _process(delta: float) -> void:
 	scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
 	game.transit.tick(delta, scenery.traffic_controller, game.territory)
+	if citizen_pool != null and is_instance_valid(citizen_pool):
+		citizen_pool.tick(delta)
 	update_transit_stats()
 	var movement_fraction := 1.0
 	if game.job != "" and game.route_index < game.route.size():
@@ -2141,8 +2356,25 @@ func apply_quality() -> void:
 	var viewport := viewport_container.get_child(0) as SubViewport
 	viewport.msaa_3d = Viewport.MSAA_DISABLED if quality == "low" else (Viewport.MSAA_2X if quality == "medium" else Viewport.MSAA_4X)
 	scenery.traffic_controller.set_active_count(8 if quality == "low" else (16 if quality == "medium" else 24))
+	if citizen_pool != null and is_instance_valid(citizen_pool):
+		citizen_pool.set_quality(quality)
 	Engine.max_fps = 30 if quality == "low" else 60
 	update_layout()
+
+func on_screen_citizen_count() -> int:
+	if citizen_pool == null or camera == null or viewport_container.get_child_count() == 0:
+		return 0
+	var viewport := viewport_container.get_child(0) as SubViewport
+	var bounds := Rect2(Vector2.ZERO, Vector2(viewport.size))
+	var count := 0
+	for walker: Dictionary in citizen_pool.walkers:
+		var visual: Sprite3D = walker.visual
+		if not visual.visible or camera.is_position_behind(visual.global_position):
+			continue
+		if bounds.has_point(camera.unproject_position(visual.global_position)):
+			count += 1
+	return count
+
 
 func open_settings() -> void:
 	close_sheet()

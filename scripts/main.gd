@@ -105,6 +105,7 @@ var catalog_category: String = "residential"
 var catalog_target_plot: int = -1
 var catalog_grid_target := Vector2i(-1, -1)
 var road_selected_cell := Vector2i(-1, -1)
+var road_piece_type := "auto"
 var construction_root: Node3D
 var construction_objects: Dictionary = {}
 var construction_bar_fill: MeshInstance3D
@@ -1661,10 +1662,29 @@ func build_land_cell_sheet() -> void:
 			refresh(), true).name = "BuildOnLandCell"
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelLandCell"
 
+func build_road_piece_catalog() -> void:
+	action_height = 250
+	header(tr_text("Элемент дороги", "Road piece"))
+	label(17, sheet_column, tr_text("Выберите тип узла. Направление подберётся по соединённым сторонам; зеркальное размещение запрещено.", "Choose a road piece. Orientation follows connected sides; mirrored placement is blocked." )).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	for piece in [
+		{"id": "straight", "ru": "Прямая", "en": "Straight"},
+		{"id": "corner", "ru": "Поворот 90°", "en": "90° turn"},
+		{"id": "tee", "ru": "Т‑перекрёсток", "en": "T-junction"},
+		{"id": "cross", "ru": "Крестовой перекрёсток", "en": "Four-way junction"}
+	]:
+		var title := tr_text(str(piece.ru), str(piece.en))
+		var item_button := button(sheet_column, title + (" ✓" if road_piece_type == piece.id else ""), choose_road_piece.bind(str(piece.id)), true)
+		item_button.custom_minimum_size.y = 52
+	button(sheet_column, t("cancel"), close_sheet).name = "CancelRoadPieceCatalog"
+
 func select_catalog_item(type_id: String) -> void:
 	if not catalog_items_for(catalog_category).has(type_id) or not catalog_item_unlocked(type_id):
 		return
 	territory_tool = type_id
+	if type_id == "road":
+		selection_kind = "road_piece_catalog"
+		refresh()
+		return
 	preview_kind = type_id
 	selected = catalog_target_plot
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
@@ -1682,6 +1702,12 @@ func cancel_catalog_placement() -> void:
 	selection_kind = "catalog"
 	selected = catalog_target_plot
 	territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
+	refresh()
+
+func choose_road_piece(piece_type: String) -> void:
+	road_piece_type = piece_type
+	territory_tool = "road"
+	selection_kind = "territory"
 	refresh()
 
 func build_legacy_catalog_placement_sheet() -> void:
@@ -1845,6 +1871,13 @@ func territory_reason() -> String:
 	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool if territory_tool in ["clear", "road"] else placement_kind)
 	if reason != "":
 		return reason
+	if territory_tool == "road" and road_piece_type != "auto":
+		var links: Array[Vector2i] = []
+		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			if game.territory.state_at(territory_cell.x + offset.x, territory_cell.y + offset.y) == "road":
+				links.append(offset)
+		if links.size() >= 2 and road_topology(links) != road_piece_type:
+			return tr_text("Выбранный элемент не совпадает с подключёнными сторонами дороги.", "This road piece does not match the connected sides.")
 	if territory_tool not in ["clear", "road"] and game.city_level() < Catalog.unlock_level(selected_type):
 		return "locked"
 	var cost := catalog_cost(selected_type)
@@ -1976,6 +2009,8 @@ func build_sheet() -> void:
 		build_district_sheet()
 	elif selection_kind == "catalog":
 		build_catalog_sheet()
+	elif selection_kind == "road_piece_catalog":
+		build_road_piece_catalog()
 	elif selection_kind == "catalog_legacy_placement":
 		build_legacy_catalog_placement_sheet()
 	elif selection_kind == "territory":

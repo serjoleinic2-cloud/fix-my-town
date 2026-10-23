@@ -308,31 +308,6 @@ func building_contour(entry: Dictionary) -> Array[Vector2i]:
 					result.append(cell)
 	return result
 
-func has_constructed_network() -> bool:
-	for row in cells:
-		for state in row:
-			if state == "road":
-				return true
-	for entry: Dictionary in buildings:
-		if entry.type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
-			return true
-	return false
-
-func building_contour(entry: Dictionary) -> Array[Vector2i]:
-	var result: Array[Vector2i] = []
-	var seen: Dictionary = {}
-	for dy in range(entry.height):
-		for dx in range(entry.width):
-			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var cell := Vector2i(entry.col + dx, entry.row + dy) + offset
-				var inside := cell.x >= entry.col and cell.x < entry.col + entry.width and cell.y >= entry.row and cell.y < entry.row + entry.height
-				if inside or not in_bounds(cell.x, cell.y) or seen.has(cell):
-					continue
-				seen[cell] = true
-				if state_at(cell.x, cell.y) == "free":
-					result.append(cell)
-	return result
-
 func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
 	# Find a short cleared corridor from the building edge to the existing
 	# connected network. The corridor becomes the building's automatic road

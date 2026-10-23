@@ -78,6 +78,14 @@ func start_empty_city() -> void:
 		buildings.append("empty")
 		levels.append(1)
 	territory = TerritoryGrid.new(buildings)
+	# A new city starts with terrain only; no legacy road grid survives the reset.
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
+			territory.cells[row][col] = "forest"
+	incident_seed = 48291
+	incident_rng.seed = incident_seed
+	income_clock = 0.0
+	service_neglect_clock = 0.0
 	job = ""
 	job_phase = "travel"
 	route.clear()
@@ -366,9 +374,9 @@ func incident_penalty() -> int:
 	# more expensive than routine service failures, so ignoring them has a clear
 	# escalating cost even before a building becomes a ruin.
 	var penalty := 0
-	if not leak_fixed:
+	if legacy_problem_available("leak"):
 		penalty += 3
-	if not signal_fixed:
+	if legacy_problem_available("signal"):
 		penalty += 2
 	penalty += fires.size() * 4
 	for identifier in fire_ruins:
@@ -798,6 +806,24 @@ func fire_station_record() -> Dictionary:
 			return result
 	return {}
 
+func legacy_problem_available(kind: String) -> bool:
+	if kind == "leak":
+		if leak_fixed:
+			return false
+		for entry: Dictionary in all_buildings():
+			if entry.type_id == "house":
+				return true
+		return false
+	if kind == "signal":
+		if signal_fixed:
+			return false
+		for row in territory.cells:
+			for state in row:
+				if state == "road":
+					return true
+		return false
+	return false
+
 func has_service_building(type_id: String) -> bool:
 	for entry: Dictionary in territory.buildings:
 		if entry.type_id == type_id:
@@ -1042,6 +1068,8 @@ func dispatch_to_building(identifier: String) -> bool:
 func dispatch(kind: String) -> bool:
 	if job != "" or kind not in ["signal", "leak"]:
 		return false
+	if not legacy_problem_available(kind):
+		return false
 	if (kind == "signal" and signal_fixed) or (kind == "leak" and leak_fixed):
 		return false
 	var cost := Catalog.cost("traffic_signal" if kind == "signal" else "water_leak")
@@ -1200,7 +1228,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		if old_phase != fire.phase or old_warning != ceili(float(fire.warning_left)) or old_damage != house_damage(identifier) or old_severity != fire_severity(identifier):
 			changed = true
 	income_clock += delta
-	if not leak_fixed or not signal_fixed:
+	if legacy_problem_available("leak") or legacy_problem_available("signal"):
 		service_neglect_clock += delta
 	if income_clock >= 12.0:
 		income_clock -= 12.0
@@ -1213,12 +1241,12 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		if service_neglect_clock >= 60.0:
 			var neglect_cycles := floori(service_neglect_clock / 60.0)
 			service_neglect_clock = fmod(service_neglect_clock, 60.0)
-			if not leak_fixed:
+			if legacy_problem_available("leak"):
 				var water_homes: Array = []
 				for index in WATER_AFFECTED_HOMES:
 					water_homes.append("pine_district_legacy_%d" % index)
 				apply_service_neglect_damage(4 * neglect_cycles, water_homes)
-			if not signal_fixed:
+			if legacy_problem_available("signal"):
 				var city_homes: Array = []
 				for entry: Dictionary in all_buildings():
 					if entry.type_id == "house":
@@ -1338,13 +1366,33 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		save_game()
 	return changed
 
+
+func incident_is_valid(incident: Dictionary) -> bool:
+	var kind := str(incident.get("type", ""))
+	if kind not in ["leak", "signal", "fire", "disease"]:
+		return false
+	if kind == "leak":
+		return legacy_problem_available("leak")
+	if kind == "signal":
+		return legacy_problem_available("signal")
+	var target_id := str(incident.get("target_id", ""))
+	for entry: Dictionary in all_buildings():
+		if entry.instance_id == target_id and entry.type_id == "house" and not is_ruined(target_id):
+			return true
+	return false
+
 func generate_incident() -> bool:
 	if incidents.size() >= 2:
 		return false
-	var candidates: Array[String] = ["leak", "signal"]
-	if has_service_building("fire_station"):
+	var candidates: Array[String] = []
+	if legacy_problem_available("leak"):
+		candidates.append("leak")
+	if legacy_problem_available("signal"):
+		candidates.append("signal")
+	var has_houses := not all_buildings().filter(func(entry: Dictionary): return entry.type_id == "house").is_empty()
+	if has_service_building("fire_station") and has_houses:
 		candidates.append("fire")
-	if has_service_building("hospital"):
+	if has_service_building("hospital") and has_houses:
 		candidates.append("disease")
 	if candidates.is_empty():
 		return false
@@ -1696,7 +1744,13 @@ func load_game() -> bool:
 	construction_job = loaded_construction
 	incident_seed = int(data.get("incident_seed", 48291))
 	incident_clock = maxf(0.0, float(data.get("incident_clock", 0.0)))
-	incidents = data.get("incidents", {}) if data.get("incidents", {}) is Dictionary else {}
+	incidents = {}
+	var raw_incidents: Variant = data.get("incidents", {})
+	if raw_incidents is Dictionary:
+		for incident_id in raw_incidents:
+			var candidate: Variant = raw_incidents[incident_id]
+			if candidate is Dictionary and incident_is_valid(candidate):
+				incidents[str(incident_id)] = candidate.duplicate(true)
 	incident_rng.seed = incident_seed
 	district_house_limit = clampi(int(data.get("district_house_limit", 8)), 1, 100)
 	if data.get("district_tasks", []) is Array and not data.get("district_tasks", []).is_empty():

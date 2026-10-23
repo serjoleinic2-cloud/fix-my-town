@@ -26,6 +26,12 @@ func run() -> void:
 	check(empty.incident_penalty() == 0, "Empty city has no legacy service penalty")
 	empty.tick(180.0, true)
 	check(empty.incidents.is_empty(), "Empty city does not generate incidents on empty terrain")
+	for row in range(19, 23):
+		for col in range(12, 21):
+			empty.territory.clear_cell(col, row)
+	check(empty.build_grid_building(13, 20, "house"), "First cleared house can bootstrap the road network")
+	check(empty.territory.has_constructed_network(), "First house creates an automatic road contour")
+	check(empty.build_grid_building(17, 20, "house"), "Second house can extend the network linearly")
 	var game := Simulation.new()
 	game.save_path = "user://review_regression_test.json"
 	game.budget = 5000

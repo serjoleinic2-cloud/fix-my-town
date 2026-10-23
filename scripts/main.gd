@@ -138,6 +138,8 @@ func t(key: String) -> String:
 
 func _ready() -> void:
 	game.load_game()
+	if OS.is_debug_build() and OS.has_feature("android"):
+		print("FMT_RESTORE ", JSON.stringify({"budget": game.budget, "job": game.job, "phase": game.job_phase, "target": game.target_instance_id, "vehicle": str(game.vehicle), "route_index": game.route_index, "expansion": game.territory.buildings.filter(func(entry): return not entry.has("legacy_plot"))}))
 	completion_observed = game.completed
 	load_graphics()
 	build_ui()
@@ -198,7 +200,9 @@ func button(parent: Node, text_value: String, callback: Callable, primary: bool 
 	item.pressed.connect(func():
 		if audio != null:
 			audio.play_ui())
-	item.pressed.connect(callback)
+	# Обновление панели удаляет нажатую кнопку. Выполняем действие после
+	# завершения GUI-dispatch, чтобы Godot не опрашивал уже снятый с дерева узел.
+	item.pressed.connect(callback, CONNECT_DEFERRED)
 	parent.add_child(item)
 	return item
 
@@ -666,6 +670,9 @@ func select_grid_house(identifier: String) -> void:
 	selection_kind = "grid_house"
 	selected = -1
 	active_tab = "district"
+	var entry: Dictionary = game.territory.building_by_id(identifier)
+	if not entry.is_empty():
+		set_camera_focus(game.territory.building_center(entry) + Vector3(7, 0, 7))
 	audio.play_ui("select")
 	refresh()
 
@@ -723,12 +730,24 @@ func open_territory() -> void:
 	territory_cell = Vector2i(-1, -1)
 	set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
 	refresh()
+	log_territory_probe()
+
+func log_territory_probe() -> void:
+	if not OS.is_debug_build() or not OS.has_feature("android"):
+		return
+	var points: Dictionary = {}
+	var physical := Vector2(DisplayServer.window_get_size()) / screen.size
+	for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22), Vector2i(15, 21), Vector2i(16, 21), Vector2i(15, 22), Vector2i(16, 22)]:
+		var point: Vector2 = camera.unproject_position(game.territory.cell_world(cell.x, cell.y)) * viewport_container.stretch_shrink / render_scale * physical
+		points["%d,%d" % [cell.x, cell.y]] = [roundi(point.x), roundi(point.y)]
+	print("FMT_TERRITORY ", JSON.stringify({"points": points, "selected": str(territory_cell), "tool": territory_tool}))
 
 func select_territory_cell(cell: Vector2i) -> void:
 	territory_cell = cell
 	if territory_tool == "house":
 		set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(9.4, 0, 9.4))
 	refresh()
+	log_territory_probe()
 
 func build_territory_sheet() -> void:
 	action_height = 380
@@ -786,7 +805,10 @@ func apply_territory_tool() -> void:
 	else:
 		success = game.build_grid_house(territory_cell.x, territory_cell.y)
 	if success:
-		audio.play_ui("success")
+		if territory_tool in ["house", "road"]:
+			audio.play_construction(DistrictWorld.logical_position(game.territory.cell_world(territory_cell.x, territory_cell.y)))
+		else:
+			audio.play_ui("success")
 		territory_signature = ""
 		if territory_tool == "house":
 			select_grid_house(game.territory.building_at(territory_cell.x, territory_cell.y).instance_id)
@@ -969,7 +991,20 @@ func outline(point: Vector3, color: Color) -> void:
 	for x in [-4.5, 4.5]:
 		Art.box(highlights, point + Vector3(x, 0.26, 0), Vector3(0.13, 0.08, 9.1), color)
 
+func influence_targets(index: int, kind: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var point: Vector3 = game.building_world(index)
+	for entry: Dictionary in game.all_buildings():
+		var relevant: bool = entry.type_id in ["cafe", "park"] if kind == "house" else entry.type_id == "house"
+		if entry.get("legacy_plot", -1) != index and relevant and entry.position.distance_to(point) < Simulation.AMENITY_RADIUS:
+			result.append(entry)
+	return result
+
 func update_preview() -> void:
+	# Любой выход из предпросмотра восстанавливает реальную модель.
+	for object in territory_visuals.get_children():
+		if object.has_meta("grid_instance_id"):
+			object.visual_root.show()
 	if preview != null:
 		world.remove_child(preview)
 		preview.queue_free()
@@ -996,9 +1031,13 @@ func update_preview() -> void:
 		var point: Vector3 = game.territory.building_center(entry)
 		outline(point, Color("8ed6f8"))
 		if selection_kind == "grid_upgrade":
+			var current := territory_visuals.get_node_or_null(NodePath(grid_selected_id))
+			if current != null:
+				current.visual_root.hide()
 			preview = create_object(world, "house", "grid_upgrade_preview", point)
 			preview.set_level(mini(3, int(entry.get("level", 1)) + 1))
-			make_ghost(preview, Color("8ed6f8"))
+			preview.interaction_area.collision_layer = 0
+			preview.set_language(game.language)
 		else:
 			var route: Array = game.service_route(grid_selected_id)
 			for index in range(1, route.size()):
@@ -1048,9 +1087,8 @@ func update_preview() -> void:
 	for item in preview.visual_root.find_children("*", "GeometryInstance3D", true, false):
 		item.material_override = ghost
 		item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	for i in range(24):
-		if i != selected and (game.buildings[i] in ["cafe", "park"] if preview_kind == "house" else game.buildings[i] == "house") and game.building_world(i).distance_to(game.building_world(selected)) < Simulation.AMENITY_RADIUS:
-			outline(map_position(game.plot_position(i)), Color("a7f384"))
+	for entry: Dictionary in influence_targets(selected, preview_kind):
+		outline(entry.position, Color("a7f384"))
 
 func make_ghost(object: Node3D, color: Color) -> void:
 	object.interaction_area.collision_layer = 0
@@ -1071,10 +1109,7 @@ func dispatch() -> void:
 
 func construct(kind: String) -> void:
 	if game.build(selected, kind):
-		audio.play_ui("success")
-		audio.play("build", "Effects", game.plot_position(selected))
-		if kind == "park":
-			audio.play("leaves", "Effects", game.plot_position(selected))
+		audio.play_construction(game.plot_position(selected), kind == "park")
 		close_sheet()
 	else:
 		audio.play_ui("deny")
@@ -1399,14 +1434,14 @@ func build_grid_upgrade_sheet() -> void:
 	var price: int = Catalog.level_data("house", entry.level).upgrade_cost
 	var confirm := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % price, func():
 		if game.upgrade_grid_house(grid_selected_id):
-			audio.play_ui("success")
+			audio.play_construction(DistrictWorld.logical_position(entry.position))
 		selection_kind = "grid_house"
 		refresh(), true)
 	confirm.name = "ConfirmGridUpgrade"
 	confirm.disabled = entry.level >= 3 or game.budget < price
 	button(sheet_column, t("cancel"), func():
 		selection_kind = "grid_house"
-		refresh())
+		refresh()).name = "CancelGridUpgrade"
 
 func open_grid_more() -> void:
 	var entry := selected_grid_record()
@@ -1628,8 +1663,7 @@ func build_upgrade_sheet() -> void:
 
 func confirm_upgrade(index: int, kind: String, expected_level: int) -> void:
 	if game.buildings[index] == kind and game.building_level(index) == expected_level and game.upgrade(index):
-		audio.play_ui("success")
-		audio.play("build", "Effects", game.plot_position(index))
+		audio.play_construction(game.plot_position(index), kind == "park")
 		selection_kind = "plot"
 	else:
 		audio.play_ui("deny")

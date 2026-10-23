@@ -58,8 +58,11 @@ func run() -> void:
 		loaded.tick(0.1)
 	check(loaded.leak_fixed, "Task completes after replacement and load")
 	var audio = scene.audio
+	var city: AudioStreamWAV = audio.stream("city", true)
+	check(city.get_length() >= 60 and city.stereo, "Ambience is a long stereo field-recording loop")
 	audio.set_paused(false)
 	audio.sync(scene.game, 33, 0.1)
+	check(audio.loops.has("city") and not audio.loops.has("birds"), "Real city recording replaces the repetitive synthetic birds layer")
 	check(audio.loops.has("water") and audio.loops.has("engine"), "Leak and moving engine loops")
 	check(audio.loops["engine"].get_parent() == scene.world, "Spatial audio belongs to gameplay world")
 	scene.game.route_index = scene.game.route.size()
@@ -80,6 +83,9 @@ func run() -> void:
 	for i in range(30):
 		audio.play_ui("click")
 	check(audio.voices.size() + audio.loops.size() <= audio.MAX_VOICES, "Voice budget")
+	audio.play_ui("select")
+	check(audio.voices[-1].bus == "Interface" and audio.voices[-1].stream == audio.stream("select"), "House tap remains audible when effects occupy the voice budget")
+	check(audio.stream("place").get_length() < 1.1, "Construction feedback is a brief original musical accent")
 	for type_id: String in Catalog.TYPES:
 		check(ResourceLoader.exists(Catalog.scene_path(type_id)), "Catalog resource exists: " + type_id)
 	DirAccess.remove_absolute(scene.game.save_path)

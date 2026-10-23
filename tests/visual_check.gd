@@ -37,10 +37,12 @@ func capture() -> void:
 		scene.open_territory()
 		scene.territory_tool = "house"
 		scene.select_territory_cell(Vector2i(15, 21))
-		if mode in ["expansion_house", "expansion_condition"]:
+		if mode in ["expansion_house", "expansion_condition", "expansion_upgrade"]:
 			scene.game.build_grid_house(15, 21)
 			scene.select_grid_house(scene.game.territory.building_at(15, 21).instance_id)
 			scene.quality_mode = mode == "expansion_condition"
+			if mode == "expansion_upgrade":
+				scene.selection_kind = "grid_upgrade"
 		if mode == "expansion_en":
 			scene.game.language = "en"
 	if mode == "done":

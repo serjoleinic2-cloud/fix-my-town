@@ -49,6 +49,7 @@ func run() -> void:
 			check(scene.sheet.position.y > scene.hud.get_global_rect().end.y and scene.sheet.get_global_rect().end.y <= scene.navbar.position.y, "Expansion controls fit between HUD and navigation")
 		# Подтверждение добавляет дом и открывает его собственную карточку.
 		scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
+		await process_frame
 		check(scene.selection_kind == "grid_house", "Construction opens the new home's card")
 		for frame in range(3):
 			await physics_frame
@@ -59,10 +60,48 @@ func run() -> void:
 		scene.close_sheet()
 		scene.map_input(tap)
 		check(scene.selection_kind == "grid_house" and scene.grid_selected_id == entry.instance_id, "Tapping the new home's roof selects its own state")
+		var original = scene.territory_visuals.get_node(NodePath(entry.instance_id))
+		var collision = original.interaction_area
+		var budget: int = scene.game.budget
+		var saved := FileAccess.get_file_as_string(scene.game.save_path)
 		scene.sheet.find_child("UpgradeButton", true, false).pressed.emit()
+		await process_frame
 		check(scene.selection_kind == "grid_upgrade" and scene.preview.level == 2, "New homes use the same swappable upgrade preview")
+		check(not original.visual_root.visible and original.interaction_area == collision and scene.game.budget == budget and scene.selected_grid_record().level == 1, "Preview hides only the original model without changing gameplay")
+		check(FileAccess.get_file_as_string(scene.game.save_path) == saved, "Preview never rewrites the saved city")
+		scene.sheet.find_child("CancelGridUpgrade", true, false).pressed.emit()
+		await process_frame
+		check(original.visual_root.visible and scene.preview == null, "Cancel restores the original model")
+		scene.sheet.find_child("UpgradeButton", true, false).pressed.emit()
+		await process_frame
+		scene.close_sheet()
+		check(original.visual_root.visible and scene.preview == null, "Closing the panel restores the original model")
+		scene.select_grid_house(entry.instance_id)
+		scene.sheet.find_child("UpgradeButton", true, false).pressed.emit()
+		await process_frame
+		scene.select_plot(0)
+		check(original.visual_root.visible, "Changing selection restores the original model")
+		scene.select_grid_house(entry.instance_id)
+		scene.sheet.find_child("UpgradeButton", true, false).pressed.emit()
+		await process_frame
 		scene.sheet.find_child("ConfirmGridUpgrade", true, false).pressed.emit()
+		await process_frame
 		check(scene.selected_grid_record().level == 2, "Confirmed upgrade changes the expansion level")
+		check(scene.preview == null and scene.territory_visuals.get_node(NodePath(entry.instance_id)).visual_root.visible, "After confirmation only the upgraded real model remains")
+		# Нижний старый участок расположен в 14.4 м от дома расширения.
+		scene.game.buildings[21] = "empty"
+		var bonus: int = scene.game.placement_bonus(21, "cafe")
+		check(scene.influence_targets(21, "cafe").any(func(item): return item.instance_id == entry.instance_id), "An expansion house appears in the legacy cafe influence preview")
+		check(scene.influence_targets(21, "park").any(func(item): return item.instance_id == entry.instance_id), "An expansion house also appears in the legacy park influence preview")
+		scene.selected = 21
+		scene.selection_kind = "plot"
+		scene.preview_kind = "cafe"
+		scene.refresh()
+		var base_count: int = scene.highlights.get_child_count()
+		scene.game.territory.buildings.erase(scene.game.territory.building_by_id(entry.instance_id))
+		check(scene.game.placement_bonus(21, "cafe") == bonus - 4, "The level-two expansion house adds the same neighbor bonus")
+		scene.refresh()
+		check(scene.highlights.get_child_count() == base_count - 4, "The removed expansion house also loses exactly its four outline edges")
 		scene.toggle_quality()
 		check(scene.quality_mode and scene.quality_legend.visible, "Condition mode also covers expansion homes")
 		scene.audio.shutdown()

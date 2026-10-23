@@ -149,6 +149,7 @@ func run() -> void:
 		check(upgrade != null and not upgrade.disabled, "Each house exposes its improvement action: " + str(index))
 		if upgrade != null:
 			upgrade.pressed.emit()
+			await process_frame
 			check(scene.selection_kind == "upgrade", "House upgrade action opens its confirmation preview: " + str(index))
 			scene.cancel_upgrade()
 	for path in [staged.save_path, game.save_path, slow.save_path, fast.save_path, poor.save_path, scene.game.save_path]:

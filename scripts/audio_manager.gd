@@ -3,6 +3,7 @@ extends Node
 const DistrictWorld = preload("res://scripts/district_world.gd")
 
 const MAX_VOICES = 12
+const UI_RESERVE = 2
 const SETTINGS_PATH = "user://audio_settings.json"
 const CHANNELS = ["Ambience", "Effects", "Interface", "Music"]
 var levels: Dictionary = {"Ambience": 0.45, "Effects": 0.65, "Interface": 0.6, "Music": 0.4}
@@ -12,7 +13,7 @@ var spatial_root: Node3D
 var paused: bool = false
 var zoom_gain: float = 1.0
 var warning_clock: float = 0.0
-var random_clock: float = 0.0
+var ambience_fade: float = 0.0
 var last_job: String = ""
 var last_leak: bool = false
 var last_completed: bool = false
@@ -45,10 +46,25 @@ func stream(sound: String, loop: bool = false) -> AudioStream:
 func play_ui(sound: String = "click") -> void:
 	play(sound, "Interface")
 
+func play_construction(position_value: Vector3, park: bool = false) -> void:
+	play_ui("place")
+	play("build", "Effects", position_value)
+	if park:
+		play("leaves", "Effects", position_value)
+
 func play(sound: String, channel: String, position_value: Variant = null) -> void:
 	clean_voices()
-	if paused or voices.size() + loops.size() >= MAX_VOICES:
+	if paused:
 		return
+	var limit := MAX_VOICES if channel == "Interface" else MAX_VOICES - UI_RESERVE
+	if voices.size() + loops.size() >= limit:
+		if channel != "Interface" or voices.is_empty():
+			return
+		# Подтверждение/тап не теряется за длинными эффектами.
+		var oldest: Node = voices.pop_front()
+		oldest.stop()
+		oldest.stream = null
+		oldest.queue_free()
 	var player: Node
 	if position_value is Vector3:
 		player = AudioStreamPlayer3D.new()
@@ -85,7 +101,7 @@ func set_loop(key: String, sound: String, channel: String, enabled: bool, positi
 		return
 	if not loops.has(key):
 		clean_voices()
-		if voices.size() + loops.size() >= MAX_VOICES:
+		if voices.size() + loops.size() >= MAX_VOICES - UI_RESERVE:
 			return
 		var player: Node
 		if position_value is Vector3:
@@ -111,7 +127,7 @@ func sync(game: RefCounted, zoom: float, delta: float) -> void:
 	if paused:
 		return
 	warning_clock += delta
-	random_clock += delta
+	ambience_fade = minf(1, ambience_fade + delta / 2.0)
 	if not initialized:
 		last_signal = game.signal_fixed
 		last_leak = game.leak_fixed
@@ -124,8 +140,8 @@ func sync(game: RefCounted, zoom: float, delta: float) -> void:
 		set_loop("water", "water", "Effects", false)
 	if not last_completed and game.completed:
 		play_ui("level_up")
-	set_loop("city", "city", "Ambience", true, null, 0.7)
-	set_loop("birds", "birds", "Ambience", true, null, float(game.happiness()) / 100.0)
+	# В полевой записи уже есть птицы и редкий дальний транспорт.
+	set_loop("city", "city", "Ambience", true, null, ambience_fade * 0.6)
 	set_loop("water", "water", "Effects", not game.leak_fixed, Vector3(-9, 0.5, 6))
 	var moving: bool = game.job != "" and game.route_index < game.route.size()
 	set_loop("engine", "engine", "Effects", moving, game.vehicle)
@@ -133,10 +149,6 @@ func sync(game: RefCounted, zoom: float, delta: float) -> void:
 	if warning_clock >= 45 and (not game.leak_fixed or not game.signal_fixed):
 		play_ui("warning")
 		warning_clock = 0
-	if random_clock >= 18:
-		# Редкая условная проезжающая машина либо бессловесная реакция.
-		play("engine" if randf() < 0.5 else "reaction", "Ambience", Vector3(randf_range(-10, 10), 0.4, 3))
-		random_clock = 0
 	last_job = game.job
 	last_signal = game.signal_fixed
 	last_vehicle = game.vehicle
@@ -195,7 +207,7 @@ func reset_state() -> void:
 	initialized = false
 	last_job = ""
 	warning_clock = 0
-	random_clock = 0
+	ambience_fade = 0
 
 func _exit_tree() -> void:
 	shutdown()

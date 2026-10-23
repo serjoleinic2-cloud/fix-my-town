@@ -1660,6 +1660,12 @@ func build_land_cell_sheet() -> void:
 			catalog_category = "residential"
 			selection_kind = "catalog"
 			refresh(), true).name = "BuildOnLandCell"
+		button(sheet_column, tr_text("Построить службу", "Build a service"), func():
+			catalog_grid_target = territory_cell
+			active_tab = "build_tab"
+			catalog_category = "services"
+			selection_kind = "catalog"
+			refresh(), true).name = "BuildServiceOnLandCell"
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelLandCell"
 
 func build_road_piece_catalog() -> void:

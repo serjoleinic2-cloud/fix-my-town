@@ -79,10 +79,12 @@ func capture() -> void:
 	if mode == "low":
 		scene.quality = "low"
 		scene.apply_quality()
-	if mode in ["house", "condition"]:
+	if mode in ["house", "condition", "damaged_house"]:
 		scene.selected = 16
 		scene.selection_kind = "plot"
 		scene.quality_mode = mode == "condition"
+		if mode == "damaged_house":
+			scene.game.fire_damage["pine_district_legacy_16"] = 24.0
 		scene.set_camera_focus(scene.map_position(scene.game.plot_position(16)) + Vector3(7, 0, 7))
 	if mode in ["transit", "stop", "stop_move", "transit_en"]:
 		scene.game.leak_fixed = true

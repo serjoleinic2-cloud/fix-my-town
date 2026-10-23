@@ -113,8 +113,33 @@ func run() -> void:
 		scene.select_plot(0)
 		var damage_card: Control = scene.sheet
 		var repair_button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Пожар потушен"))
-		check(not repair_button.is_empty(), "Damaged home card offers a clear restoration action")
+		var restore_button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Восстановить дом"))
+		check(not restore_button.is_empty(), "Damaged home card offers a compact restoration action")
 		check(damage_card.get_global_rect().end.y <= scene.navbar.position.y + 1 and damage_card.position.y >= scene.hud.get_global_rect().end.y, "Damaged home card remains above bottom navigation")
+		check(damage_card.position.x >= 0 and damage_card.get_global_rect().end.x <= scene.screen.size.x + 1, "Damaged home card stays inside narrow/wide screen bounds")
+		var close_button: Button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text == "×")[0]
+		check(close_button.visible and close_button.get_global_rect().position.x >= 0 and close_button.get_global_rect().end.x <= scene.screen.size.x + 1, "House card close button remains visible and tappable")
+		scene.set_camera_focus(scene.map_position(scene.game.plot_position(1)) + Vector3(7, 0, 7))
+		var other_house_tap := InputEventMouseButton.new()
+		other_house_tap.button_index = MOUSE_BUTTON_LEFT
+		other_house_tap.pressed = true
+		other_house_tap.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(1)) + Vector3(0, 0.2, 0)) * scene.viewport_container.stretch_shrink
+		scene.map_input(other_house_tap)
+		check(scene.selection_kind == "plot" and scene.selected == 1, "Tapping another house replaces the previous house card")
+		var outside_tap := InputEventMouseButton.new()
+		outside_tap.button_index = MOUSE_BUTTON_LEFT
+		outside_tap.pressed = true
+		scene.set_camera_focus(Vector3(40, 0, 75))
+		outside_tap.position = scene.screen.size / 2 * scene.viewport_container.stretch_shrink
+		scene.map_input(outside_tap)
+		check(scene.selection_kind == "" and not scene.sheet.visible, "Tapping an unoccupied map area dismisses the current card")
+		scene.select_plot(0)
+		for i in range(2):
+			await process_frame
+		var header_close: Button = scene.sheet.find_children("*", "Button", true, false).filter(func(item): return item.text == "×")[0]
+		click(viewport, header_close.get_global_transform_with_canvas() * (header_close.size / 2))
+		await process_frame
+		check(scene.selection_kind == "" and not scene.sheet.visible, "Tapping the visible close button dismisses the card")
 		scene.audio.shutdown()
 		scene.queue_free()
 		await process_frame

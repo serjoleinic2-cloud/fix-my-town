@@ -86,6 +86,8 @@ var stop_candidate: int = 0
 var placing_stop: bool = false
 var moving_stop_index: int = -1
 var selected_stop_index: int = -1
+var safe_left: float = 16.0
+var safe_right: float = 16.0
 var territory_tool: String = "clear"
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
@@ -182,7 +184,7 @@ func style(color: Color, radius: int = 14, border: Color = Color.TRANSPARENT) ->
 func label(size_value: int, parent: Node, text_value: String = "", bold: bool = false) -> Label:
 	var item := Label.new()
 	if parent == sheet_column and sheet_column != null:
-		item.size.x = maxf(100, screen.size.x - 64)
+		item.size.x = maxf(100, screen.size.x - safe_left - safe_right - 64)
 		item.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	item.text = text_value
 	item.add_theme_font_size_override("font_size", size_value)
@@ -386,8 +388,8 @@ func update_layout() -> void:
 	viewport_container.size = size_value * render_scale
 	safe_top = maxf(16, safe_override.y)
 	safe_bottom = maxf(12, safe_override.w)
-	var safe_left := maxf(16, safe_override.x)
-	var safe_right := maxf(16, safe_override.z)
+	safe_left = maxf(16, safe_override.x)
+	safe_right = maxf(16, safe_override.z)
 	if OS.has_feature("android") or OS.has_feature("ios"):
 		var safe := DisplayServer.get_display_safe_area()
 		var physical := DisplayServer.window_get_size()
@@ -644,6 +646,7 @@ func set_camera_focus(point: Vector3) -> void:
 	camera.look_at(focus_point)
 
 func focus_problem() -> void:
+	close_sheet()
 	var point := map_position(Vector3(-9, 0, 6)) if not game.leak_fixed else Vector3(-14.4, 0, 0)
 	set_camera_focus(point + Vector3(5, 0, 5))
 
@@ -710,7 +713,7 @@ func map_input(event: InputEvent) -> void:
 		var candidate_row := tapped_stop_candidate(point)
 		if candidate_row >= 0:
 			confirm_stop(candidate_row)
-			return
+		return
 	if selection_kind not in ["territory", "stop_place"]:
 		var tapped_stop := tapped_existing_stop(point)
 		if tapped_stop >= 0:
@@ -731,6 +734,8 @@ func map_input(event: InputEvent) -> void:
 		return
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
+		if selection_kind not in ["", "territory", "stop_place"]:
+			close_sheet()
 		return
 	if selection_kind == "territory":
 		var col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
@@ -775,6 +780,9 @@ func map_input(event: InputEvent) -> void:
 	var entry: Dictionary = game.territory.building_at(cell.x, cell.y)
 	if not entry.is_empty() and not entry.has("legacy_plot"):
 		select_grid_house(entry.instance_id)
+		return
+	if selection_kind not in ["", "territory", "stop_place"]:
+		close_sheet()
 
 func select_projected_building(point: Vector2) -> bool:
 	var best_score := INF
@@ -1037,9 +1045,11 @@ func header(title_value: String, icon_key: String = "") -> void:
 	if icon_key != "":
 		var tile := card(row, Color("e68a3c"))
 		icon(tile, icon_key, 42)
-	var title := label(30, row, title_value, true)
+	var title := label(26 if screen.size.x < 420 else 30, row, title_value, true)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.custom_minimum_size.x = 0
+	title.clip_text = true
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var close := button(row, "×", close_sheet)
 	close.size_flags_horizontal = Control.SIZE_SHRINK_END
 	close.custom_minimum_size = Vector2(72, 72)
@@ -1438,6 +1448,7 @@ func apply_quality() -> void:
 	update_layout()
 
 func open_settings() -> void:
+	close_sheet()
 	var dialog := AcceptDialog.new()
 	dialog.theme = ui_theme
 	dialog.title = "Настройки" if game.language == "ru" else "Settings"
@@ -1498,6 +1509,7 @@ func confirm_reset() -> void:
 
 
 func open_audio_settings() -> void:
+	close_sheet()
 	var dialog := AcceptDialog.new()
 	dialog.theme = ui_theme
 	dialog.title = t("audio")
@@ -1568,6 +1580,7 @@ func quality_color(score: float) -> Color:
 	return QUALITY_COLORS[Simulation.quality_band(score)]
 
 func toggle_quality() -> void:
+	close_sheet()
 	quality_mode = not quality_mode
 	refresh()
 
@@ -1625,14 +1638,17 @@ func build_grid_house_sheet() -> void:
 	if not data.services:
 		label(20, sheet_column, tr_text("Службы задерживаются — проверьте дорогу и светофор", "Services delayed — check the road and signal")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label(20, sheet_column, t("residents") % [game.record_residents(entry), Catalog.level_data("house", entry.level).income])
-	var row := hbox(sheet_column)
+	var narrow_screen: bool = screen.size.x < 420
+	var row: HBoxContainer
+	if not narrow_screen:
+		row = hbox(sheet_column)
 	var price: int = Catalog.level_data("house", entry.level).upgrade_cost
-	var improve := button(row, tr_text("Улучшить · %d", "Upgrade · %d") % price if entry.level < 3 else tr_text("Максимум", "Maximum"), func():
+	var improve := button(sheet_column if narrow_screen else row, tr_text("Улучшить · %d", "Upgrade · %d") % price if entry.level < 3 else tr_text("Максимум", "Maximum"), func():
 		selection_kind = "grid_upgrade"
 		refresh(), true)
 	improve.name = "UpgradeButton"
 	improve.disabled = entry.level >= 3
-	button(row, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
+	button(sheet_column if narrow_screen else row, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
 	var inspected: bool = bool(entry.get("inspected", false))
 	if not inspected:
 		var inspect_button := button(sheet_column, tr_text("Проверить выезд бригады", "Check crew access"), dispatch_grid_inspection)
@@ -1713,10 +1729,11 @@ func build_building_sheet() -> void:
 			label(20, sheet_column, t("fire_damaged") % damage).add_theme_color_override("font_color", Color("c96b52"))
 			if game.fires.is_empty():
 				var repair_price := 40 + damage
-				var restore := button(sheet_column, t("fire_extinguished") % repair_price, func():
+				var restore := button(sheet_column, tr_text("Восстановить дом · %d", "Restore home · %d") % repair_price, func():
 					if game.repair_fire_damage("pine_district_legacy_%d" % selected):
 						audio.play_ui("success")
 					refresh(), true)
+				restore.add_theme_font_size_override("font_size", 21 if screen.size.x < 420 else 24)
 				restore.disabled = game.budget < repair_price
 	else:
 		label(22, sheet_column, building_effect(kind, level_value))
@@ -1724,13 +1741,18 @@ func build_building_sheet() -> void:
 		label(20, sheet_column, tr_text("Следующий: ", "Next: ") + building_effect(kind, level_value + 1))
 	else:
 		label(20, sheet_column, tr_text("Достигнут третий уровень", "Level three reached"))
-	var row := hbox(sheet_column)
-	var improve := button(row, tr_text("Улучшить · %d", "Upgrade · %d") % game.upgrade_cost(selected) if level_value < 3 else tr_text("Максимум", "Maximum"), begin_upgrade, true)
+	var narrow_screen: bool = screen.size.x < 420
+	var action_row: HBoxContainer
+	if not narrow_screen:
+		action_row = hbox(sheet_column)
+	var improve_parent: Node = sheet_column if narrow_screen else action_row
+	var improve := button(improve_parent, tr_text("Улучшить · %d", "Upgrade · %d") % game.upgrade_cost(selected) if level_value < 3 else tr_text("Максимум", "Maximum"), begin_upgrade, true)
 	improve.name = "UpgradeButton"
 	improve.disabled = level_value >= 3
-	var more := button(row, tr_text("Ещё", "More"), open_building_more)
-	more.size_flags_horizontal = Control.SIZE_SHRINK_END
-	more.custom_minimum_size.x = 100
+	var more := button(sheet_column if narrow_screen else action_row, tr_text("Ещё", "More"), open_building_more)
+	if not narrow_screen:
+		more.size_flags_horizontal = Control.SIZE_SHRINK_END
+		more.custom_minimum_size.x = 100
 	more.name = "MoreButton"
 	if not issues.is_empty():
 		var key: String = issues[0][1]

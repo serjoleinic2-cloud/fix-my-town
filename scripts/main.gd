@@ -804,6 +804,20 @@ func redraw_plots() -> void:
 		object.set_language(game.language)
 	redraw_territory()
 
+func is_in_compact_road_square(col: int, row: int) -> bool:
+	# A 2x2 cleared road block is an open paved square, not four
+	# independent intersections. Suppress junction markings inside it.
+	for origin_x in [col - 1, col]:
+		for origin_z in [row - 1, row]:
+			var all_roads := true
+			for dx in [0, 1]:
+				for dz in [0, 1]:
+					if game.territory.state_at(origin_x + dx, origin_z + dz) != "road":
+						all_roads = false
+			if all_roads:
+				return true
+	return false
+
 func redraw_territory() -> void:
 	var signature := JSON.stringify(game.territory.data()) + JSON.stringify(game.fire_ruins) + JSON.stringify(game.fire_damage) + str([quality_mode, game.language, game.signal_fixed, game.transit.active, game.transit.funded, game.transit.stops])
 	if signature == territory_signature:
@@ -854,19 +868,19 @@ func redraw_territory() -> void:
 						else:
 							for side in [-1.0, 1.0]:
 								Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, offset.y * 1.8), Vector3(0.9, 0.1, 1.2), concrete)
-						# Zebra and stop line are placed at the mouth of every arm.
-						# Crosswalks sit at the outer edge of the junction, leaving the
-						# central asphalt clear for turning traffic.
-						var cross_center := center + Vector3(offset.x * 2.0, 0.23, offset.y * 2.0)
-						for stripe in range(-1, 2):
-							var stripe_center := cross_center + (Vector3(0, 0, stripe * 0.38) if offset.x != 0 else Vector3(stripe * 0.38, 0, 0))
-							var stripe_size := Vector3(0.14, 0.018, 1.35) if offset.x != 0 else Vector3(1.35, 0.018, 0.14)
-							Art.box(tile_visuals, stripe_center, stripe_size, markings)
-						# The STOP line is outside the junction and spans only half the
-						# road, so four approaches never form an inner square.
-						var stop_center := center + Vector3(offset.x * 2.3, 0.25, offset.y * 2.3)
-						var stop_size := Vector3(0.10, 0.02, 1.35) if offset.x != 0 else Vector3(1.35, 0.02, 0.10)
-						Art.box(tile_visuals, stop_center, stop_size, Color("f4f0d8"))
+						if topology in ["tee", "cross"] and not is_in_compact_road_square(col, row):
+							# Only the junction cell owns its crossings. Neighbouring road
+							# cells must not add a second STOP line at the same approach.
+							# Crosswalks sit at the outer edge, leaving the centre clear.
+							var cross_center := center + Vector3(offset.x * 2.0, 0.23, offset.y * 2.0)
+							for stripe in range(-1, 2):
+								var stripe_center := cross_center + (Vector3(0, 0, stripe * 0.38) if offset.x != 0 else Vector3(stripe * 0.38, 0, 0))
+								var stripe_size := Vector3(0.14, 0.018, 1.35) if offset.x != 0 else Vector3(1.35, 0.018, 0.14)
+								Art.box(tile_visuals, stripe_center, stripe_size, markings)
+							# One short STOP line outside the crossing, half a road wide.
+							var stop_center := center + Vector3(offset.x * 2.3, 0.25, offset.y * 2.3)
+							var stop_size := Vector3(0.10, 0.02, 1.35) if offset.x != 0 else Vector3(1.35, 0.02, 0.10)
+							Art.box(tile_visuals, stop_center, stop_size, Color("f4f0d8"))
 					# Four small corner pads connect the split sidewalk segments.
 					for side_x in [-1.0, 1.0]:
 						for side_z in [-1.0, 1.0]:

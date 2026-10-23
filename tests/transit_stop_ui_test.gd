@@ -75,6 +75,7 @@ func run() -> void:
 	candidate_tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(moved_cell.x, moved_cell.y) + Vector3(0, 1.6, 0)) * scene.viewport_container.stretch_shrink
 	scene.map_input(candidate_tap)
 	check(not scene.placing_stop and scene.game.transit.stops[0] == 0 and scene.game.transit.stops[1] == {"col": 18, "row": 12}, "Tapping a marked valid road location commits the move")
+	check(scene.game.stop_orientation(scene.game.transit.stops[1]) == "horizontal" and is_equal_approx(absf(scene.transit_visuals.get_node("bus_stop_1").rotation.y), PI / 2.0), "Moved stop follows the horizontal road instead of standing across it")
 	check(scene.game.transit_metrics() != old_coverage and scene.game.transit.target_z == old_target, "Coverage refreshes and the active bus safely finishes its current leg")
 	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(scene.game.save_path))
 	var saved_stops: Array = saved.get("transit", {}).get("stops", [])

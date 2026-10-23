@@ -47,6 +47,7 @@ func run() -> void:
 	var second: Vector2i = game.territory.nearest_road(cafe_point)
 	check(game.place_stop(first) and not game.place_stop(first), "Stops require a unique connected road cell")
 	check(game.place_stop(second), "Second stop can be placed on another street")
+	check(game.stop_orientation(game.transit.stops[0]) in ["horizontal", "vertical"] and game.stop_orientation(game.transit.stops[1]) in ["horizontal", "vertical"], "Every placed stop receives an along-road orientation")
 	check(not game.place_stop(Vector2i(0, 29)), "A forest cell is not a stop location")
 	check(game.transit.route_for(game.territory, 0, 1).size() > 4, "Route follows a connected multi-cell road path")
 	var route := game.transit.route_for(game.territory, 0, 1)

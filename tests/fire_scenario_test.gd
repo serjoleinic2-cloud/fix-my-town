@@ -162,17 +162,46 @@ func run() -> void:
 	ruined_load.save_path = save_path
 	damaged_save.save_game()
 	check(ruined_load.load_game() and ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Ruins survive save and reload")
-	check(ruined_load.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A ruin can be explicitly rebuilt for its restoration price")
-	check(not ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Rebuild removes the ruin state")
+	check(ruined_load.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A ruin starts a visible restoration worksite")
+	check(ruined_load.construction_job.get("kind", "") == "restore_legacy", "Ruins use a dedicated restoration construction kind")
+	check(ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET) and ruined_load.building_level(0) == 3, "A ruin stays damaged and keeps its old level until work finishes")
+	ruined_load.tick(6.1)
+	check(not ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Restoration removes the ruin state only after construction")
 	check(ruined_load.building_level(0) == 1, "A rebuilt ruin returns as a one-storey home")
+	check(ruined_load.upgrade(0) and ruined_load.construction_job.get("kind", "") == "upgrade_legacy", "Further improvement is a separate action after restoration")
+	ruined_load.tick(6.1)
+	check(ruined_load.building_level(0) == 2, "The restored home reaches level two only after a second worksite")
 	var final_load = Simulation.new()
 	final_load.save_path = save_path
 	ruined_load.save_game()
 	check(final_load.load_game() and not final_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Rebuilt home is saved")
+
+	# Grid ruins follow the same two-step rule and never jump directly to level two.
+	var grid_save := Simulation.new()
+	grid_save.save_path = "user://grid_ruin_restore_test.json"
+	grid_save.budget = 5000
+	for cell in [Vector2i(12, 19), Vector2i(13, 19), Vector2i(14, 19), Vector2i(15, 19), Vector2i(14, 20), Vector2i(15, 20)]:
+		grid_save.clear_grid_cell(cell.x, cell.y)
+	grid_save.build_grid_road(12, 19)
+	grid_save.build_grid_road(13, 19)
+	check(grid_save.build_grid_building(14, 19, "house"), "Grid house can be prepared for ruin restoration")
+	var grid_id := str(grid_save.territory.building_at(14, 19).instance_id)
+	grid_save.fire_damage[grid_id] = 100.0
+	grid_save.fire_ruins[grid_id] = true
+	check(not grid_save.start_grid_upgrade(grid_id), "Ruined grid home cannot open an upgrade")
+	check(grid_save.repair_fire_damage(grid_id) and grid_save.construction_job.kind == "restore_grid", "Grid ruin opens a visible first-floor restoration")
+	grid_save.tick(6.1)
+	check(grid_save.territory.building_by_id(grid_id).level == 1 and not grid_save.is_ruined(grid_id), "Grid restoration finishes at level one")
+	check(grid_save.start_grid_upgrade(grid_id) and grid_save.territory.building_by_id(grid_id).level == 1, "Level two remains a separate work order")
+	grid_save.tick(6.1)
+	check(grid_save.territory.building_by_id(grid_id).level == 2, "Grid upgrade reaches level two only after its own work")
 	for suffix in ["", ".tmp"]:
 		var absolute := ProjectSettings.globalize_path(save_path + suffix)
 		if FileAccess.file_exists(absolute):
 			DirAccess.remove_absolute(absolute)
+	var grid_absolute := ProjectSettings.globalize_path("user://grid_ruin_restore_test.json")
+	if FileAccess.file_exists(grid_absolute):
+		DirAccess.remove_absolute(grid_absolute)
 	if failures.is_empty():
 		print("FIRE SCENARIO CHECKS: PASS")
 		quit(0)
@@ -180,4 +209,3 @@ func run() -> void:
 		for failure in failures:
 			push_error(failure)
 		quit(1)
-

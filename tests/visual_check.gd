@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TerritoryGrid = preload("res://scripts/territory_grid.gd")
+
 func _initialize() -> void:
 	call_deferred("capture")
 
@@ -45,6 +47,27 @@ func capture() -> void:
 				scene.selection_kind = "grid_upgrade"
 		if mode == "expansion_en":
 			scene.game.language = "en"
+	if mode == "city_review":
+		# Пересобираем только временную копию города для визуального осмотра;
+		# пользовательское сохранение не затрагивается.
+		scene.game.budget = 100000
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+			for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
+				if scene.game.territory.state_at(col, row) == "forest":
+					scene.game.clear_grid_cell(col, row)
+		# Spine, branch and turn expose every available road topology.
+		for col in range(8, 18):
+			scene.game.build_grid_road(col, 19)
+		for row in range(20, 28):
+			scene.game.build_grid_road(12, row)
+		for col in range(13, 18):
+			scene.game.build_grid_road(col, 24)
+		for cell in [Vector2i(9, 20), Vector2i(9, 21), Vector2i(15, 20), Vector2i(15, 21), Vector2i(9, 25), Vector2i(15, 25)]:
+			if scene.game.territory.state_at(cell.x, cell.y) == "free":
+				scene.game.build_grid_building(cell.x, cell.y, "house")
+		scene.set_camera_focus(scene.game.territory.cell_world(12, 22) + Vector3(12, 0, 12))
 	if mode == "done":
 		scene.game.leak_fixed = true
 		scene.game.signal_fixed = true

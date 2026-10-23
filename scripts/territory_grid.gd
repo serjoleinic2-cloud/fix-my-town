@@ -93,6 +93,23 @@ func connected_road(col: int, row: int) -> bool:
 				queue.append(next)
 	return reaches_city
 
+func road_orientation(col: int, row: int) -> String:
+	# Остановка ориентируется вдоль оси улицы. На узлах выбираем ось с
+	# горизонтальным продолжением, чтобы модель не вставала поперёк проезжей части.
+	if state_at(col, row) != "road":
+		return ""
+	var links: Array[Vector2i] = []
+	for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		if state_at(col + offset.x, row + offset.y) == "road":
+			links.append(offset)
+	var has_horizontal := Vector2i.LEFT in links or Vector2i.RIGHT in links
+	var has_vertical := Vector2i.UP in links or Vector2i.DOWN in links
+	if has_horizontal:
+		return "horizontal"
+	if has_vertical:
+		return "vertical"
+	return ""
+
 func place_road(col: int, row: int) -> bool:
 	if not in_bounds(col, row) or cells[row][col] != "free":
 		return false

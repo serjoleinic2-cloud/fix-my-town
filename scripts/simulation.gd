@@ -172,12 +172,18 @@ func record_destination_level(entry: Dictionary) -> int:
 	return best
 
 func valid_stop_cell(cell: Vector2i, ignore_index: int = -1) -> bool:
-	if territory.state_at(cell.x, cell.y) != "road" or territory.path_to_city(cell.x, cell.y).is_empty():
+	if territory.state_at(cell.x, cell.y) != "road" or territory.road_orientation(cell.x, cell.y) == "" or territory.path_to_city(cell.x, cell.y).is_empty():
 		return false
 	for index in range(transit.stops.size()):
 		if index != ignore_index and transit.stop_cell(transit.stops[index], territory) == cell:
 			return false
 	return true
+
+func stop_orientation(stop: Variant) -> String:
+	if stop is Dictionary and str(stop.get("orientation", "")) in ["horizontal", "vertical"]:
+		return str(stop.orientation)
+	var cell := transit.stop_cell(stop, territory)
+	return territory.road_orientation(cell.x, cell.y) if cell.x >= 0 else "vertical"
 
 func place_stop(location: Variant) -> bool:
 	if not completed or transit.stops.size() >= 2 or budget < Transit.STOP_COST:
@@ -410,7 +416,7 @@ func _construction_position(data: Dictionary) -> Array:
 		var point := building_world(index) if index in range(24) else Vector3.ZERO
 		return [point.x, point.y, point.z]
 	var point := territory.cell_world(int(data.get("col", 0)), int(data.get("row", 0)))
-	if str(data.get("kind", "")) in ["build_grid", "upgrade_grid", "demolish_grid"]:
+	if str(data.get("kind", "")) in ["build_grid", "upgrade_grid", "restore_grid", "demolish_grid"]:
 		var size := Catalog.footprint_cells(str(data.get("type_id", "house")))
 		point += Vector3((size.x - 1) * TerritoryGrid.CELL_SIZE * 0.5, 0.0, (size.y - 1) * TerritoryGrid.CELL_SIZE * 0.5)
 	return [point.x, point.y, point.z]
@@ -478,6 +484,8 @@ func _finish_construction() -> bool:
 		"build_grid": result = build_grid_building(int(task.col), int(task.row), str(task.type_id), true)
 		"upgrade_legacy": result = upgrade(int(task.index), true)
 		"upgrade_grid": result = upgrade_grid_house(str(task.identifier), true)
+		"restore_legacy": result = restore_legacy_ruin(int(task.index), true)
+		"restore_grid": result = restore_grid_ruin(str(task.identifier), true)
 		"clear": result = clear_grid_cell(int(task.col), int(task.row), true)
 		"road": result = build_grid_road(int(task.col), int(task.row), true)
 		"demolish_grid": result = demolish_grid_building(str(task.identifier))
@@ -587,7 +595,7 @@ func demolish_road(col: int, row: int) -> bool:
 
 func upgrade_grid_house(identifier: String, reserved: bool = false) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot"):
+	if entry.is_empty() or entry.has("legacy_plot") or is_ruined(identifier) or not Catalog.LEVELS.has(entry.type_id):
 		return false
 	var level_value := int(entry.get("level", 1))
 	var price: int = Catalog.level_data(entry.type_id, level_value).upgrade_cost
@@ -763,8 +771,22 @@ func repair_fire_damage(identifier: String) -> bool:
 	var damage := house_damage(identifier)
 	var ruined := is_ruined(identifier)
 	var price := 120 if ruined else 40 + damage
-	if damage <= 0 or not fires.is_empty() or job != "" or not fire_jobs.is_empty() or budget < price:
+	if damage <= 0 or not fires.is_empty() or job != "" or not fire_jobs.is_empty() or not construction_job.is_empty() or budget < price:
 		return false
+	if ruined:
+		var task_kind := "restore_legacy" if identifier.begins_with("pine_district_legacy_") else "restore_grid"
+		var fields := {"kind": task_kind, "type_id": "house", "identifier": identifier, "col": -1, "row": -1, "index": -1, "level": 1, "cost": price}
+		if task_kind == "restore_legacy":
+			fields.index = int(identifier.trim_prefix("pine_district_legacy_"))
+		else:
+			var ruined_entry := territory.building_by_id(identifier)
+			if ruined_entry.is_empty():
+				return false
+			fields.type_id = ruined_entry.type_id
+			fields.col = ruined_entry.col
+			fields.row = ruined_entry.row
+			fields.level = int(ruined_entry.get("level", 1))
+		return _start_construction(fields)
 	budget -= price
 	fire_damage.erase(identifier)
 	fire_ruins.erase(identifier)
@@ -780,6 +802,37 @@ func repair_fire_damage(identifier: String) -> bool:
 			var restored_entry := territory.building_by_id(identifier)
 			if not restored_entry.is_empty():
 				restored_entry.level = 1
+	save_game()
+	return true
+
+func restore_grid_ruin(identifier: String, reserved: bool = false) -> bool:
+	var entry := territory.building_by_id(identifier)
+	if entry.is_empty() or entry.has("legacy_plot") or not is_ruined(identifier):
+		return false
+	if not reserved:
+		var price := 120
+		if budget < price:
+			return false
+		budget -= price
+	fire_damage.erase(identifier)
+	fire_ruins.erase(identifier)
+	jam_cleared.erase(identifier)
+	entry.level = 1
+	save_game()
+	return true
+
+func restore_legacy_ruin(index: int, reserved: bool = false) -> bool:
+	if index < 0 or index >= 24 or buildings[index] != "house" or not is_ruined("pine_district_legacy_%d" % index):
+		return false
+	if not reserved:
+		if budget < 120:
+			return false
+		budget -= 120
+	var identifier := "pine_district_legacy_%d" % index
+	fire_damage.erase(identifier)
+	fire_ruins.erase(identifier)
+	jam_cleared.erase(identifier)
+	levels[index] = 1
 	save_game()
 	return true
 
@@ -1270,6 +1323,11 @@ func load_game() -> bool:
 			var cell := Vector2i(int(stop.col), int(stop.row))
 			if loaded_territory.state_at(cell.x, cell.y) != "road" or loaded_territory.path_to_city(cell.x, cell.y).is_empty():
 				return false
+			if str(stop.get("orientation", "")) not in ["", "horizontal", "vertical"]:
+				return false
+			var orientation := str(stop.get("orientation", "")) if stop.has("orientation") else loaded_territory.road_orientation(cell.x, cell.y)
+			if orientation == "":
+				return false
 	var stored_target: String = str(data.get("target_instance_id", ""))
 	if stored_job == "inspection" and loaded_territory.building_by_id(stored_target).is_empty():
 		return false
@@ -1401,7 +1459,7 @@ func load_game() -> bool:
 		return false
 	if not raw_construction.is_empty():
 		var construction_kind := str(raw_construction.get("kind", ""))
-		if construction_kind not in ["build_legacy", "build_grid", "upgrade_legacy", "upgrade_grid", "clear", "road", "demolish_grid", "demolish_legacy", "demolish_road"]:
+		if construction_kind not in ["build_legacy", "build_grid", "upgrade_legacy", "upgrade_grid", "restore_legacy", "restore_grid", "clear", "road", "demolish_grid", "demolish_legacy", "demolish_road"]:
 			return false
 		for key in ["remaining", "total"]:
 			var number: Variant = raw_construction.get(key, null)
@@ -1429,7 +1487,16 @@ func load_game() -> bool:
 			return false
 		if construction_kind == "upgrade_grid":
 			var upgrade_entry: Dictionary = loaded_territory.building_by_id(str(raw_construction.get("identifier", "")))
-			if upgrade_entry.is_empty() or not Catalog.LEVELS.has(ct) or upgrade_entry.type_id != ct or int(upgrade_entry.get("level", 1)) != int(raw_construction.get("level", -1)) or int(raw_construction.get("level", 0)) >= 3:
+			if upgrade_entry.is_empty() or not Catalog.LEVELS.has(ct) or upgrade_entry.type_id != ct or loaded_ruins.has(str(raw_construction.get("identifier", ""))) or int(upgrade_entry.get("level", 1)) != int(raw_construction.get("level", -1)) or int(raw_construction.get("level", 0)) >= 3:
+				return false
+		if construction_kind == "restore_grid":
+			var restore_entry: Dictionary = loaded_territory.building_by_id(str(raw_construction.get("identifier", "")))
+			if restore_entry.is_empty() or restore_entry.has("legacy_plot") or not loaded_ruins.has(str(raw_construction.get("identifier", ""))) or restore_entry.type_id != ct:
+				return false
+		if construction_kind == "restore_legacy":
+			var restore_index := int(raw_construction.get("index", -1))
+			var restore_id := "pine_district_legacy_%d" % restore_index
+			if restore_index not in range(24) or stored[restore_index] != "house" or not loaded_ruins.has(restore_id):
 				return false
 		if construction_kind == "demolish_road" and loaded_territory.state_at(cc, cr) != "road":
 			return false
@@ -1563,4 +1630,3 @@ func proposed_vehicle(delta: float) -> Vector3:
 		return vehicle
 	var speed := 0.55 if not signal_fixed and absf(vehicle.z) < 1.8 else 2.6
 	return vehicle.move_toward(route[route_index], delta * speed)
-

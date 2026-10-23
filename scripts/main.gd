@@ -1651,7 +1651,7 @@ func build_construction_job_sheet() -> void:
 	action_height = 230
 	var task: Dictionary = game.construction_job
 	var task_kind := str(task.get("kind", ""))
-	var verb := t("construction_demolish") if task_kind.begins_with("demolish") else (t("construction_upgrade") if task_kind.begins_with("upgrade") else t("construction_build"))
+	var verb := t("construction_demolish") if task_kind.begins_with("demolish") else (tr_text("Восстановление", "Restoration") if task_kind.begins_with("restore") else (t("construction_upgrade") if task_kind.begins_with("upgrade") else t("construction_build")))
 	header(verb)
 	var item_id := str(task.get("type_id", ""))
 	if item_id != "":
@@ -1679,6 +1679,10 @@ func handle_construction_finish(task: Dictionary) -> void:
 			close_sheet()
 	elif kind == "upgrade_grid":
 		select_grid_house(str(task.get("identifier", "")))
+	elif kind == "restore_grid":
+		select_grid_house(str(task.get("identifier", "")))
+	elif kind == "restore_legacy":
+		select_plot(int(task.get("index", -1)))
 	elif kind == "demolish_grid":
 		open_catalog()
 		catalog_category = "landscaping"
@@ -2975,6 +2979,8 @@ func redraw_transit() -> void:
 	clear_children(transit_visuals)
 	for index in range(game.transit.stops.size()):
 		var stop := create_object(transit_visuals, "bus_stop", "bus_stop_%d" % index, game.transit.stop_position(game.transit.stops[index], game.territory))
+		if game.stop_orientation(game.transit.stops[index]) == "horizontal":
+			stop.rotation.y = PI / 2.0
 		stop.interaction_area.collision_layer = 0
 	if show_route:
 		var path: Array[Vector3] = game.transit.route_for(game.territory, 0, 1)

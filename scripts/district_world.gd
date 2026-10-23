@@ -2,6 +2,8 @@ extends Node3D
 
 const Art = preload("res://scripts/art.gd")
 const TrafficSystem = preload("res://scripts/traffic_system.gd")
+const ROAD_X_POINTS := [-57.6, -43.2, -28.8, -14.4, 0.0, 14.4, 28.8]
+const ROAD_Z_POINTS := [-43.2, -28.8, -14.4, 0.0, 14.4, 28.8, 43.2]
 var traffic_controller: Node3D
 var traffic: Array[Node3D] = []
 var animation_time: float = 0
@@ -37,11 +39,25 @@ func build() -> void:
 		# streets: 2.8 m asphalt with two 0.9 m sidewalks.
 		Art.box(self, Vector3(-17, 0.14, z), Vector3(98, 0.08, 2.8), Color("777d80"))
 		for side in [-1.0, 1.0]:
-			Art.box(self, Vector3(-17, 0.16, z + side * 1.85), Vector3(98, 0.1, 0.9), Color("b6b2a3"))
+			# Тротуар не должен проходить через центр перекрёстка. Разбиваем
+			# его на пролёты между узлами и оставляем угловые площадки ниже.
+			for index in range(ROAD_X_POINTS.size() - 1):
+				var first_x: float = ROAD_X_POINTS[index]
+				var second_x: float = ROAD_X_POINTS[index + 1]
+				Art.box(self, Vector3((first_x + second_x) * 0.5, 0.16, z + side * 1.85), Vector3(second_x - first_x - 3.0, 0.1, 0.9), Color("b6b2a3"))
 	for x in [-57.6, -43.2, -28.8, -14.4, 0, 14.4, 28.8]:
 		Art.box(self, Vector3(x, 0.14, 0), Vector3(2.8, 0.08, 96), Color("777d80"))
 		for side in [-1.0, 1.0]:
-			Art.box(self, Vector3(x + side * 1.85, 0.16, 0), Vector3(0.9, 0.1, 96), Color("b6b2a3"))
+			for index in range(ROAD_Z_POINTS.size() - 1):
+				var first_z: float = ROAD_Z_POINTS[index]
+				var second_z: float = ROAD_Z_POINTS[index + 1]
+				Art.box(self, Vector3(x + side * 1.85, 0.16, (first_z + second_z) * 0.5), Vector3(0.9, 0.1, second_z - first_z - 3.0), Color("b6b2a3"))
+	# Углы тротуаров остаются вокруг перекрёстка, не пересекают его центр.
+	for x in [-57.6, -43.2, -28.8, -14.4, 0, 14.4, 28.8]:
+		for z in [-43.2, -28.8, -14.4, 0, 14.4, 28.8, 43.2]:
+			for side_x in [-1.0, 1.0]:
+				for side_z in [-1.0, 1.0]:
+					Art.box(self, Vector3(x + side_x * 2.85, 0.16, z + side_z * 2.85), Vector3(1.7, 0.1, 1.7), Color("b6b2a3"))
 	# Broken centre markings use the same short dashes as expansion roads.
 	for z in [-43.2, -28.8, -14.4, 0, 14.4, 28.8, 43.2]:
 		for x in [-50.4, -36.0, -21.6, -7.2, 7.2, 21.6]:

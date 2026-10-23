@@ -697,6 +697,12 @@ func has_service_building(type_id: String) -> bool:
 	for entry: Dictionary in territory.buildings:
 		if entry.type_id == type_id:
 			return true
+	# На старте района дежурный патруль выезжает из дома рабочих. Игрок
+	# по-прежнему может построить отдельный участок позже.
+	if type_id == "police_station":
+		for entry: Dictionary in territory.buildings:
+			if entry.type_id == "depot":
+				return true
 	return false
 
 func job_depot_world() -> Vector3:
@@ -1002,6 +1008,12 @@ func dispatch_police(incident_id: String) -> bool:
 			station = entry.duplicate(true)
 			station.position = territory.building_center(entry)
 			break
+	if station.is_empty():
+		for entry: Dictionary in territory.buildings:
+			if entry.type_id == "depot":
+				station = entry.duplicate(true)
+				station.position = territory.building_center(entry)
+				break
 	if station.is_empty():
 		return false
 	var target := building_world_for_id(incident_id)

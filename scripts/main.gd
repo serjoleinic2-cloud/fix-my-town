@@ -28,6 +28,7 @@ var notified_fire_ids: Dictionary = {}
 var fire_notice: PanelContainer
 var fire_notice_label: Label
 var fire_notice_left: float = 0.0
+var jam_notice_cooldown: float = 0.0
 var signal_object: Node3D
 var leak_effect: Node3D
 var sunlight: DirectionalLight3D
@@ -2325,6 +2326,7 @@ func _process(delta: float) -> void:
 	if fire_notice_left > 0:
 		fire_notice_left = maxf(0, fire_notice_left - delta)
 		fire_notice.visible = fire_notice_left > 0
+	jam_notice_cooldown = maxf(0.0, jam_notice_cooldown - delta)
 	if game.completed and not game.fire_triggered and elapsed >= 5.0:
 		if game.start_fire():
 			refresh()
@@ -2366,6 +2368,7 @@ func _process(delta: float) -> void:
 				fire_motion["police"] = scenery.traffic_controller.service_travel_distance(police_current, police_current.move_toward(police_next, delta * 2.8), delta, "police", false, str(game.police_job.incident_id)) / police_intended
 	scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
+	check_traffic_jam_notice()
 	game.transit.tick(delta, scenery.traffic_controller, game.territory)
 	if citizen_pool != null and is_instance_valid(citizen_pool):
 		citizen_pool.tick(delta)
@@ -2423,6 +2426,30 @@ func _process(delta: float) -> void:
 	if save_clock > 2:
 		game.save_game()
 		save_clock = 0
+
+func check_traffic_jam_notice() -> void:
+	if jam_notice_cooldown > 0.0 or not game.police_job.is_empty() or scenery == null:
+		return
+	var jam_id := ""
+	var blocker_position := Vector3.ZERO
+	for blocker: Dictionary in scenery.traffic_controller.blocking_positions:
+		var incident := str(blocker.get("incident_id", ""))
+		if incident != "":
+			jam_id = incident
+			blocker_position = blocker.position
+			break
+	if jam_id == "":
+		return
+	for vehicle: Dictionary in scenery.traffic_controller.vehicles:
+		if vehicle.node.type_id == "city_bus" or not vehicle.node.visible:
+			continue
+		if vehicle.node.position.distance_to(blocker_position) < 14.0 and scenery.traffic_controller.travel_distance(vehicle, 0.12) < 0.01:
+			selected_fire_id = jam_id
+			fire_notice_left = 4.0
+			fire_notice_label.text = tr_text("Затор у пожарной машины · Нажмите на технику и вызовите полицию.", "Fire engine traffic jam · Tap the vehicle and call police.")
+			fire_notice.show()
+			jam_notice_cooldown = 4.0
+			return
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:

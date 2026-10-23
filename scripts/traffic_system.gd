@@ -167,9 +167,19 @@ func continue_road_loop(vehicle: Dictionary) -> void:
 
 func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	var distance := SPEED * delta * float(vehicle.get("speed_factor", 1.0))
+	var current_position := lane_position(vehicle)
 	for other: Dictionary in vehicles:
 		if other.id == vehicle.id or not other.node.visible or other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
-			continue
+			# Same-lane following is handled below; the general footprint check
+			# also prevents cars from passing through one another at a junction.
+			if other.id == vehicle.id or not other.node.visible:
+				continue
+			var other_position := lane_position(other)
+			var proposed_position := current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0)
+			if proposed_position.distance_to(other_position) < 2.8:
+				distance = minf(distance, maxf(0.0, current_position.distance_to(other_position) - 2.8))
+			if other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
+				continue
 		var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
 		if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
 			distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))

@@ -1002,7 +1002,7 @@ func set_camera_focus(point: Vector3) -> void:
 
 func focus_problem() -> void:
 	close_sheet()
-	var point := map_position(Vector3(-9, 0, 6)) if not game.leak_fixed else Vector3(-14.4, 0, 0)
+	var point := map_position(Vector3(-9, 0, 6)) if game.legacy_problem_available("leak") else Vector3(-14.4, 0, 0)
 	set_camera_focus(point + Vector3(5, 0, 5))
 
 func change_zoom(amount: float) -> void:
@@ -1314,6 +1314,11 @@ func select_plot(index: int) -> void:
 	refresh()
 
 func select_problem(kind: String) -> void:
+	if kind in ["leak", "signal"] and not game.legacy_problem_available(kind):
+		selection_kind = "district_status"
+		selected = -1
+		refresh()
+		return
 	selection_kind = kind
 	selected = -1
 	if kind == "fire" and not game.fires.has(selected_fire_id):
@@ -1326,7 +1331,16 @@ func select_problem(kind: String) -> void:
 func select_tab(key: String) -> void:
 	active_tab = key
 	if key == "services":
-		select_problem("fire" if not game.fires.is_empty() else ("leak" if not game.leak_fixed else "signal"))
+		if not game.fires.is_empty():
+			select_problem("fire")
+		elif game.legacy_problem_available("leak"):
+			select_problem("leak")
+		elif game.legacy_problem_available("signal"):
+			select_problem("signal")
+		else:
+			selection_kind = "district_status"
+			selected = -1
+			refresh()
 		return
 	if key == "build_tab":
 		open_catalog(selected if selected >= 0 and game.buildings[selected] == "empty" else -1)

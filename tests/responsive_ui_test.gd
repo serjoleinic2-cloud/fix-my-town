@@ -1,5 +1,7 @@
 extends SceneTree
 
+const Simulation = preload("res://scripts/simulation.gd")
+
 var failures: int = 0
 
 func check(condition: bool, message: String) -> void:
@@ -35,6 +37,20 @@ func run() -> void:
 		scene.update_layout()
 		for i in range(3):
 			await process_frame
+		check(scene.district_label.text == "Сосновый район" and not scene.district_label.clip_text, "District name remains complete in the top bar")
+		var map_tools: Control = scene.screen.get_node("MapTools")
+		check(map_tools.size.y <= 140 and map_tools.get_global_rect().end.y < scene.navbar.position.y, "Compact map actions leave the map visible")
+		var settings_rect: Rect2 = scene.audio_button.get_global_rect()
+		var condition_rect: Rect2 = scene.state_button.get_global_rect()
+		var bus_rect: Rect2 = scene.transit_button.get_global_rect()
+		check(map_tools.position.y >= scene.hud.get_global_rect().end.y and settings_rect.position.y == condition_rect.position.y and bus_rect.position.y > condition_rect.position.y,
+			"BUS is placed on the third line below the condition button")
+		check(absf(condition_rect.position.x - bus_rect.position.x) <= 1 and bus_rect.end.x <= scene.screen.size.x - scene.safe_right + 1,
+			"BUS aligns beneath Condition and remains within the safe area")
+		scene.open_territory()
+		scene.set_territory_tool("service")
+		check(not scene.mode_switcher.get_global_rect().intersects(map_tools.get_global_rect()), "Four land-mode buttons never overlap floating map controls")
+		check(scene.mode_switcher.get_global_rect().position.x >= 0 and scene.mode_switcher.get_global_rect().end.x <= scene.screen.size.x + 1, "Land-mode row stays inside safe screen width")
 		check(scene.hud.position.y >= 40, "HUD respects top safe area")
 		check(scene.hud.get_global_rect().end.x <= scene.screen.size.x - 20.0 + 1, "HUD respects right safe area")
 		var map_before: Vector3 = scene.focus_point
@@ -96,8 +112,51 @@ func run() -> void:
 		var build_button = scene.action_box.get_child(0)
 		click(viewport, build_button.get_global_transform_with_canvas() * (build_button.size / 2))
 		await process_frame
-		check(scene.game.buildings[9] == "cafe", "Actual touch/mouse build button works")
+		check(scene.game.buildings[9] == "empty" and scene.game.construction_job.kind == "build_legacy", "Actual touch/mouse build button starts a saved worksite")
+		var construction_task: Dictionary = scene.game.construction_job.duplicate(true)
+		scene.game.tick(6.1)
+		scene.handle_construction_finish(construction_task)
+		scene.refresh()
+		check(scene.game.buildings[9] == "cafe", "Building appears when the work bar completes")
 		check(scene.game.budget == 180, "Construction button charges once")
+		scene.game.fire_triggered = true
+		scene.game.fires[Simulation.FIRST_FIRE_TARGET] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1}
+		scene.select_problem("fire")
+		check(not scene.navbar.visible and scene.sheet.get_global_rect().end.y <= scene.screen.size.y, "Fire call card fits within the safe screen")
+		check(scene.sheet.find_child("DispatchFirefighters", true, false) != null, "Fire card offers a direct dispatch action")
+		scene.game.fires.clear()
+		scene.game.fire_damage[Simulation.FIRST_FIRE_TARGET] = 24.0
+		scene.select_plot(0)
+		var damage_card: Control = scene.sheet
+		var repair_button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Пожар потушен"))
+		var restore_button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Восстановить дом"))
+		check(not restore_button.is_empty(), "Damaged home card offers a compact restoration action")
+		check(damage_card.get_global_rect().end.y <= scene.navbar.position.y + 1 and damage_card.position.y >= scene.hud.get_global_rect().end.y, "Damaged home card remains above bottom navigation")
+		check(damage_card.position.x >= 0 and damage_card.get_global_rect().end.x <= scene.screen.size.x + 1, "Damaged home card stays inside narrow/wide screen bounds")
+		var close_button: Button = damage_card.find_children("*", "Button", true, false).filter(func(item): return item.text == "×")[0]
+		check(close_button.visible and close_button.get_global_rect().position.x >= 0 and close_button.get_global_rect().end.x <= scene.screen.size.x + 1, "House card close button remains visible and tappable")
+		scene.set_camera_focus(scene.map_position(scene.game.plot_position(1)) + Vector3(7, 0, 7))
+		var other_house_tap := InputEventMouseButton.new()
+		other_house_tap.button_index = MOUSE_BUTTON_LEFT
+		other_house_tap.pressed = true
+		other_house_tap.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(1)) + Vector3(0, 0.2, 0)) * scene.viewport_container.stretch_shrink
+		scene.map_input(other_house_tap)
+		check(scene.selection_kind == "plot" and scene.selected == 1, "Tapping another house replaces the previous house card")
+		var outside_tap := InputEventMouseButton.new()
+		outside_tap.button_index = MOUSE_BUTTON_LEFT
+		outside_tap.pressed = true
+		scene.set_camera_focus(Vector3(40, 0, 75))
+		var landscape_point: Vector3 = scene.game.territory.cell_world(14, 21)
+		outside_tap.position = scene.camera.unproject_position(landscape_point) * scene.viewport_container.stretch_shrink
+		scene.map_input(outside_tap)
+		check(scene.selection_kind == "land_cell" and scene.sheet.visible, "Tapping an unoccupied landscape cell opens its available actions")
+		scene.select_plot(0)
+		for i in range(2):
+			await process_frame
+		var header_close: Button = scene.sheet.find_children("*", "Button", true, false).filter(func(item): return item.text == "×")[0]
+		click(viewport, header_close.get_global_transform_with_canvas() * (header_close.size / 2))
+		await process_frame
+		check(scene.selection_kind == "" and not scene.sheet.visible, "Tapping the visible close button dismisses the card")
 		scene.audio.shutdown()
 		scene.queue_free()
 		await process_frame

@@ -42,6 +42,19 @@ static func cylinder(parent: Node3D, pos: Vector3, radius: float, height: float,
 	parent.add_child(item)
 	return item
 
+static func sphere(parent: Node3D, pos: Vector3, radius: float, color: Color) -> MeshInstance3D:
+	var item := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 8
+	mesh.rings = 4
+	item.mesh = mesh
+	item.material_override = material(color)
+	item.position = pos
+	parent.add_child(item)
+	return item
+
 static func triangles(parent: Node3D, vertices: PackedVector3Array, color: Color) -> MeshInstance3D:
 	var normals := PackedVector3Array()
 	for i in range(0, vertices.size(), 3):

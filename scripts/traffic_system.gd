@@ -18,11 +18,14 @@ var clock: float = 0
 var signal_fixed: bool = false
 var service_position := Vector3(1000, 0, 1000)
 var service_active: bool = false
+var blocking_positions: Array[Dictionary] = []
 var wait_times: Dictionary = {}
 var reservations: Dictionary = {}
 var last_states: Dictionary = {}
+var route_rng := RandomNumberGenerator.new()
 
 func build() -> void:
+	route_rng.seed = 48291
 	for ix in range(ROAD_X.size()):
 		for iz in range(ROAD_Z.size()):
 			var node := ObjectScene.instantiate()
@@ -48,7 +51,8 @@ func make_cars() -> void:
 		var direction := 1 if i % 2 == 0 else -1
 		var road: float = ROAD_Z[(i / 4 + 1) % ROAD_Z.size()] if axis == "H" else ROAD_X[(i / 4 + 2) % ROAD_X.size()]
 		var coordinate: float = -44 + fposmod(i * 11.3, 82)
-		var vehicle := {"id": "civilian_%d" % i, "node": node, "axis": axis, "direction": direction, "road": road, "coordinate": coordinate, "spacing": 5.8 if kind == "city_bus" else FOLLOW_DISTANCE}
+		var vehicle := {"id": "civilian_%d" % i, "node": node, "axis": axis, "direction": direction, "road": road, "coordinate": coordinate, "spacing": 5.8 if kind == "city_bus" else FOLLOW_DISTANCE,
+			"randomized": kind != "city_bus", "speed_factor": route_rng.randf_range(0.86, 1.14), "turn_cooldown": 0.0}
 		vehicles.append(vehicle)
 		cars.append(node)
 		place_vehicle(vehicle)
@@ -103,30 +107,92 @@ func step(delta: float) -> void:
 			continue
 		if vehicle.get("managed", false):
 			continue
+		vehicle.turn_cooldown = maxf(0.0, float(vehicle.get("turn_cooldown", 0.0)) - delta)
 		var distance := travel_distance(vehicle, delta)
 		vehicle.coordinate += distance * vehicle.direction
-		var low := -64.0 if vehicle.axis == "H" else -48.0
-		var high := 34.0 if vehicle.axis == "H" else 48.0
-		if vehicle.coordinate > high:
-			vehicle.coordinate = low
-		elif vehicle.coordinate < low:
-			vehicle.coordinate = high
+		continue_road_loop(vehicle)
+		maybe_random_turn(vehicle)
 		place_vehicle(vehicle)
 
-func travel_distance(vehicle: Dictionary, delta: float) -> float:
-	var distance := SPEED * delta
-	for other: Dictionary in vehicles:
-		if other.id == vehicle.id or not other.node.visible or other.axis != vehicle.axis or other.direction != vehicle.direction or other.road != vehicle.road:
+func maybe_random_turn(vehicle: Dictionary) -> void:
+	if not bool(vehicle.get("randomized", false)) or float(vehicle.get("turn_cooldown", 0.0)) > 0.0:
+		return
+	# A civilian may choose a new direction at any visible intersection. The
+	# choice is deterministic per run, but independent for every vehicle, so
+	# cars no longer form a permanent column on the outer ring.
+	for intersection: Dictionary in intersections:
+		var crossing: float = float(intersection.x if vehicle.axis == "H" else intersection.z)
+		if absf(vehicle.coordinate - crossing) > 0.22:
 			continue
-		var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
-		if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
-			distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
+		var turn_chance := 0.24
+		if route_rng.randf() > turn_chance:
+			return
+		var old_axis: String = str(vehicle.axis)
+		var old_road: float = vehicle.road
+		vehicle.axis = "V" if old_axis == "H" else "H"
+		vehicle.road = intersection.x if vehicle.axis == "V" else intersection.z
+		vehicle.coordinate = old_road
+		vehicle.direction = 1 if route_rng.randf() >= 0.5 else -1
+		vehicle.turn_cooldown = 1.2
+		return
+
+func continue_road_loop(vehicle: Dictionary) -> void:
+	# Cars stay in the road network and turn at the outer intersections instead
+	# of disappearing at an arbitrary screen edge. This forms a continuous
+	# ring route around the district while retaining lane direction.
+	if vehicle.axis == "H" and vehicle.direction > 0 and vehicle.coordinate >= ROAD_X.back():
+		var old_z: float = vehicle.road
+		vehicle.axis = "V"
+		vehicle.road = ROAD_X.back()
+		vehicle.coordinate = old_z
+		vehicle.direction = 1
+	elif vehicle.axis == "V" and vehicle.direction > 0 and vehicle.coordinate >= ROAD_Z.back():
+		var old_x: float = vehicle.road
+		vehicle.axis = "H"
+		vehicle.road = ROAD_Z.back()
+		vehicle.coordinate = old_x
+		vehicle.direction = -1
+	elif vehicle.axis == "H" and vehicle.direction < 0 and vehicle.coordinate <= ROAD_X.front():
+		var old_z: float = vehicle.road
+		vehicle.axis = "V"
+		vehicle.road = ROAD_X.front()
+		vehicle.coordinate = old_z
+		vehicle.direction = -1
+	elif vehicle.axis == "V" and vehicle.direction < 0 and vehicle.coordinate <= ROAD_Z.front():
+		var old_x: float = vehicle.road
+		vehicle.axis = "H"
+		vehicle.road = ROAD_Z.front()
+		vehicle.coordinate = old_x
+		vehicle.direction = 1
+
+func travel_distance(vehicle: Dictionary, delta: float) -> float:
+	var distance := SPEED * delta * float(vehicle.get("speed_factor", 1.0))
+	var current_position := lane_position(vehicle)
+	for other: Dictionary in vehicles:
+		if other.id == vehicle.id or not other.node.visible:
+			continue
+		var same_lane: bool = other.axis == vehicle.axis and other.direction == vehicle.direction and is_equal_approx(float(other.road), float(vehicle.road))
+		if same_lane:
+			var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
+			if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
+				distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
+			continue
+		# Different lanes only interact when both cars are actually approaching
+		# the same crossing. A stable id priority prevents mutual deadlock.
+		if other.axis == vehicle.axis:
+			continue
+		var other_position: Vector3 = lane_position(other)
+		var proposed_position: Vector3 = current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0)
+		if proposed_position.distance_to(other_position) < 2.8 and current_position.distance_to(other_position) < 7.0 and str(other.id) < str(vehicle.id):
+			distance = 0.0
 	var position_value := lane_position(vehicle)
+	var blockers := blocking_positions.duplicate()
 	if service_active:
-		var lateral: float = absf(service_position.z - position_value.z) if vehicle.axis == "H" else absf(service_position.x - position_value.x)
-		var gap: float = ((service_position.x - position_value.x) if vehicle.axis == "H" else (service_position.z - position_value.z)) * vehicle.direction
-		# Служебная машина занимает ширину обеих полос, пока стоит на проезжей части.
-		# Останавливаем потоки с обеих сторон, чтобы машины не проходили сквозь неё.
+		blockers.append({"id": "primary_service", "position": service_position})
+	for blocker: Dictionary in blockers:
+		var block_position: Vector3 = blocker.position
+		var lateral: float = absf(block_position.z - position_value.z) if vehicle.axis == "H" else absf(block_position.x - position_value.x)
+		var gap: float = ((block_position.x - position_value.x) if vehicle.axis == "H" else (block_position.z - position_value.z)) * vehicle.direction
 		if lateral < 1.8 and gap > 0 and gap < vehicle.spacing + distance:
 			distance = maxf(0, gap - maxf(vehicle.spacing, 3.8))
 	for intersection: Dictionary in intersections:
@@ -143,14 +209,8 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	return distance
 
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
-	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
-	for other: Dictionary in vehicles:
-		if not other.node.visible or other.id == actor or other.axis == axis:
-			continue
-		var point := lane_position(other)
-		var clearance: float = 4.6 if other.node.type_id == "city_bus" else 3.5
-		if absf(point.x - intersection.x) < clearance and absf(point.z - intersection.z) < clearance:
-			return false
+	if not cross_traffic_clear(intersection, axis, actor):
+		return false
 	if not is_broken(intersection):
 		return phase(axis, clock + intersection.offset) == "green"
 	var wait_key: String = intersection.key + ":" + actor
@@ -161,6 +221,17 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 		return false
 	# Сломанный узел пропускает машины по очереди после паузы.
 	reservations[intersection.key] = {"actor": actor, "remaining": 5.0}
+	return true
+
+func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
+	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
+	for other: Dictionary in vehicles:
+		if not other.node.visible or other.id == actor or other.axis == axis:
+			continue
+		var point := lane_position(other)
+		var clearance: float = 4.6 if other.node.type_id == "city_bus" else 3.5
+		if absf(point.x - intersection.x) < clearance and absf(point.z - intersection.z) < clearance:
+			return false
 	return true
 
 func lane_position(vehicle: Dictionary) -> Vector3:
@@ -179,7 +250,7 @@ static func stop_distance_for(type_id: String) -> float:
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
 
-func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) -> float:
+func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0", emergency: bool = false, ignore_incident_id: String = "") -> float:
 	var direction_value := proposed - current
 	var distance := direction_value.length()
 	if distance < 0.0001:
@@ -187,7 +258,7 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) 
 	var axis := "H" if absf(direction_value.x) > absf(direction_value.z) else "V"
 	var direction: float = signf(direction_value.x if axis == "H" else direction_value.z)
 	for other: Dictionary in vehicles:
-		if not other.node.visible or other.axis != axis or other.direction != direction:
+		if other.id == actor_id or not other.node.visible or other.axis != axis or other.direction != direction:
 			continue
 		var road: float = current.z if axis == "H" else current.x
 		if absf(road - other.road) > 0.15:
@@ -195,6 +266,21 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) 
 		var gap: float = (other.coordinate - (current.x if axis == "H" else current.z)) * direction
 		if gap > 0:
 			distance = minf(distance, maxf(0, gap - other.spacing))
+	var blockers := blocking_positions.duplicate()
+	if service_active:
+		blockers.append({"id": "primary_service", "position": service_position})
+	for blocker: Dictionary in blockers:
+		if ignore_incident_id != "" and str(blocker.get("incident_id", "")) == ignore_incident_id:
+			continue
+		if str(blocker.get("id", "")) == "primary_service" and actor_id in ["crew_0", "fire_engine_1", "fire_engine_2"]:
+			continue
+		if str(blocker.get("id", "")) == actor_id:
+			continue
+		var block_position: Vector3 = blocker.position
+		var lateral: float = absf((current.z - block_position.z) if axis == "H" else (current.x - block_position.x))
+		var ahead_to_blocker: float = ((block_position.x - current.x) if axis == "H" else (block_position.z - current.z)) * direction
+		if lateral < 1.7 and ahead_to_blocker > 0 and ahead_to_blocker < distance + 4.5:
+			distance = minf(distance, maxf(0, ahead_to_blocker - 4.5))
 	var stop_distance := stop_distance_for("repair_van")
 	for intersection: Dictionary in intersections:
 		var lateral: float = absf((current.z - intersection.z) if axis == "H" else (current.x - intersection.x))
@@ -202,9 +288,11 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float) 
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
 		if ahead < stop_distance - 0.01:
-			wait_times.erase(intersection.key + ":crew_0")
-		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01 and not permission(intersection, axis, "crew_0", delta):
-			distance = minf(distance, maxf(0, ahead - stop_distance))
+			wait_times.erase(intersection.key + ":" + actor_id)
+		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01:
+			var may_pass := cross_traffic_clear(intersection, axis, actor_id) if emergency else permission(intersection, axis, actor_id, delta)
+			if not may_pass:
+				distance = minf(distance, maxf(0, ahead - stop_distance))
 	return distance
 
 func set_active_count(count: int) -> void:

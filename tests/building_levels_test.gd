@@ -132,7 +132,13 @@ func run() -> void:
 				scene.cancel_upgrade()
 				check(object.visual_root.visible and object.visual_root.get_child(0) == visual and scene.game.budget == money, "Cancel restores original unchanged visual")
 				scene.confirm_upgrade(16, kind, 1)
-				check(object.level == 2 and object.visual_root.get_child(0).visual_level == 2 and object.interaction_area == area and object.mounts == sockets, "Upgrade changes only visual, preserves interactions and mounts")
+				var upgrade_task: Dictionary = scene.game.construction_job.duplicate(true)
+				check(object.level == 1 and scene.game.construction_job.kind == "upgrade_legacy", "Confirming upgrade starts saved construction work")
+				scene.game.tick(6.1)
+				scene.handle_construction_finish(upgrade_task)
+				scene.refresh()
+				object = scene.plots.get_node("plot_16")
+				check(object.level == 2 and object.visual_root.get_child(0).visual_level == 2 and object.interaction_area == area and object.mounts == sockets, "Completed upgrade changes model and preserves interactions and mounts")
 				money = scene.game.budget
 				scene.confirm_upgrade(16, kind, 1)
 				check(scene.game.budget == money and scene.game.building_level(16) == 2, "Stale confirmation cannot charge twice")
@@ -154,6 +160,11 @@ func run() -> void:
 				await process_frame
 				scene.get_node("DemolitionConfirmation").confirmed.emit()
 				await process_frame
+				var demolition_task: Dictionary = scene.game.construction_job.duplicate(true)
+				check(demolition_task.get("kind", "") == "demolish_legacy" and scene.game.buildings[16] == kind, "Confirmed demolition creates a saved worksite before removing the house")
+				scene.game.tick(6.1)
+				scene.handle_construction_finish(demolition_task)
+				scene.refresh()
 				check(scene.game.buildings[16] == "empty" and scene.plots.get_node("plot_16").type_id == "empty", "Confirm demolition redraws vacant lot")
 		scene.audio.shutdown()
 		await create_timer(0.1).timeout

@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TerritoryGrid = preload("res://scripts/territory_grid.gd")
+
 func _initialize() -> void:
 	call_deferred("capture")
 
@@ -26,11 +28,85 @@ func capture() -> void:
 	scene.apply_quality()
 	if mode == "en":
 		scene.game.language = "en"
+	if mode.begins_with("expansion"):
+		scene.game.budget = 5000
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22), Vector2i(15, 21), Vector2i(16, 21), Vector2i(15, 22), Vector2i(16, 22)]:
+			scene.game.clear_grid_cell(cell.x, cell.y)
+		for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22)]:
+			scene.game.build_grid_road(cell.x, cell.y)
+		scene.open_territory()
+		scene.territory_tool = "house"
+		scene.select_territory_cell(Vector2i(15, 21))
+		if mode in ["expansion_house", "expansion_condition", "expansion_upgrade"]:
+			scene.game.build_grid_house(15, 21)
+			scene.select_grid_house(scene.game.territory.building_at(15, 21).instance_id)
+			scene.quality_mode = mode == "expansion_condition"
+			if mode == "expansion_upgrade":
+				scene.selection_kind = "grid_upgrade"
+		if mode == "expansion_en":
+			scene.game.language = "en"
+	if mode == "city_review":
+		# Пересобираем только временную копию города для визуального осмотра;
+		# пользовательское сохранение не затрагивается.
+		scene.game.budget = 100000
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		for row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
+			for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
+				if scene.game.territory.state_at(col, row) == "forest":
+					scene.game.clear_grid_cell(col, row)
+		# Spine, branch and turn expose every available road topology.
+		for col in range(8, 18):
+			scene.game.build_grid_road(col, 19)
+		for row in range(20, 28):
+			scene.game.build_grid_road(12, row)
+		for col in range(13, 18):
+			scene.game.build_grid_road(col, 24)
+		for cell in [Vector2i(9, 20), Vector2i(9, 21), Vector2i(15, 20), Vector2i(15, 21), Vector2i(9, 25), Vector2i(15, 25)]:
+			if scene.game.territory.state_at(cell.x, cell.y) == "free":
+				scene.game.build_grid_building(cell.x, cell.y, "house")
+		scene.set_camera_focus(scene.game.territory.cell_world(12, 22) + Vector3(12, 0, 12))
 	if mode == "done":
 		scene.game.leak_fixed = true
 		scene.game.signal_fixed = true
 		scene.game.buildings[9] = "park"
 		scene.game.check_complete()
+	if mode in ["fire_before", "fire_during", "fire_alert", "fire_two"]:
+		scene.game.leak_fixed = true
+		scene.game.signal_fixed = true
+		scene.game.buildings[9] = "cafe"
+		scene.game.check_complete()
+		scene.game.completed = true
+		scene.game.fire_triggered = true
+		scene.completion_observed = true
+		scene.completion_left = 0
+		var target_id: String = scene.game.FIRST_FIRE_TARGET
+		if mode in ["fire_during", "fire_alert", "fire_two"]:
+			scene.game.fires[target_id] = {"phase": "burning", "warning_left": 0.0, "elapsed": 26.0, "danger": 2}
+			scene.game.fires[scene.game.FIRST_FIRE_NEIGHBOR] = {"phase": "warning", "warning_left": 11.0, "elapsed": 0.0, "danger": 1}
+			scene.game.fire_damage[target_id] = 14.0
+			scene.notified_fire_ids.clear()
+			scene.select_problem("fire")
+		else:
+			scene.selection_kind = ""
+		scene.set_camera_focus(scene.game.building_world_for_id(target_id) + Vector3(7, 0, 7))
+		if mode == "fire_two":
+			scene.game.budget = 2000
+			for row in [19, 20]:
+				for col in [12, 13]:
+					scene.game.clear_grid_cell(col, row)
+			scene.game.build_grid_service(12, 19, "fire_station")
+			scene.game.dispatch_fire(target_id)
+			scene.game.dispatch_fire(scene.game.FIRST_FIRE_NEIGHBOR)
+			if scene.game.fire_jobs.has(scene.game.FIRST_FIRE_NEIGHBOR):
+				scene.game.fire_jobs[scene.game.FIRST_FIRE_NEIGHBOR].repair_left = 500.0
+			var arrival_ticks := 0
+			while (scene.game.job_phase == "travel" or scene.game.fire_jobs[scene.game.FIRST_FIRE_NEIGHBOR].phase == "travel") and arrival_ticks < 500:
+				scene.game.tick(1.0, true)
+				arrival_ticks += 1
+			scene.set_camera_focus((scene.game.building_world_for_id(target_id) + scene.game.building_world_for_id(scene.game.FIRST_FIRE_NEIGHBOR)) / 2 + Vector3(7, 0, 7))
 	if mode in ["leak", "signal"]:
 		scene.select_problem(mode)
 	if mode in ["build", "en", "park"]:
@@ -42,12 +118,14 @@ func capture() -> void:
 	if mode == "low":
 		scene.quality = "low"
 		scene.apply_quality()
-	if mode in ["house", "condition"]:
+	if mode in ["house", "condition", "damaged_house"]:
 		scene.selected = 16
 		scene.selection_kind = "plot"
 		scene.quality_mode = mode == "condition"
+		if mode == "damaged_house":
+			scene.game.fire_damage["pine_district_legacy_16"] = 24.0
 		scene.set_camera_focus(scene.map_position(scene.game.plot_position(16)) + Vector3(7, 0, 7))
-	if mode in ["transit", "stop", "transit_en"]:
+	if mode in ["transit", "stop", "stop_move", "transit_en"]:
 		scene.game.leak_fixed = true
 		scene.game.signal_fixed = true
 		scene.game.buildings[9] = "cafe"
@@ -58,13 +136,23 @@ func capture() -> void:
 		if mode == "stop":
 			scene.placing_stop = true
 			scene.stop_candidate = 4
+		elif mode == "stop_move":
+			scene.game.place_stop(4)
+			scene.open_stop_card(1)
+			scene.begin_move_stop(1)
 		else:
 			scene.game.place_stop(4)
+			if mode == "transit":
+				scene.game.transit.stops = [{"col": 6, "row": 14}, {"col": 9, "row": 8}]
 			scene.game.start_transit()
-			scene.game.transit.tick(0.1, scene.scenery.traffic_controller)
+			scene.game.transit.tick(0.1, scene.scenery.traffic_controller, scene.game.territory)
 		if mode == "transit_en":
 			scene.game.language = "en"
 		scene.set_camera_focus(scene.game.transit.stop_position(4) + Vector3(7, 0, 7))
+		if mode == "transit":
+			var route: Array[Vector3] = scene.game.transit.route_for(scene.game.territory, 0, 1)
+			if not route.is_empty():
+				scene.set_camera_focus((route.front() + route.back()) / 2 + Vector3(7, 0, 7))
 	if mode in ["upgrade", "upgrade_en", "levels", "demolition"]:
 		scene.game.budget = 5000
 		scene.game.buildings[9] = "cafe"
@@ -99,6 +187,8 @@ func capture() -> void:
 	if mode == "safe":
 		scene.safe_override = Vector4(0, 36, 0, 38)
 	scene.refresh()
+	if mode == "fire_two":
+		scene.sync_fire_engine_nodes()
 	if mode in ["upgrade", "upgrade_en"]:
 		scene.begin_upgrade()
 	if mode == "demolition":
@@ -112,7 +202,7 @@ func capture() -> void:
 		scene.open_audio_settings()
 	for i in range(12):
 		await process_frame
-	await RenderingServer.frame_post_draw
+	await process_frame
 	var destination := args[0] if not args.is_empty() else "user://preview.png"
 	capture_viewport.get_texture().get_image().save_png(destination)
 	print("CAPTURE: ", destination)

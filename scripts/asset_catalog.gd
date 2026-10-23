@@ -3,11 +3,23 @@ extends RefCounted
 # Постоянные игровые типы и единственная точка выбора визуальных сцен.
 const TYPES = {
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
+	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
-	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 0, "footprint": Vector2(9, 9)},
+	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 220, "footprint": Vector2(9, 9)},
+	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "cost": 260, "footprint": Vector2(9, 9)},
+	"police_station": {"scene": "res://scenes/visuals/police_station.tscn", "cost": 240, "footprint": Vector2(9, 9)},
+	"hospital": {"scene": "res://scenes/visuals/hospital.tscn", "cost": 300, "footprint": Vector2(9, 9)},
+	"lawn": {"icon": "res://assets/icons/lawn.svg", "scene": "res://scenes/visuals/lawn.tscn", "cost": 10, "environment": 2, "footprint": Vector2(4.8, 4.8)},
+	"flower_bed": {"icon": "res://assets/icons/flower_bed.svg", "scene": "res://scenes/visuals/flower_bed.tscn", "cost": 25, "environment": 4, "footprint": Vector2(4.8, 4.8)},
+	"street_tree": {"icon": "res://assets/icons/street_tree.svg", "scene": "res://scenes/visuals/street_tree.tscn", "cost": 20, "environment": 3, "footprint": Vector2(4.8, 4.8)},
+	"bush": {"icon": "res://assets/icons/bush.svg", "scene": "res://scenes/visuals/bush.tscn", "cost": 15, "environment": 2, "footprint": Vector2(4.8, 4.8)},
 	"cafe": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/cafe.tscn", "cost": 120, "mood": 5, "footprint": Vector2(9, 9)},
 	"park": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/park.tscn", "cost": 100, "mood": 5, "footprint": Vector2(9, 9)},
 	"repair_van": {"scene": "res://scenes/visuals/repair_van.tscn", "footprint": Vector2(1.8, 3.0)},
+	"excavator": {"scene": "res://scenes/visuals/excavator.tscn", "footprint": Vector2(2.4, 4.0)},
+	"dump_truck": {"scene": "res://scenes/visuals/dump_truck.tscn", "footprint": Vector2(2.4, 4.4)},
+	"fire_engine": {"scene": "res://scenes/visuals/fire_engine.tscn", "footprint": Vector2(2.2, 4.2)},
+	"police_car": {"scene": "res://scenes/visuals/police_car.tscn", "footprint": Vector2(1.8, 3.0)},
 	"civilian_car": {"scene": "res://scenes/visuals/civilian_car.tscn", "footprint": Vector2(1.5, 2.6)},
 	"bus_stop": {"scene": "res://scenes/visuals/bus_stop.tscn", "cost": 40, "footprint": Vector2(8, 5)},
 	"city_bus": {"scene": "res://scenes/visuals/city_bus.tscn", "footprint": Vector2(1.8, 4.8)},
@@ -32,6 +44,28 @@ const ALTERNATIVES = {
 	"house": "res://scenes/visuals/house_alternate.tscn",
 	"repair_van": "res://scenes/visuals/repair_van_alternate.tscn"
 }
+const UNLOCK_LEVELS = {
+	"house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1,
+	"police_station": 2, "hospital": 3,
+	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
+}
+const LANDSCAPING_TYPES = ["lawn", "flower_bed", "street_tree", "bush"]
+const SERVICE_TYPES = ["fire_station", "police_station", "hospital", "depot"]
+
+static func unlock_level(type_id: String) -> int:
+	return int(UNLOCK_LEVELS.get(type_id, 1))
+
+static func is_service(type_id: String) -> bool:
+	return type_id in SERVICE_TYPES
+
+static func is_landscaping(type_id: String) -> bool:
+	return type_id in LANDSCAPING_TYPES
+
+static func footprint_cells(type_id: String) -> Vector2i:
+	return Vector2i.ONE if is_landscaping(type_id) else Vector2i(2, 2)
+
+static func icon_path(type_id: String) -> String:
+	return str(TYPES.get(type_id, {}).get("icon", "res://assets/icons/ui_hammer.svg"))
 
 static func cost(type_id: String) -> int:
 	return TYPES[type_id].get("cost", 0)

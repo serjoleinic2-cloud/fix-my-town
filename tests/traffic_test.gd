@@ -22,6 +22,8 @@ func run() -> void:
 		check(not (Traffic.phase("H", time) == "green" and Traffic.phase("V", time) == "green"), "Conflicting greens")
 	check(traffic.intersections.size() == 49, "Every grid intersection controlled")
 	check(traffic.vehicles.filter(func(v): return v.node.type_id == "city_bus").size() == 1, "One replaceable bus")
+	var speed_factors: Array = traffic.vehicles.filter(func(v): return bool(v.get("randomized", false))).map(func(v): return float(v.get("speed_factor", 1.0)))
+	check(speed_factors.max() - speed_factors.min() > 0.08, "Civilian cars use different cruising speeds")
 	for count in [8, 16, 24]:
 		traffic.set_active_count(count)
 		for axis in ["H", "V"]:
@@ -29,6 +31,12 @@ func run() -> void:
 				check(traffic.vehicles.any(func(v): return v.node.visible and v.axis == axis and v.direction == direction), "Both directions on both axes")
 	traffic.set_active_count(1)
 	var car: Dictionary = traffic.vehicles[0]
+	car.axis = "H"
+	car.direction = 1
+	car.road = 0.0
+	car.coordinate = Traffic.ROAD_X.back() + 0.1
+	traffic.continue_road_loop(car)
+	check(car.axis == "V" and car.road == Traffic.ROAD_X.back() and car.direction == 1, "Cars turn onto the outer ring instead of disappearing at the edge")
 	car.axis = "H"
 	car.direction = 1
 	car.road = 0.0
@@ -40,6 +48,18 @@ func run() -> void:
 	traffic.clock = 0
 	traffic.step(0.1)
 	check(car.coordinate > -19.75, "Proceed on green")
+	traffic.set_active_count(24)
+	traffic.signal_fixed = true
+	var initial_axes: Dictionary = {}
+	for vehicle: Dictionary in traffic.vehicles:
+		initial_axes[vehicle.id] = vehicle.axis
+	for frame in range(240):
+		traffic.step(0.1)
+	var changed_routes := traffic.vehicles.filter(func(v): return bool(v.get("randomized", false)) and str(v.axis) != str(initial_axes.get(v.id, v.axis))).size()
+	check(changed_routes > 0, "Civilian cars choose independent turns instead of one permanent ring")
+	car.axis = "H"
+	car.direction = 1
+	car.road = 0.0
 	car.coordinate = -19.75
 	traffic.clock = 7
 	traffic.step(0.1)
@@ -82,6 +102,24 @@ func run() -> void:
 				check(absf(vehicle.coordinate - (center - direction * stop)) < 0.001, "Vehicle stops exactly before line")
 				var front: float = 2.33 if vehicle.node.type_id == "city_bus" else 1.25
 				check((center - vehicle.coordinate) * direction - front >= Traffic.STOP_LINE_DISTANCE + 0.19, "Entire body stays behind stop line and zebra")
+	# Fire engines ignore the signal phase, while still yielding to an occupied crossing.
+	traffic.set_active_count(0)
+	traffic.signal_fixed = true
+	var emergency_center := Vector3(-14.4, 0, 0)
+	var emergency_current := emergency_center + Vector3(-6, 0, 0)
+	var emergency_proposed := emergency_center + Vector3(2, 0, 0)
+	traffic.clock = 10.0 # Horizontal approach is red.
+	var normal_distance := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", false)
+	var emergency_distance := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", true)
+	check(normal_distance < 1.0 and emergency_distance > normal_distance, "Fire engine bypasses red signal during an emergency response")
+	var crossing_car: Dictionary = traffic.vehicles[0]
+	crossing_car.node.show()
+	crossing_car.axis = "V"
+	crossing_car.direction = 1
+	crossing_car.road = -14.4
+	crossing_car.coordinate = 0.0
+	var blocked_emergency := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", true)
+	check(blocked_emergency < emergency_distance, "Emergency response still yields to a vehicle occupying the crossing")
 	traffic.set_active_count(0)
 	for axis in ["H", "V"]:
 		for direction in [-1, 1]:
@@ -108,7 +146,36 @@ func run() -> void:
 	traffic.service_active = false
 	var released: Dictionary = traffic.vehicles[0]
 	check(traffic.travel_distance(released, 0.5) > 2.2, "Traffic resumes after the service van leaves")
+	traffic.blocking_positions = [{"id": "fire_engine_test", "incident_id": "fire_incident", "position": Vector3(0, 0.18, 0)}]
+	var queued_vehicle: Dictionary = traffic.vehicles[0]
+	queued_vehicle.node.show()
+	queued_vehicle.axis = "H"
+	queued_vehicle.direction = 1
+	queued_vehicle.road = -1.0
+	queued_vehicle.coordinate = -6.0
+	check(traffic.travel_distance(queued_vehicle, 0.5) <= 2.2, "Civilian traffic queues behind a stopped fire engine")
+	traffic.blocking_positions = [{"id": "construction_dump_truck", "position": Vector3(0, 0.18, 0)}]
+	var works_vehicle: Dictionary = traffic.vehicles[0]
+	works_vehicle.node.show()
+	works_vehicle.axis = "H"
+	works_vehicle.direction = 1
+	works_vehicle.road = -1.0
+	works_vehicle.coordinate = -6.0
+	check(traffic.travel_distance(works_vehicle, 0.5) <= 2.2, "Civilian traffic queues behind the construction dump truck")
+	traffic.blocking_positions = [{"id": "fire_engine_test", "incident_id": "fire_incident", "position": Vector3(0, 0.18, 0)}]
+	var following_service := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "repair_crew", true)
+	check(following_service < 2.0, "A roadblock delays another service vehicle too")
+	var police_clearance := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "police", false, "fire_incident")
+	check(police_clearance > following_service, "Police can reach the exact fire engine it was called to clear")
+	traffic.blocking_positions.clear()
 	# Полный сценарий с тем же дорожным контроллером, который вызывает main.
+	# Изолированные проверки выше меняли полосы и удаляли перекрёстки.
+	traffic.queue_free()
+	await process_frame
+	traffic = Traffic.new()
+	root.add_child(traffic)
+	traffic.build()
+	check(traffic.intersections.size() == 49, "Integrated scenario retains all intersections")
 	traffic.set_active_count(8)
 	traffic.clock = 0
 	var game := Simulation.new()

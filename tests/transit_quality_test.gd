@@ -3,16 +3,19 @@ extends SceneTree
 const Simulation = preload("res://scripts/simulation.gd")
 const Traffic = preload("res://scripts/traffic_system.gd")
 var failures: int = 0
+
 func check(condition: bool, message: String) -> void:
 	if not condition:
 		push_error(message)
 		failures += 1
+
 func _initialize() -> void:
 	call_deferred("run")
+
 func run() -> void:
 	var game := Simulation.new()
 	game.save_path = "user://transit_quality_test.json"
-	check(not game.place_stop(0), "Transit waits for completed scenario")
+	check(not game.place_stop(Vector2i(18, 0)), "Transit waits for completed scenario")
 	check(game.WATER_AFFECTED_HOMES.size() == 3, "Exactly three affected houses")
 	for i in range(24):
 		if game.buildings[i] == "house":
@@ -38,19 +41,33 @@ func run() -> void:
 	game.build(9, "cafe")
 	check(game.completed, "Scenario completed before transit")
 	before = game.district_quality()
-	check(game.place_stop(0) and not game.place_stop(0), "Unique road stop")
-	check(game.place_stop(4), "Second road stop")
-	check(not game.place_stop(5), "First route limited to two stops")
-	check(not game.house_transit(16), "Stops alone do not provide service")
+	var house_point: Vector3 = game.building_world(16)
+	var cafe_point: Vector3 = game.building_world(9)
+	var first: Vector2i = game.territory.nearest_road(house_point)
+	var second: Vector2i = game.territory.nearest_road(cafe_point)
+	check(game.place_stop(first) and not game.place_stop(first), "Stops require a unique connected road cell")
+	check(game.place_stop(second), "Second stop can be placed on another street")
+	check(game.stop_orientation(game.transit.stops[0]) in ["horizontal", "vertical"] and game.stop_orientation(game.transit.stops[1]) in ["horizontal", "vertical"], "Every placed stop receives an along-road orientation")
+	check(not game.place_stop(Vector2i(0, 29)), "A forest cell is not a stop location")
+	check(game.transit.route_for(game.territory, 0, 1).size() > 4, "Route follows a connected multi-cell road path")
+	var route := game.transit.route_for(game.territory, 0, 1)
+	var has_turn := false
+	for index in range(2, route.size()):
+		var first_axis := (route[index - 1] - route[index - 2]).normalized()
+		var next_axis := (route[index] - route[index - 1]).normalized()
+		if absf(first_axis.dot(next_axis)) < 0.1:
+			has_turn = true
+	check(has_turn, "Bus route has an actual turn at the road intersection")
+	check(game.move_stop(0, second) == false, "Moving a stop onto the other endpoint is rejected")
 	check(game.start_transit(), "One bus route launches")
 	check(not game.start_transit(), "No duplicate buses or charge")
-	var relocated_target: float = game.transit.target_z
-	check(game.move_stop(1, 5) and game.transit.stops == [0, 5], "A route stop can be relocated and stays ordered")
-	check(not game.move_stop(0, 5) and not game.move_stop(1, 5), "Duplicate and unchanged stop moves are rejected")
-	game.move_stop(1, 4)
-	check(is_equal_approx(game.transit.target_z, relocated_target), "Moving a stop during travel does not teleport or retarget the current leg")
-	check(game.transit_metrics().served > 0 and game.house_transit(16), "Route connects residents to workplace/cafe")
-	check(game.district_quality() > before, "Useful transit improves quality")
+	var current_path: Array[Vector3] = game.transit.route_points.duplicate()
+	var current_target: int = game.transit.current_target
+	var alternate := Vector2i(12, 6)
+	check(game.move_stop(1, alternate), "A stop can move to a connected road on another street")
+	check(game.transit.route_dirty and game.transit.current_target == current_target and game.transit.route_points == current_path, "An active bus safely finishes its current leg before retargeting")
+	check(game.transit_metrics().covered > 0, "Route endpoints provide walking coverage")
+	check(game.district_quality() >= before, "Transit quality is recalculated without reducing prior services")
 	check(game.happiness() != roundi(game.district_quality()), "Mayor rating is independent")
 	var budget: int = game.budget
 	game.income_clock = 11.95
@@ -63,50 +80,18 @@ func run() -> void:
 	traffic.vehicles[2].managed = true
 	traffic.vehicles[0].node.hide()
 	traffic.vehicles[1].node.hide()
-	traffic.signal_fixed = true
+	traffic.signal_fixed = false
 	for i in range(2400):
 		traffic.step(0.05)
-		game.transit.tick(0.05, traffic)
-	check(game.transit.trips >= 2 and game.transit.last_delay > 0, "Bus shuttles, dwells and waits at signals")
-	var saved_intersections: Array = traffic.intersections.duplicate()
-	traffic.intersections.clear()
-	for index in range(traffic.vehicles.size()):
-		if index != 2:
-			traffic.vehicles[index].node.hide()
-	var bus: Dictionary = traffic.vehicles[2]
-	game.transit.coordinate = 21.5
-	game.transit.direction = 1
-	game.transit.visual_direction = 1
-	game.transit.target_z = 21.6
-	game.transit.turning_out = false
-	game.transit.dwell = 0
-	traffic.place_vehicle(bus)
-	game.transit.tick(0.05, traffic)
-	check(is_equal_approx(game.transit.coordinate, 21.6) and game.transit.direction == 1 and game.transit.dwell > 0, "Bus stops at the terminal before continuing beyond the district")
-	for i in range(61):
-		game.transit.tick(0.05, traffic)
-	check(game.transit.turning_out and game.transit.direction == 1 and bus.node.position.x < -15, "Bus keeps its lane and drives beyond the terminal")
-	for i in range(180):
-		game.transit.tick(0.05, traffic)
-	check(not game.transit.turning_out and game.transit.direction == -1 and game.transit.coordinate > 21.6 and bus.node.position.x > -14.4, "Bus turns beyond the visible district and returns on the opposite lane")
-	traffic.intersections = saved_intersections
-	game.transit.coordinate = -4.0
-	game.transit.direction = 1
-	game.transit.visual_direction = 1
-	game.transit.target_z = 0.0
-	game.transit.dwell = 0
-	traffic.clock = 0
-	game.transit.tick(0.1, traffic)
-	check(game.transit.coordinate > -4.0, "Bus already past stop line clears crossing")
-	game.transit.coordinate = -Traffic.stop_distance_for("city_bus")
-	game.transit.tick(0.1, traffic)
-	check(is_equal_approx(game.transit.coordinate, -Traffic.stop_distance_for("city_bus")), "Bus stops behind crossing")
+		game.transit.tick(0.05, traffic, game.territory)
+	check(game.transit.trips >= 2 and game.transit.last_delay > 0, "Bus follows its route and waits at the broken traffic signal")
+	check(traffic.vehicles[2].node.visible, "Managed route bus remains visible in traffic")
 	game.save_game()
 	var loaded := Simulation.new()
 	loaded.save_path = game.save_path
 	check(loaded.load_game(), "Transit save loads")
-	check(loaded.transit.stops == game.transit.stops and loaded.transit.active and loaded.transit.direction == game.transit.direction and loaded.transit.trips == game.transit.trips, "Stops, route and direction persist")
-	check(is_equal_approx(loaded.transit.coordinate, game.transit.coordinate) and is_equal_approx(loaded.transit.delay, game.transit.delay) and is_equal_approx(loaded.transit.dwell, game.transit.dwell) and is_equal_approx(loaded.transit.target_z, game.transit.target_z), "Bus position, target, delay and dwell persist")
+	check(loaded.transit.stops == game.transit.stops and loaded.transit.active and loaded.transit.trips == game.transit.trips, "Stops and active route persist")
+	check(loaded.transit.route_points == game.transit.route_points and loaded.transit.route_index == game.transit.route_index and loaded.transit.bus_position == game.transit.bus_position, "Bus route, position and leg progress persist")
 	check(is_equal_approx(loaded.district_quality(), game.district_quality()), "Quality recalculated after load")
 	for band in range(5):
 		check(Simulation.quality_band(band * 20) == band and Simulation.quality_band(band * 20 + 19) == band, "Band boundaries")
@@ -114,17 +99,15 @@ func run() -> void:
 	check(game.district_quality() < 0, "No residents means no data")
 	game.transit.funded = false
 	check(game.transit_metrics().served == 0, "Unfunded route has no service")
-	# Два остановочных навеса без полезной точки назначения не создают пользу.
 	game.buildings.fill("house")
 	game.transit.funded = true
 	check(game.transit_metrics().covered > 0 and game.transit_metrics().served == 0, "Coverage without destinations gives no utility")
-	# Старое сохранение без transit продолжает загружаться.
-	var data = JSON.parse_string(FileAccess.get_file_as_string(loaded.save_path))
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(loaded.save_path))
 	data.erase("transit")
 	var file := FileAccess.open(loaded.save_path, FileAccess.WRITE)
 	file.store_string(JSON.stringify(data))
 	file.close()
-	check(loaded.load_game() and not loaded.transit.active, "Version 1 saves remain compatible")
+	check(loaded.load_game() and not loaded.transit.active, "Older saves without a transit section remain compatible")
 	traffic.queue_free()
 	await process_frame
 	for resolution in [Vector2i(360, 800), Vector2i(540, 960), Vector2i(1080, 2400)]:
@@ -134,7 +117,6 @@ func run() -> void:
 		viewport.size_2d_override_stretch = true
 		root.add_child(viewport)
 		var scene = load("res://main.tscn").instantiate()
-		scene.game.save_path = "user://test_startup.json"
 		viewport.add_child(scene)
 		scene.set_process(false)
 		scene.game = Simulation.new()

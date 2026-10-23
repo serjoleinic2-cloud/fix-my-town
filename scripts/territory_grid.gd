@@ -10,6 +10,7 @@ const DISTRICT_ID := "pine_district"
 const BUILDINGS = ["house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
+var revealed: Array = []
 
 func _init(legacy_buildings: Array = []) -> void:
 	reset()
@@ -18,11 +19,16 @@ func _init(legacy_buildings: Array = []) -> void:
 
 func reset() -> void:
 	cells.clear()
+	revealed.clear()
 	for row in range(HEIGHT):
 		var line: Array = []
 		line.resize(WIDTH)
 		line.fill("forest")
 		cells.append(line)
+		var visibility_line: Array = []
+		visibility_line.resize(WIDTH)
+		visibility_line.fill(true)
+		revealed.append(visibility_line)
 	buildings.clear()
 	# The existing district is a connected orthogonal road grid.
 	for row in range(HEIGHT):
@@ -44,6 +50,25 @@ func migrate_legacy(legacy_buildings: Array) -> void:
 					cells[row + dy][col + dx] = cells_to_mark
 		if kind != "empty":
 			buildings.append({"type_id": kind, "instance_id": "pine_district_legacy_%d" % index, "col": col, "row": row, "width": 2, "height": 2, "legacy_plot": index})
+
+func reset_visibility() -> void:
+	revealed.clear()
+	for row in range(HEIGHT):
+		var line: Array = []
+		line.resize(WIDTH)
+		line.fill(false)
+		revealed.append(line)
+
+func reveal_area(col: int, row: int, radius: int = 3) -> void:
+	if revealed.size() != HEIGHT:
+		reset_visibility()
+	for current_row in range(row - radius, row + radius + 1):
+		for current_col in range(col - radius, col + radius + 1):
+			if in_bounds(current_col, current_row) and max(abs(current_col - col), abs(current_row - row)) <= radius:
+				revealed[current_row][current_col] = true
+
+func is_revealed(col: int, row: int) -> bool:
+	return in_bounds(col, row) and revealed.size() == HEIGHT and bool(revealed[row][col])
 
 func in_bounds(col: int, row: int) -> bool:
 	return col >= 0 and col < WIDTH and row >= 0 and row < HEIGHT

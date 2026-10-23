@@ -852,7 +852,21 @@ func redraw_territory() -> void:
 			var color := Color("607e4c") if state == "forest" else Color("9fbd77")
 			Art.box(tile_visuals, center + Vector3(0, 0.045, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.08, 0.09, TerritoryGrid.CELL_SIZE - 0.08), color)
 			if state == "forest":
-				Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9, true, row * 53 + col)
+				# Forest cells deliberately use several deterministic variants so
+				# the expansion reads as a natural edge rather than a repeated wall
+				# of identical firs.  The coordinate seed keeps the look stable after
+				# saving and loading.
+				var forest_seed := absi(row * 53 + col * 17 + row * col)
+				var forest_variant := forest_seed % 10
+				if forest_variant < 4:
+					Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9 + float(forest_seed % 3) * 0.08, true, forest_seed)
+				elif forest_variant < 7:
+					Art.tree(tile_visuals, center + Vector3(-0.25, 0.1, 0.15), 0.75 + float(forest_seed % 4) * 0.08, false, forest_seed)
+				elif forest_variant < 9:
+					Art.tree(tile_visuals, center + Vector3(-0.75, 0.1, 0.45), 0.38, false, forest_seed)
+					Art.tree(tile_visuals, center + Vector3(0.65, 0.1, -0.5), 0.3, false, forest_seed + 1)
+				# The remaining variant is an open clearing: grass remains visible
+				# and the player can immediately read it as a future work site.
 			elif state == "road":
 				var links: Array[Vector2i] = []
 				for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:

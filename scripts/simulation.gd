@@ -82,6 +82,9 @@ func start_empty_city() -> void:
 	for row in range(TerritoryGrid.HEIGHT):
 		for col in range(TerritoryGrid.WIDTH):
 			territory.cells[row][col] = "forest"
+	territory.reset_visibility()
+	# The player sees only a small starting pocket; the rest remains in white fog.
+	territory.reveal_area(12, 20, 3)
 	incident_seed = 48291
 	incident_rng.seed = incident_seed
 	income_clock = 0.0

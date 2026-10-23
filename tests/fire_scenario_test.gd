@@ -153,6 +153,7 @@ func run() -> void:
 
 	# Ignore a third ignition until it reaches ruin; the result must survive a restart.
 	check(damaged_save.start_fire(Simulation.FIRST_FIRE_TARGET), "A repaired home may suffer a later incident")
+	check(damaged_save.upgrade(0), "A restored home can be upgraded before a later fire")
 	for i in range(190):
 		damaged_save.tick(1.0, true)
 	check(damaged_save.is_ruined(Simulation.FIRST_FIRE_TARGET), "100 percent fire damage leaves persistent ruins")
@@ -163,6 +164,7 @@ func run() -> void:
 	check(ruined_load.load_game() and ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Ruins survive save and reload")
 	check(ruined_load.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A ruin can be explicitly rebuilt for its restoration price")
 	check(not ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Rebuild removes the ruin state")
+	check(ruined_load.building_level(0) == 1, "A rebuilt ruin returns as a one-storey home")
 	var final_load = Simulation.new()
 	final_load.save_path = save_path
 	ruined_load.save_game()
@@ -178,3 +180,4 @@ func run() -> void:
 		for failure in failures:
 			push_error(failure)
 		quit(1)
+

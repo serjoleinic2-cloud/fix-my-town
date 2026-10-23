@@ -106,13 +106,37 @@ func step(delta: float) -> void:
 			continue
 		var distance := travel_distance(vehicle, delta)
 		vehicle.coordinate += distance * vehicle.direction
-		var low := -64.0 if vehicle.axis == "H" else -48.0
-		var high := 34.0 if vehicle.axis == "H" else 48.0
-		if vehicle.coordinate > high:
-			vehicle.coordinate = low
-		elif vehicle.coordinate < low:
-			vehicle.coordinate = high
+		continue_road_loop(vehicle)
 		place_vehicle(vehicle)
+
+func continue_road_loop(vehicle: Dictionary) -> void:
+	# Cars stay in the road network and turn at the outer intersections instead
+	# of disappearing at an arbitrary screen edge. This forms a continuous
+	# ring route around the district while retaining lane direction.
+	if vehicle.axis == "H" and vehicle.direction > 0 and vehicle.coordinate >= ROAD_X.back():
+		var old_z: float = vehicle.road
+		vehicle.axis = "V"
+		vehicle.road = ROAD_X.back()
+		vehicle.coordinate = old_z
+		vehicle.direction = 1
+	elif vehicle.axis == "V" and vehicle.direction > 0 and vehicle.coordinate >= ROAD_Z.back():
+		var old_x: float = vehicle.road
+		vehicle.axis = "H"
+		vehicle.road = ROAD_Z.back()
+		vehicle.coordinate = old_x
+		vehicle.direction = -1
+	elif vehicle.axis == "H" and vehicle.direction < 0 and vehicle.coordinate <= ROAD_X.front():
+		var old_z: float = vehicle.road
+		vehicle.axis = "V"
+		vehicle.road = ROAD_X.front()
+		vehicle.coordinate = old_z
+		vehicle.direction = -1
+	elif vehicle.axis == "V" and vehicle.direction < 0 and vehicle.coordinate <= ROAD_Z.front():
+		var old_x: float = vehicle.road
+		vehicle.axis = "H"
+		vehicle.road = ROAD_Z.front()
+		vehicle.coordinate = old_x
+		vehicle.direction = 1
 
 func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	var distance := SPEED * delta
@@ -236,3 +260,4 @@ func set_active_count(count: int) -> void:
 	reservations.clear()
 	for i in range(cars.size()):
 		cars[i].visible = i < count or vehicles[i].get("managed", false)
+

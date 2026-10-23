@@ -40,9 +40,14 @@ var fire_jobs: Dictionary = {}
 var jam_cleared: Dictionary = {}
 var police_job: Dictionary = {}
 var construction_job: Dictionary = {}
+var incident_seed: int = 48291
+var incident_clock: float = 0.0
+var incident_rng := RandomNumberGenerator.new()
+var incidents: Dictionary = {}
 var save_path: String = SAVE_PATH
 
 func _init() -> void:
+	incident_rng.seed = incident_seed
 	for i in range(24):
 		levels.append(1)
 		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
@@ -1027,6 +1032,12 @@ func dispatch_police(incident_id: String) -> bool:
 
 func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
+	if movement_allowed:
+		incident_clock += delta
+		if incident_clock >= 90.0:
+			incident_clock = 0.0
+			if generate_incident():
+				changed = true
 	if not construction_job.is_empty():
 		var previous_progress := floori(construction_progress() * 20.0)
 		construction_job.remaining = maxf(0.0, float(construction_job.remaining) - delta)
@@ -1217,6 +1228,28 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		save_game()
 	return changed
 
+func generate_incident() -> bool:
+	if incidents.size() >= 2:
+		return false
+	var candidates: Array[String] = ["leak", "signal"]
+	if has_service_building("fire_station"):
+		candidates.append("fire")
+	if has_service_building("hospital"):
+		candidates.append("disease")
+	if candidates.is_empty():
+		return false
+	var kind := candidates[incident_rng.randi_range(0, candidates.size() - 1)]
+	var homes := all_buildings().filter(func(entry: Dictionary): return entry.type_id == "house")
+	if homes.is_empty():
+		return false
+	var target: Dictionary = homes[incident_rng.randi_range(0, homes.size() - 1)]
+	var id := "incident_%d" % incident_rng.randi()
+	incidents[id] = {"id": id, "type": kind, "district_id": "pine_district", "target_id": str(target.instance_id),
+		"seed": incident_rng.randi(), "state": "new", "difficulty": clampi(city_level(), 1, 4),
+		"reward": 100 + city_level() * 50, "reaction_left": 45.0, "progress": 0.0}
+	save_game()
+	return true
+
 func check_complete() -> void:
 	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
 
@@ -1251,7 +1284,8 @@ func save_game() -> void:
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
 		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
-		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job}
+		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
+		"incident_seed": incident_seed, "incident_clock": incident_clock, "incidents": incidents}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
 		return
@@ -1549,6 +1583,10 @@ func load_game() -> bool:
 	jam_cleared = loaded_jam_cleared
 	police_job = loaded_police_job
 	construction_job = loaded_construction
+	incident_seed = int(data.get("incident_seed", 48291))
+	incident_clock = maxf(0.0, float(data.get("incident_clock", 0.0)))
+	incidents = data.get("incidents", {}) if data.get("incidents", {}) is Dictionary else {}
+	incident_rng.seed = incident_seed
 	route = loaded_route
 	route_index = clampi(int(data.route_index), 0, route.size())
 	vehicle = Vector3(stored_vehicle[0], stored_vehicle[1], stored_vehicle[2])

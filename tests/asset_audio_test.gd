@@ -86,6 +86,7 @@ func run() -> void:
 	audio.play_ui("select")
 	check(audio.voices[-1].bus == "Interface" and audio.voices[-1].stream == audio.stream("select"), "House tap remains audible when effects occupy the voice budget")
 	check(audio.stream("place").get_length() < 1.1, "Construction feedback is a brief original musical accent")
+	check(audio.stream("tesla").get_length() < 0.3, "Tesla-like selection feedback is a short cue")
 	for type_id: String in Catalog.TYPES:
 		check(ResourceLoader.exists(Catalog.scene_path(type_id)), "Catalog resource exists: " + type_id)
 	DirAccess.remove_absolute(scene.game.save_path)
@@ -97,3 +98,4 @@ func run() -> void:
 	await create_timer(0.15).timeout
 	print("ASSET + AUDIO CHECKS: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
+

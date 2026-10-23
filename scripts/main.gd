@@ -1173,9 +1173,7 @@ func map_input(event: InputEvent) -> void:
 		if game.territory.in_bounds(col, row):
 			var selected_cell := Vector2i(col, row)
 			var in_expansion := col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
-			if game.territory.state_at(col, row) == "road" and not in_expansion:
-				open_grid_road_card(selected_cell)
-			elif in_expansion:
+			if in_expansion:
 				select_territory_cell(selected_cell)
 		return
 	if placing_stop:
@@ -1198,7 +1196,6 @@ func map_input(event: InputEvent) -> void:
 		var tapped_cell := Vector2i(picked_col, picked_row)
 		var tapped_state: String = game.territory.state_at(picked_col, picked_row)
 		if tapped_state == "road":
-			open_grid_road_card(tapped_cell)
 			return
 		if tapped_state in ["forest", "free"] and picked_col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and picked_row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
 			open_land_cell(tapped_cell)
@@ -1738,12 +1735,10 @@ func build_land_cell_sheet() -> void:
 	header(tr_text("Земля района", "District land"))
 	label(20, sheet_column, tr_text("Клетка %d,%d · %s", "Cell %d,%d · %s") % [territory_cell.x + 1, territory_cell.y + 1, t(state)])
 	if state == "forest":
-		label(18, sheet_column, tr_text("Освободите место, чтобы проложить дорогу или построить объект.", "Clear this tile before adding a road or placing an object."))
+		label(18, sheet_column, tr_text("Освободите место, чтобы построить объект.", "Clear this tile before placing an object."))
 		var clear_button := button(sheet_column, tr_text("Расчистить участок · 5", "Clear tile · 5"), clear_selected_land_cell, true)
 		clear_button.name = "ClearLandCell"
-		clear_button.disabled = not game.completed or game.budget < 5 or not game.construction_job.is_empty()
-		if not game.completed:
-			label(15, sheet_column, tr_text("Эта зона откроется после завершения первого района.", "This zone opens after completing the first district.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		clear_button.disabled = game.budget < 5 or not game.construction_job.is_empty()
 	else:
 		label(18, sheet_column, tr_text("Выберите, как использовать свободное место.", "Choose how to use this free space."))
 		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"
@@ -1780,10 +1775,6 @@ func select_catalog_item(type_id: String) -> void:
 	if not catalog_items_for(catalog_category).has(type_id) or not catalog_item_unlocked(type_id):
 		return
 	territory_tool = type_id
-	if type_id == "road":
-		selection_kind = "road_piece_catalog"
-		refresh()
-		return
 	preview_kind = type_id
 	selected = catalog_target_plot
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:

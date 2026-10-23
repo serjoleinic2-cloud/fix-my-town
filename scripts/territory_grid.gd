@@ -330,7 +330,7 @@ func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
 			var next := current + offset
 			if not in_bounds(next.x, next.y) or previous.has(next):
 				continue
-			if state_at(next.x, next.y) == "road" and connected_road(next.x, next.y):
+			if state_at(next.x, next.y) == "road":
 				var path: Array[Vector2i] = [current]
 				var step := current
 				while previous[step].x >= 0:

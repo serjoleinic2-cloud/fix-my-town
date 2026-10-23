@@ -1,7 +1,7 @@
 extends RefCounted
 
-const WIDTH: int = 28
-const HEIGHT: int = 30
+const WIDTH: int = 96
+const HEIGHT: int = 96
 const CELL_SIZE: float = 4.8
 const ORIGIN := Vector3(-57.6, 0, -43.2) # world-space centre of cell (0, 0)
 const EXPANSION_COLS := Vector2i(8, 17)
@@ -11,6 +11,8 @@ const BUILDINGS = ["house", "cafe", "park", "depot", "fire_station", "police_sta
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
+var expansion_cols: Vector2i = EXPANSION_COLS
+var expansion_rows: Vector2i = EXPANSION_ROWS
 
 func _init(legacy_buildings: Array = []) -> void:
 	reset()
@@ -18,6 +20,8 @@ func _init(legacy_buildings: Array = []) -> void:
 		migrate_legacy(legacy_buildings)
 
 func reset() -> void:
+	expansion_cols = EXPANSION_COLS
+	expansion_rows = EXPANSION_ROWS
 	cells.clear()
 	revealed.clear()
 	for row in range(HEIGHT):
@@ -35,6 +39,16 @@ func reset() -> void:
 		for col in range(WIDTH):
 			if (row <= 18 and row % 3 == 0) or (col <= 18 and col % 3 == 0 and row <= 18):
 				cells[row][col] = "road"
+
+func set_expansion_level(level: int) -> void:
+	# Expand the playable ring while keeping a much larger hidden backing grid.
+	var growth := maxi(0, level - 1) * 6
+	expansion_cols = Vector2i(maxi(1, EXPANSION_COLS.x - growth), mini(WIDTH - 2, EXPANSION_COLS.y + growth))
+	expansion_rows = Vector2i(maxi(1, EXPANSION_ROWS.x - growth), mini(HEIGHT - 2, EXPANSION_ROWS.y + growth))
+	for row in range(expansion_rows.x, expansion_rows.y + 1):
+		for col in range(expansion_cols.x, expansion_cols.y + 1):
+			if in_bounds(col, row):
+				revealed[row][col] = true
 
 func migrate_legacy(legacy_buildings: Array) -> void:
 	for index in range(24):
@@ -348,7 +362,7 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 	# общей операцией города, а ограничения расширения относятся к расчистке и
 	# размещению зданий.
 	var expansion_only := tool != "road"
-	if expansion_only and (col < EXPANSION_COLS.x or col + footprint.x - 1 > EXPANSION_COLS.y or row < EXPANSION_ROWS.x or row + footprint.y - 1 > EXPANSION_ROWS.y):
+	if expansion_only and (col < expansion_cols.x or col + footprint.x - 1 > expansion_cols.y or row < expansion_rows.x or row + footprint.y - 1 > expansion_rows.y):
 		return "outside"
 	if not in_bounds(col, row) or col + footprint.x > WIDTH or row + footprint.y > HEIGHT:
 		return "outside"
@@ -384,7 +398,7 @@ func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
 	return connected
 
 func data() -> Dictionary:
-	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true)}
+	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true), "expansion_cols": [expansion_cols.x, expansion_cols.y], "expansion_rows": [expansion_rows.x, expansion_rows.y]}
 
 func restore(value: Variant) -> bool:
 	if not value is Dictionary or value.get("district_id", DISTRICT_ID) != DISTRICT_ID or int(value.get("width", 0)) != WIDTH or int(value.get("height", 0)) != HEIGHT:
@@ -431,4 +445,10 @@ func restore(value: Variant) -> bool:
 			visibility_line.resize(WIDTH)
 			visibility_line.fill(true)
 			revealed.append(visibility_line)
+	var saved_cols: Variant = value.get("expansion_cols", null)
+	var saved_rows: Variant = value.get("expansion_rows", null)
+	if saved_cols is Array and saved_cols.size() == 2 and saved_rows is Array and saved_rows.size() == 2:
+		if int(saved_cols[0]) >= 0 and int(saved_cols[1]) < WIDTH and int(saved_cols[0]) <= int(saved_cols[1]) and int(saved_rows[0]) >= 0 and int(saved_rows[1]) < HEIGHT and int(saved_rows[0]) <= int(saved_rows[1]):
+			expansion_cols = Vector2i(int(saved_cols[0]), int(saved_cols[1]))
+			expansion_rows = Vector2i(int(saved_rows[0]), int(saved_rows[1]))
 	return true

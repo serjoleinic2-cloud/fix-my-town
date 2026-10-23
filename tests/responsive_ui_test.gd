@@ -40,6 +40,10 @@ func run() -> void:
 		check(scene.district_label.text == "Сосновый район" and not scene.district_label.clip_text, "District name remains complete in the top bar")
 		var map_tools: Control = scene.screen.get_node("MapTools")
 		check(map_tools.size.y <= 140 and map_tools.get_global_rect().end.y < scene.navbar.position.y, "Compact map actions leave the map visible")
+		scene.open_territory()
+		scene.set_territory_tool("service")
+		check(not scene.mode_switcher.get_global_rect().intersects(map_tools.get_global_rect()), "Four land-mode buttons never overlap floating map controls")
+		check(scene.mode_switcher.get_global_rect().position.x >= 0 and scene.mode_switcher.get_global_rect().end.x <= scene.screen.size.x + 1, "Land-mode row stays inside safe screen width")
 		check(scene.hud.position.y >= 40, "HUD respects top safe area")
 		check(scene.hud.get_global_rect().end.x <= scene.screen.size.x - 20.0 + 1, "HUD respects right safe area")
 		var map_before: Vector3 = scene.focus_point

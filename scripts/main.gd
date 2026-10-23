@@ -20,7 +20,6 @@ var plots: Node3D
 var territory_visuals: Node3D
 var car: Node3D
 var fire_car: Node3D
-var fire_station: Node3D
 var fire_markers: Dictionary = {}
 var signal_object: Node3D
 var leak_effect: Node3D
@@ -89,6 +88,8 @@ var selected_stop_index: int = -1
 var safe_left: float = 16.0
 var safe_right: float = 16.0
 var territory_tool: String = "clear"
+var service_type: String = "fire_station"
+var selected_vehicle_type: String = ""
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
 var grid_selected_id: String = ""
@@ -109,7 +110,8 @@ const TEXT = {
 	"repair": ["Отправить бригаду", "Dispatch crew"], "fixed": ["Обслуживание восстановлено", "Service restored"],
 	"busy": ["Бригада: %s • %s", "Crew: %s • %s"], "travel": ["в пути", "on the way"], "repairing": ["ремонт %d сек.", "repair %d sec"], "return": ["возвращается", "returning"], "idle": ["Бригада свободна • выбор участка на карте", "Crew ready • select a plot on the map"],
 	"empty": ["Участок %d • доступ к дороге\nБонус зависит от соседних домов и объектов.", "Plot %d • road access\nBonus depends on nearby homes and amenities."],
-	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Ремонтная служба", "Repair depot"],
+	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Дом рабочих", "Workers depot"],
+	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
 	"occupied": ["%s • участок %d", "%s • plot %d"],
 	"reset": ["Заново", "Restart"], "confirm": ["Начать новый район?", "Start a new district?"],
@@ -148,6 +150,9 @@ const TEXT = {
 	 "fire_damaged": ["Повреждения здания: %d%%", "Building damage: %d%%"],
 	 "fire_extinguished": ["Пожар потушен · восстановить дом за %d", "Fire extinguished · restore home for %d"],
 	 "fire_station": ["Пожарная часть", "Fire station"],
+	 "police_station": ["Полицейский участок", "Police station"],
+	 "hospital": ["Больница", "Hospital"],
+	 "service_depot": ["Дом рабочих", "Workers depot"],
 		"fire_dispatching": ["Пожарная машина выехала", "Fire engine dispatched"]
 }
 
@@ -434,8 +439,19 @@ func update_layout() -> void:
 		sheet.position = Vector2(safe_left, navbar.position.y - action_height - 12)
 		sheet.size = Vector2(size_value.x - safe_left - safe_right, maxf(action_height, sheet.get_combined_minimum_size().y))
 		sheet.position.y = navbar.position.y - sheet.size.y - 12
-	mode_switcher.position = Vector2(safe_left, safe_top + 92)
-	mode_switcher.size = Vector2(minf(360, size_value.x - 150), 72)
+	if size_value.x < 620 or mode_switcher.get_child_count() >= 4:
+		mode_switcher.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
+		mode_switcher.size = Vector2(size_value.x - safe_left - safe_right, 72)
+		mode_switcher.add_theme_constant_override("separation", 5)
+		var mode_buttons := mode_switcher.get_children()
+		var mode_button_width := maxf(72, (mode_switcher.size.x - 5.0 * maxf(0, mode_buttons.size() - 1)) / maxf(1, mode_buttons.size()))
+		for choice in mode_switcher.get_children():
+			if choice is Button:
+				choice.custom_minimum_size.x = mode_button_width
+				choice.add_theme_font_size_override("font_size", 13)
+	else:
+		mode_switcher.position = Vector2(safe_left, safe_top + 92)
+		mode_switcher.size = Vector2(minf(360, size_value.x - safe_left - safe_right - tools_width - 16), 72)
 	updating_layout = false
 
 func map_position(point: Vector3) -> Vector3:
@@ -486,13 +502,10 @@ func build_world() -> void:
 	signal_object = scenery.traffic_controller.get_problem_signal()
 	leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
 	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
-	fire_station = create_object(world, "fire_station", Simulation.FIRE_STATION_ID, game.fire_station_world())
-	fire_station.interaction_area.collision_layer = 0
 	fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
 	fire_car.position = car.position
 	car.visible = game.job != "fire"
 	fire_car.visible = game.job == "fire"
-	fire_station.set_language(game.language)
 	fire_car.set_language(game.language)
 	make_marker("SignalMarker", Vector3(-14.4, 5, 0))
 	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
@@ -732,14 +745,16 @@ func map_input(event: InputEvent) -> void:
 			return
 	if selection_kind != "territory" and select_projected_building(point):
 		return
+	if selection_kind != "territory" and select_vehicle_at(point):
+		return
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
 		if selection_kind not in ["", "territory", "stop_place"]:
 			close_sheet()
 		return
 	if selection_kind == "territory":
-		var col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
-		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
+		var col := floori((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
+		var row := floori((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
 		if col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1) and row in range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1):
 			select_territory_cell(Vector2i(col, row))
 		return
@@ -821,6 +836,30 @@ func select_projected_building(point: Vector2) -> bool:
 		select_grid_house(grid_hit)
 		return true
 	return false
+
+func select_vehicle_at(point: Vector2) -> bool:
+	var candidates: Array[Node3D] = [car, fire_car]
+	for vehicle: Dictionary in scenery.traffic_controller.vehicles:
+		var node: Node3D = vehicle.node
+		if node.visible:
+			candidates.append(node)
+	var best: Node3D
+	var best_distance := 44.0 * render_scale / viewport_container.stretch_shrink
+	for node in candidates:
+		if node == null or not is_instance_valid(node) or not node.visible:
+			continue
+		var distance := camera.unproject_position(node.global_position + Vector3(0, 0.9, 0)).distance_to(point)
+		if distance < best_distance:
+			best = node
+			best_distance = distance
+	if best == null:
+		return false
+	selected_vehicle_type = best.type_id
+	selection_kind = "vehicle"
+	selected = -1
+	active_tab = "services"
+	refresh()
+	return true
 
 func select_grid_house(identifier: String) -> void:
 	grid_selected_id = identifier
@@ -904,7 +943,7 @@ func log_territory_probe() -> void:
 
 func select_territory_cell(cell: Vector2i) -> void:
 	territory_cell = cell
-	if territory_tool == "house":
+	if territory_tool in ["house", "service"]:
 		set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(9.4, 0, 9.4))
 	refresh()
 	log_territory_probe()
@@ -912,13 +951,25 @@ func select_territory_cell(cell: Vector2i) -> void:
 func build_territory_sheet() -> void:
 	action_height = 420
 	header(tr_text("Освоение территории", "Expand the city"))
-	for tool in ["clear", "road", "house"]:
-		var title := tr_text("Расчистить", "Clear") if tool == "clear" else (tr_text("Дорога", "Road") if tool == "road" else tr_text("Дом", "House"))
+	for tool in ["clear", "road", "house", "service"]:
+		var title := tr_text("Расчистить", "Clear") if tool == "clear" else (tr_text("Дорога", "Road") if tool == "road" else (tr_text("Службы", "Services") if tool == "service" else tr_text("Дом", "House")))
 		var choice := button(mode_switcher, title, set_territory_tool.bind(tool))
 		choice.custom_minimum_size.y = 72
 		choice.add_theme_font_size_override("font_size", 16)
 		if territory_tool == tool:
 			choice.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
+	if territory_tool == "service":
+		var service_choices := GridContainer.new()
+		service_choices.columns = 2
+		service_choices.add_theme_constant_override("h_separation", 6)
+		service_choices.add_theme_constant_override("v_separation", 4)
+		sheet_column.add_child(service_choices)
+		for kind in ["fire_station", "police_station", "hospital", "depot"]:
+			var service_button := button(service_choices, t(kind), set_service_type.bind(kind))
+			service_button.custom_minimum_size = Vector2(150, 68)
+			service_button.add_theme_font_size_override("font_size", 16)
+			if service_type == kind:
+				service_button.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
 	var note := label(19, sheet_column, tr_text("Порядок: расчистить лес → соединить дорогу → выбрать дом. Лес тёмно-зелёный, свободная земля светлая.", "Order: clear forest → connect a road → choose a home. Forest is dark green; cleared land is light green."))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var reason := territory_reason()
@@ -930,8 +981,9 @@ func build_territory_sheet() -> void:
 	hint.name = "TerrainPlacementHint"
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_color_override("font_color", Color("41875a") if reason == "" else INK)
-	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost("house"))
-	var verb := tr_text("Расчистить", "Clear") if territory_tool == "clear" else (tr_text("Проложить дорогу", "Build road") if territory_tool == "road" else tr_text("Построить дом", "Build home"))
+	var type_id := service_type if territory_tool == "service" else ("house" if territory_tool == "house" else "")
+	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost(type_id))
+	var verb := tr_text("Расчистить", "Clear") if territory_tool == "clear" else (tr_text("Проложить дорогу", "Build road") if territory_tool == "road" else (tr_text("Построить %s", "Build %s") % t(service_type) if territory_tool == "service" else tr_text("Построить дом", "Build home")))
 	var confirm := button(sheet_column, verb + " · %d" % cost, apply_territory_tool, true)
 	confirm.name = "ConfirmTerritory"
 	confirm.disabled = reason != ""
@@ -944,7 +996,8 @@ func territory_reason() -> String:
 	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool)
 	if reason != "":
 		return reason
-	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost("house"))
+	var type_id := service_type if territory_tool == "service" else ("house" if territory_tool == "house" else "")
+	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost(type_id))
 	return "" if game.budget >= cost else "budget"
 
 func placement_hint(reason: String) -> String:
@@ -959,10 +1012,16 @@ func placement_hint(reason: String) -> String:
 		return tr_text("Расчистка стоит 5. Для дома очистите все клетки его контура 2×2.", "Clear for 5. Clear all four cells in the 2×2 home footprint.")
 	if territory_tool == "road":
 		return tr_text("Дорога стоит 12 за клетку. Начните у существующей дороги; поворот можно сделать следующей клеткой.", "Road costs 12 per tile. Start beside an existing road; add a turn with the next tile.")
+	if territory_tool == "service":
+		return tr_text("Здание службы занимает участок 2×2 и стоит %d. Разместите его рядом с соединённой дорогой.", "The service building uses a 2×2 lot and costs %d. Place it beside a connected road.") % Catalog.cost(service_type)
 	return tr_text("Дом занимает 2×2 клетки и стоит %d. Разместите его рядом с соединённой дорогой.", "A home uses 2×2 cells and costs %d. Place it next to a connected road.") % Catalog.cost("house")
 
 func set_territory_tool(tool: String) -> void:
 	territory_tool = tool
+	refresh()
+
+func set_service_type(type_id: String) -> void:
+	service_type = type_id
 	refresh()
 
 func apply_territory_tool() -> void:
@@ -971,15 +1030,17 @@ func apply_territory_tool() -> void:
 		success = game.clear_grid_cell(territory_cell.x, territory_cell.y)
 	elif territory_tool == "road":
 		success = game.build_grid_road(territory_cell.x, territory_cell.y)
+	elif territory_tool == "service":
+		success = game.build_grid_service(territory_cell.x, territory_cell.y, service_type)
 	else:
 		success = game.build_grid_house(territory_cell.x, territory_cell.y)
 	if success:
-		if territory_tool in ["house", "road"]:
+		if territory_tool in ["house", "road", "service"]:
 			audio.play_construction(DistrictWorld.logical_position(game.territory.cell_world(territory_cell.x, territory_cell.y)))
 		else:
 			audio.play_ui("success")
 		territory_signature = ""
-		if territory_tool == "house":
+		if territory_tool in ["house", "service"]:
 			select_grid_house(game.territory.building_at(territory_cell.x, territory_cell.y).instance_id)
 			return
 	else:
@@ -1081,6 +1142,11 @@ func build_sheet() -> void:
 		build_stop_sheet()
 	elif selection_kind == "stop_place":
 		build_stop_placement_sheet()
+	elif selection_kind == "vehicle":
+		action_height = 190
+		header(t(selected_vehicle_type) if TEXT.has(selected_vehicle_type) else tr_text("Транспорт", "Vehicle"))
+		var busy_text := tr_text("В пути по поручению", "On assignment") if game.job != "" and selected_vehicle_type in ["repair_van", "fire_engine"] else tr_text("Ожидает поручения", "Waiting for an assignment")
+		label(20, sheet_column, busy_text)
 	elif selection_kind in ["signal", "leak"]:
 		action_height = 500
 		header(t("leak_title") if selection_kind == "leak" else t("signal_title"), "pipe_white")
@@ -1139,9 +1205,10 @@ func build_sheet() -> void:
 				label(20, sheet_column, warning_text).add_theme_color_override("font_color", Color("cf7543"))
 		var damage := game.house_damage(identifier)
 		label(20, sheet_column, t("fire_damaged") % damage)
-		var fire_action := button(sheet_column, t("fire_call"), dispatch_fire, true)
+		var has_station: bool = game.has_service_building("fire_station")
+		var fire_action := button(sheet_column, t("fire_call") if has_station else tr_text("Построить пожарное депо", "Build fire station"), dispatch_fire if has_station else open_fire_station_build, true)
 		fire_action.name = "DispatchFirefighters"
-		fire_action.disabled = game.job != "" or game.route_between_world(game.fire_station_world(), game.building_world_for_id(identifier)).is_empty()
+		fire_action.disabled = has_station and (game.job != "" or game.route_between_world(game.fire_station_world(), game.building_world_for_id(identifier)).is_empty())
 		status = label(19, sheet_column)
 		update_crew_status()
 	elif selected >= 0 and game.buildings[selected] == "empty":
@@ -1213,14 +1280,14 @@ func update_preview() -> void:
 	clear_children(highlights)
 	if selection_kind == "territory" and territory_cell.x >= 0:
 		var color := Color("8ed6f8") if territory_reason() == "" else Color("e18470")
-		var size_value := 2 if territory_tool == "house" else 1
+		var size_value := 2 if territory_tool in ["house", "service"] else 1
 		for dy in range(size_value):
 			for dx in range(size_value):
 				var point: Vector3 = game.territory.cell_world(territory_cell.x + dx, territory_cell.y + dy)
 				for side in [-1, 1]:
 					Art.box(highlights, point + Vector3(side * 2.3, 0.3, 0), Vector3(0.15, 0.08, 4.6), color)
 					Art.box(highlights, point + Vector3(0, 0.3, side * 2.3), Vector3(4.6, 0.08, 0.15), color)
-		if territory_tool == "house":
+		if territory_tool in ["house", "service"]:
 			var point: Vector3 = game.territory.cell_world(territory_cell.x, territory_cell.y) + Vector3(2.4, 0.2, 2.4)
 			preview = create_object(world, "house", "grid_house_preview", point)
 			make_ghost(preview, color)
@@ -1318,6 +1385,12 @@ func dispatch_fire() -> void:
 		audio.play("siren", "Effects", game.vehicle)
 	else:
 		audio.play_ui("deny")
+	refresh()
+
+func open_fire_station_build() -> void:
+	open_territory()
+	territory_tool = "service"
+	service_type = "fire_station"
 	refresh()
 
 func construct(kind: String) -> void:
@@ -1627,6 +1700,12 @@ func build_grid_house_sheet() -> void:
 	var entry := selected_grid_record()
 	if entry.is_empty():
 		return
+	if entry.type_id != "house":
+		action_height = 235
+		header(t(entry.type_id))
+		label(20, sheet_column, tr_text("Здание службы построено и подключено к дорожной сети.", "Service building is built and connected to the road network.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button(sheet_column, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
+		return
 	action_height = 430
 	header(t("house") + " · %d/3" % entry.level)
 	var data: Dictionary = game.record_quality(entry)
@@ -1711,7 +1790,7 @@ func open_grid_more() -> void:
 	dialog.popup_centered(Vector2i(480, 330))
 
 func build_building_sheet() -> void:
-	action_height = 430
+	action_height = 0
 	var kind: String = game.buildings[selected]
 	var level_value: int = game.building_level(selected)
 	header(t(kind) + " · %d/3" % level_value)
@@ -1758,6 +1837,7 @@ func build_building_sheet() -> void:
 		var key: String = issues[0][1]
 		var caption: String = (tr_text("Устранить протечку", "Fix the leak") if key == "leak" else tr_text("Починить светофор", "Fix the signal")) if key in ["leak", "signal"] else tr_text("Открыть транспорт", "Open transit") if key == "transit" else t("build_tab")
 		button(sheet_column, caption, house_action.bind(key))
+	action_height = sheet_column.get_combined_minimum_size().y + 34
 
 func house_action(key: String) -> void:
 	if key in ["leak", "signal"]:

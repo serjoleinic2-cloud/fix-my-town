@@ -105,6 +105,26 @@ func run() -> void:
 		check(scene.game.placement_bonus(21, "cafe") == bonus - 4, "The level-two expansion house adds the same neighbor bonus")
 		scene.refresh()
 		check(scene.highlights.get_child_count() == base_count - 4, "The removed expansion house also loses exactly its four outline edges")
+		scene.open_territory()
+		scene.set_territory_tool("clear")
+		for dy in range(2):
+			for dx in range(2):
+				scene.territory_cell = Vector2i(12 + dx, 19 + dy)
+				scene.refresh()
+				scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
+				await process_frame
+		scene.set_territory_tool("service")
+		scene.set_service_type("fire_station")
+		scene.territory_cell = Vector2i(12, 19)
+		scene.refresh()
+		var service_choice_visible: bool = scene.sheet.find_children("*", "Button", true, false).any(func(item): return item.text == scene.t("fire_station"))
+		var service_valid: bool = scene.territory_reason() == "" and not scene.sheet.find_child("ConfirmTerritory", true, false).disabled
+		scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
+		await process_frame
+		check(service_choice_visible and service_valid and scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(13, 20) == "occupied", "Service menu offers player-placed fire station on a connected cleared footprint and reserves every cell")
+		scene.game.buildings[3] = "cafe"
+		scene.select_plot(3)
+		check(scene.action_height < 430 and scene.sheet.get_global_rect().end.y <= scene.navbar.position.y + 1, "Café card fits its content without a fixed empty footer")
 		scene.toggle_quality()
 		check(scene.quality_mode and scene.quality_legend.visible, "Condition mode also covers expansion homes")
 		scene.audio.shutdown()

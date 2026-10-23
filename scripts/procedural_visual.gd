@@ -18,6 +18,10 @@ func _ready() -> void:
 		depot()
 	elif visual_type == "fire_station":
 		fire_station()
+	elif visual_type == "police_station":
+		service_station(Color("54768c"), Color("d9e5e6"), "ПОЛИЦИЯ")
+	elif visual_type == "hospital":
+		service_station(Color("e6e5dc"), Color("62a9a0"), "БОЛЬНИЦА")
 	elif visual_type == "park":
 		park()
 	elif visual_type == "empty":
@@ -159,6 +163,15 @@ func fire_station() -> void:
 	signs.append(Art.sign_text(self, Vector3(0, 3.2, 2.82), "ПОЖАРНЫЕ", 32))
 	for x in [-2.55, 2.55]:
 		Art.box(self, Vector3(x, 1.15, 2.78), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
+
+func service_station(wall: Color, accent: Color, sign_text: String) -> void:
+	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), wall)
+	Art.box(self, Vector3(0, 3.7, -0.5), Vector3(7.5, 0.35, 6.5), Color("70787a"))
+	Art.box(self, Vector3(0, 1.25, 2.65), Vector3(3.6, 2.5, 0.08), Color("56666a"))
+	Art.box(self, Vector3(0, 3.1, 2.72), Vector3(5.9, 0.72, 0.13), accent)
+	signs.append(Art.sign_text(self, Vector3(0, 3.15, 2.82), sign_text, 34))
+	for x in [-2.6, 2.6]:
+		Art.box(self, Vector3(x, 1.6, 2.7), Vector3(0.8, 1.0, 0.08), Color("9bc7d0"))
 
 func fire_engine() -> void:
 	Art.box(self, Vector3(0, 0.72, -0.35), Vector3(1.9, 1.15, 2.8), Color("d64f3e"))

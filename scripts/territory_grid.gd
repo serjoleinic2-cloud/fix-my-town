@@ -7,7 +7,7 @@ const ORIGIN := Vector3(-57.6, 0, -43.2) # world-space centre of cell (0, 0)
 const EXPANSION_COLS := Vector2i(8, 17)
 const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
-const BUILDINGS = ["house", "cafe", "park", "depot"]
+const BUILDINGS = ["house", "cafe", "park", "depot", "fire_station", "police_station", "hospital"]
 var cells: Array = []
 var buildings: Array = []
 
@@ -107,6 +107,11 @@ func place_road(col: int, row: int) -> bool:
 	return true
 
 func build_house(col: int, row: int) -> bool:
+	return place_building(col, row, "house")
+
+func place_building(col: int, row: int, type_id: String) -> bool:
+	if type_id not in ["house", "fire_station", "police_station", "hospital", "depot"]:
+		return false
 	if not in_bounds(col, row) or not in_bounds(col + 1, row + 1):
 		return false
 	var has_access := false
@@ -123,7 +128,11 @@ func build_house(col: int, row: int) -> bool:
 	for dy in range(2):
 		for dx in range(2):
 			cells[row + dy][col + dx] = "occupied"
-	buildings.append({"type_id": "house", "instance_id": "pine_district_house_%d_%d" % [col, row], "col": col, "row": row, "width": 2, "height": 2, "level": 1, "inspected": false})
+	var prefix := "pine_district_%s" % type_id
+	var entry := {"type_id": type_id, "instance_id": "%s_%d_%d" % [prefix, col, row], "col": col, "row": row, "width": 2, "height": 2, "level": 1, "inspected": false}
+	if type_id != "house":
+		entry.service_building = true
+	buildings.append(entry)
 	return true
 
 func path_to_city(col: int, row: int) -> Array[Vector2i]:
@@ -215,7 +224,7 @@ func access_path(entry: Dictionary, start: Vector2i) -> Array[Vector2i]:
 	return best
 
 func placement_reason(col: int, row: int, tool: String) -> String:
-	var footprint := 2 if tool == "house" else 1
+	var footprint := 2 if tool in ["house", "fire_station", "police_station", "hospital", "depot", "service"] else 1
 	if col < EXPANSION_COLS.x or col + footprint - 1 > EXPANSION_COLS.y or row < EXPANSION_ROWS.x or row + footprint - 1 > EXPANSION_ROWS.y:
 		return "outside"
 	if tool == "clear":

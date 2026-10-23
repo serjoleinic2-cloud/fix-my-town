@@ -245,6 +245,16 @@ func build_grid_house(col: int, row: int) -> bool:
 	save_game()
 	return true
 
+func build_grid_service(col: int, row: int, type_id: String) -> bool:
+	if type_id not in ["fire_station", "police_station", "hospital", "depot"]:
+		return false
+	var price: int = Catalog.cost(type_id)
+	if budget < price or territory.placement_reason(col, row, "service") != "" or not territory.place_building(col, row, type_id):
+		return false
+	budget -= price
+	save_game()
+	return true
+
 func upgrade_grid_house(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
 	if entry.is_empty() or entry.has("legacy_plot"):
@@ -269,7 +279,7 @@ func grid_demolition_refund(identifier: String) -> int:
 
 func demolish_grid_house(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or (job != "" and target_instance_id == identifier):
+	if entry.is_empty() or entry.has("legacy_plot") or (job != "" and (target_instance_id == identifier or depot_instance_id == identifier)):
 		return false
 	budget += grid_demolition_refund(identifier)
 	for dy in range(entry.height):
@@ -329,10 +339,31 @@ func route_between_world(from_point: Vector3, point: Vector3) -> Array:
 	return result
 
 func fire_station_world() -> Vector3:
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == "fire_station":
+			return territory.building_center(entry)
+	# Legacy route endpoint for saves made before service buildings became placeable.
 	return DistrictWorld.world_position(Vector3(9, 0, -7.5))
 
+func fire_station_record() -> Dictionary:
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == "fire_station":
+			var result := entry.duplicate(true)
+			result.position = territory.building_center(entry)
+			return result
+	return {}
+
+func has_service_building(type_id: String) -> bool:
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == type_id:
+			return true
+	return false
+
 func job_depot_world() -> Vector3:
-	return fire_station_world() if job == "fire" else depot_world()
+	if job == "fire":
+		var source := territory.building_by_id(depot_instance_id)
+		return territory.building_center(source) if not source.is_empty() else DistrictWorld.world_position(Vector3(9, 0, -7.5))
+	return depot_world()
 
 func building_world_for_id(identifier: String) -> Vector3:
 	for entry: Dictionary in all_buildings():
@@ -383,14 +414,15 @@ func repair_fire_damage(identifier: String) -> bool:
 
 func dispatch_fire() -> bool:
 	var identifier := fire_target()
-	if job != "" or identifier == "" or fires[identifier].phase not in ["warning", "burning"]:
+	var station := fire_station_record()
+	if job != "" or station.is_empty() or identifier == "" or fires[identifier].phase not in ["warning", "burning"]:
 		return false
-	var planned := route_between_world(fire_station_world(), building_world_for_id(identifier))
+	var planned := route_between_world(station.position, building_world_for_id(identifier))
 	if planned.is_empty():
 		return false
 	job = "fire"
 	target_instance_id = identifier
-	depot_instance_id = FIRE_STATION_ID
+	depot_instance_id = station.instance_id
 	job_phase = "travel"
 	route = planned
 	vehicle = route[0]
@@ -609,8 +641,13 @@ func load_game() -> bool:
 		return false
 	if stored_job == "fire" and not is_house_id_in(stored_target, stored, loaded_territory):
 		return false
-	var expected_depot := FIRE_STATION_ID if stored_job == "fire" else "pine_district_legacy_2"
-	if data.get("depot_instance_id", "pine_district_legacy_2") != expected_depot:
+	var stored_depot_id: String = str(data.get("depot_instance_id", "pine_district_legacy_2"))
+	if stored_job == "fire":
+		var stored_station := loaded_territory.building_by_id(stored_depot_id)
+		# Accept the old fixed station identifier only for legacy in-flight jobs.
+		if not ((not stored_station.is_empty() and stored_station.type_id == "fire_station") or (stored_depot_id == FIRE_STATION_ID and stored_station.is_empty())):
+			return false
+	elif stored_depot_id != "pine_district_legacy_2":
 		return false
 	var loaded_fires: Dictionary = {}
 	var raw_fires: Variant = data.get("fires", [])

@@ -23,6 +23,7 @@ func run() -> void:
 	game.place_stop(0)
 	game.place_stop(5)
 	game.start_transit()
+	check(game.territory.building_by_id(Simulation.FIRE_STATION_ID).is_empty(), "A new city has no automatically placed fire station")
 	var before: Dictionary = game.metrics()
 	var roads := [Vector2i(9, 19), Vector2i(9, 20), Vector2i(9, 21), Vector2i(10, 21), Vector2i(11, 21), Vector2i(11, 22)]
 	var lots := [Vector2i(10, 19), Vector2i(12, 21)]
@@ -90,6 +91,18 @@ func run() -> void:
 	var served: int = final.transit_metrics().served
 	check(final.demolish_grid_house(near_id) and final.transit_metrics().served == served - 12, "Demolition frees four cells and removes the home's transport demand")
 	check(final.territory.state_at(10, 19) == "free", "Expansion footprint is released")
+	for dy in range(2):
+		for dx in range(2):
+			check(final.clear_grid_cell(12 + dx, 19 + dy), "Clear a service-building footprint")
+	check(final.build_grid_service(12, 19, "fire_station"), "Player can place a fire station beside a connected road")
+	var station: Dictionary = final.territory.building_at(12, 19)
+	check(station.type_id == "fire_station" and station.get("service_building", false), "Fire station uses a stable type and a saved footprint")
+	check(final.territory.state_at(12, 19) == "occupied" and not final.build_grid_road(12, 19), "Service footprint cannot be overbuilt with a road")
+	check(not final.build_grid_house(12, 19), "Service footprint cannot be overbuilt with a house")
+	final.save_game()
+	var service_reload := Simulation.new()
+	service_reload.save_path = game.save_path
+	check(service_reload.load_game() and service_reload.territory.building_by_id(station.instance_id).type_id == "fire_station", "Player-built service location survives save and load")
 	traffic.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(game.save_path)

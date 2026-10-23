@@ -4,8 +4,10 @@ extends RefCounted
 const TYPES = {
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
-	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 0, "footprint": Vector2(9, 9)},
-	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "footprint": Vector2(9, 9)},
+	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 220, "footprint": Vector2(9, 9)},
+	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "cost": 260, "footprint": Vector2(9, 9)},
+	"police_station": {"scene": "res://scenes/visuals/police_station.tscn", "cost": 240, "footprint": Vector2(9, 9)},
+	"hospital": {"scene": "res://scenes/visuals/hospital.tscn", "cost": 300, "footprint": Vector2(9, 9)},
 	"cafe": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/cafe.tscn", "cost": 120, "mood": 5, "footprint": Vector2(9, 9)},
 	"park": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/park.tscn", "cost": 100, "mood": 5, "footprint": Vector2(9, 9)},
 	"repair_van": {"scene": "res://scenes/visuals/repair_van.tscn", "footprint": Vector2(1.8, 3.0)},

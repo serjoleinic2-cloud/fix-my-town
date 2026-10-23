@@ -28,6 +28,12 @@ func run() -> void:
 	var save_path := "user://fire_scenario_test.json"
 	var game = Simulation.new()
 	game.save_path = save_path
+	game.budget = 1000
+	for dy in range(2):
+		for dx in range(2):
+			check(game.clear_grid_cell(12 + dx, 19 + dy), "clear a connected lot for the player-built station")
+	check(game.build_grid_service(12, 19, "fire_station"), "player builds the fire station required for dispatch")
+	var station_id: String = game.territory.building_at(12, 19).instance_id
 	check(game.start_fire(), "one opening fire starts at its stable house ID")
 	check(not game.start_fire(), "the scenario allows only one ignition sequence")
 	check(game.fires[Simulation.FIRST_FIRE_TARGET].phase == "warning", "fire begins with a readable warning stage")
@@ -47,7 +53,7 @@ func run() -> void:
 	offline_reload.save_game()
 	check(offline_reload.dispatch_fire(), "fire station can dispatch on the shared road network")
 	check(offline_reload.job == "fire" and offline_reload.target_instance_id == Simulation.FIRST_FIRE_TARGET, "fire engine receives the stable target assignment")
-	check(offline_reload.depot_instance_id == Simulation.FIRE_STATION_ID and not offline_reload.route.is_empty(), "vehicle keeps its station and planned route")
+	check(offline_reload.depot_instance_id == station_id and not offline_reload.route.is_empty(), "vehicle keeps its player-built station and planned route")
 
 	var in_transit = Simulation.new()
 	in_transit.save_path = save_path

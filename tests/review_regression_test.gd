@@ -24,6 +24,7 @@ func run() -> void:
 				has_roads = true
 	check(empty.district_house_count() == 0 and not has_roads, "New city starts without houses or inherited roads")
 	check(empty.incident_penalty() == 0, "Empty city has no legacy service penalty")
+	check(empty.territory.is_revealed(12, 20) and not empty.territory.is_revealed(4, 4), "New city starts with a small visible pocket")
 	empty.tick(180.0, true)
 	check(empty.incidents.is_empty(), "Empty city does not generate incidents on empty terrain")
 	for row in range(19, 23):
@@ -31,7 +32,8 @@ func run() -> void:
 			empty.territory.clear_cell(col, row)
 	check(empty.build_grid_building(13, 20, "house"), "First cleared house can bootstrap the road network")
 	check(empty.territory.has_constructed_network(), "First house creates an automatic road contour")
-	check(empty.build_grid_building(17, 20, "house"), "Second house can extend the network linearly")
+	check(empty.territory.is_revealed(13, 20) and empty.territory.is_revealed(16, 20), "Buildings reveal nearby cells")
+	check(empty.build_grid_building(16, 20, "house"), "Second house can extend the network linearly")
 	var game := Simulation.new()
 	game.save_path = "user://review_regression_test.json"
 	game.budget = 5000
@@ -93,4 +95,3 @@ func run() -> void:
 	DirAccess.remove_absolute(neglected.save_path)
 	print("REVIEW REGRESSIONS: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
-

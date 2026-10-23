@@ -126,11 +126,9 @@ func happiness() -> int:
 
 func city_level() -> int:
 	var score := happiness()
-	if score >= 82:
-		return 3
-	if score >= 60:
-		return 2
-	return 1
+	var level := 3 if score >= 82 else (2 if score >= 60 else 1)
+	territory.set_expansion_level(level)
+	return level
 
 func district_house_count() -> int:
 	var total := 0

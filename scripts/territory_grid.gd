@@ -148,6 +148,7 @@ func place_road(col: int, row: int) -> bool:
 	if not adjacent:
 		return false
 	cells[row][col] = "road"
+	reveal_area(col, row, 1)
 	return true
 
 func build_house(col: int, row: int) -> bool:
@@ -191,6 +192,7 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 	if type_id in ["depot", "fire_station", "police_station", "hospital"]:
 		entry.service_building = true
 	buildings.append(entry)
+	reveal_area(col, row, 3)
 	return true
 
 func path_to_city(col: int, row: int) -> Array[Vector2i]:
@@ -407,13 +409,14 @@ func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
 	return connected
 
 func data() -> Dictionary:
-	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true)}
+	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true)}
 
 func restore(value: Variant) -> bool:
 	if not value is Dictionary or value.get("district_id", DISTRICT_ID) != DISTRICT_ID or int(value.get("width", 0)) != WIDTH or int(value.get("height", 0)) != HEIGHT:
 		return false
 	var new_cells: Variant = value.get("cells")
 	var new_buildings: Variant = value.get("buildings")
+	var new_revealed: Variant = value.get("revealed", null)
 	if not new_cells is Array or new_cells.size() != HEIGHT or not new_buildings is Array:
 		return false
 	for row in new_cells:
@@ -444,4 +447,13 @@ func restore(value: Variant) -> bool:
 					return false
 	cells = new_cells.duplicate(true)
 	buildings = new_buildings.duplicate(true)
+	if new_revealed is Array and new_revealed.size() == HEIGHT and new_revealed.all(func(line): return line is Array and line.size() == WIDTH):
+		revealed = new_revealed.duplicate(true)
+	else:
+		revealed.clear()
+		for row in range(HEIGHT):
+			var visibility_line: Array = []
+			visibility_line.resize(WIDTH)
+			visibility_line.fill(true)
+			revealed.append(visibility_line)
 	return true

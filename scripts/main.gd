@@ -1541,7 +1541,7 @@ func _input(event: InputEvent) -> void:
 		if absf(point.y - catalog_drag_start.y) > 8.0 * render_scale:
 			catalog_drag_moved = true
 		catalog_scroll.scroll_vertical = clampi(catalog_scroll.scroll_vertical - roundi(dy), 0, int(catalog_scroll.get_v_scroll_bar().max_value))
-			get_viewport().set_input_as_handled()
+		get_viewport().set_input_as_handled()
 		catalog_drag_last = point
 		return
 	if released:

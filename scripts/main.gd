@@ -79,11 +79,13 @@ var quality_legend: PanelContainer
 var state_button: Button
 var transit_button: Button
 var transit_visuals: Node3D
+var stop_candidate_visuals: Node3D
 var transit_signature: String = ""
 var transit_stats: Label
 var stop_candidate: int = 0
 var placing_stop: bool = false
 var moving_stop_index: int = -1
+var selected_stop_index: int = -1
 var territory_tool: String = "clear"
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
@@ -494,6 +496,9 @@ func build_world() -> void:
 	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
 	transit_visuals = Node3D.new()
 	world.add_child(transit_visuals)
+	stop_candidate_visuals = Node3D.new()
+	stop_candidate_visuals.name = "StopCandidates"
+	world.add_child(stop_candidate_visuals)
 	highlights = Node3D.new()
 	world.add_child(highlights)
 
@@ -590,15 +595,34 @@ func redraw_territory() -> void:
 		for col in range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1):
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
-			var color := Color("607e4c") if state == "forest" else (Color("9fbd77") if state in ["free", "occupied"] else Color("666e72"))
+			var color := Color("607e4c") if state == "forest" else Color("9fbd77")
 			Art.box(tile_visuals, center + Vector3(0, 0.045, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.08, 0.09, TerritoryGrid.CELL_SIZE - 0.08), color)
 			if state == "forest":
 				Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9, true, row * 53 + col)
 			elif state == "road":
-				var horizontal: bool = game.territory.state_at(col - 1, row) == "road" or game.territory.state_at(col + 1, row) == "road"
-				var vertical: bool = game.territory.state_at(col, row - 1) == "road" or game.territory.state_at(col, row + 1) == "road"
-				if horizontal != vertical:
-					Art.box(tile_visuals, center + Vector3(0, 0.1, 0), Vector3(1.0, 0.025, 0.16) if horizontal else Vector3(0.16, 0.025, 1.0), Color("d1d1c5"))
+				# Asphalt top is y=0.18, matching the legacy road surface exactly.
+				Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, TerritoryGrid.CELL_SIZE - 0.04), Color("777d80"))
+				var links: Array[Vector2i] = []
+				for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+					if game.territory.state_at(col + offset.x, row + offset.y) == "road":
+						links.append(offset)
+				var horizontal: bool = Vector2i.LEFT in links or Vector2i.RIGHT in links
+				var vertical: bool = Vector2i.UP in links or Vector2i.DOWN in links
+				if horizontal and not vertical:
+					Art.box(tile_visuals, center + Vector3(0, 0.185, 0), Vector3(3.4, 0.012, 0.055), Color("d1d1c5"))
+				elif vertical and not horizontal:
+					Art.box(tile_visuals, center + Vector3(0, 0.185, 0), Vector3(0.055, 0.012, 3.4), Color("d1d1c5"))
+				if links.size() >= 3:
+					for offset: Vector2i in links:
+						for stripe in range(3):
+							var distance := 1.15 + stripe * 0.62
+							var stripe_center := center + Vector3(-offset.x * distance, 0.205, -offset.y * distance)
+							var stripe_size := Vector3(0.16, 0.018, 3.8) if offset.x != 0 else Vector3(3.8, 0.018, 0.16)
+							Art.box(tile_visuals, stripe_center, stripe_size, Color("e4e1d0"))
+					var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
+					road_light.set_meta("expansion_intersection", true)
+					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
+					road_light.interaction_area.collision_layer = 0
 	for entry: Dictionary in game.territory.buildings:
 		if entry.row < TerritoryGrid.EXPANSION_ROWS.x or entry.row > TerritoryGrid.EXPANSION_ROWS.y:
 			continue
@@ -682,6 +706,16 @@ func map_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton and not event is InputEventScreenTouch:
 		return
 	var point: Vector2 = event.position / viewport_container.stretch_shrink
+	if placing_stop:
+		var candidate_row := tapped_stop_candidate(point)
+		if candidate_row >= 0:
+			confirm_stop(candidate_row)
+			return
+	if selection_kind not in ["territory", "stop_place"]:
+		var tapped_stop := tapped_existing_stop(point)
+		if tapped_stop >= 0:
+			open_stop_card(tapped_stop)
+			return
 	for identifier in game.fires:
 		var marker: Sprite3D = fire_markers.get(identifier)
 		if marker != null and marker.visible and camera.unproject_position(marker.position).distance_to(point) < 42.0 * render_scale / viewport_container.stretch_shrink:
@@ -693,6 +727,8 @@ func map_input(event: InputEvent) -> void:
 		if not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
 			select_problem(kind)
 			return
+	if selection_kind != "territory" and select_projected_building(point):
+		return
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
 		return
@@ -739,6 +775,44 @@ func map_input(event: InputEvent) -> void:
 	var entry: Dictionary = game.territory.building_at(cell.x, cell.y)
 	if not entry.is_empty() and not entry.has("legacy_plot"):
 		select_grid_house(entry.instance_id)
+
+func select_projected_building(point: Vector2) -> bool:
+	var best_score := INF
+	var legacy_hit := -1
+	for index in range(game.buildings.size()):
+		if game.buildings[index] == "empty":
+			continue
+		var center: Vector3 = map_position(game.plot_position(index))
+		var corners := PackedVector2Array()
+		for offset in [Vector2(-5.0, -5.0), Vector2(5.0, -5.0), Vector2(5.0, 5.0), Vector2(-5.0, 5.0)]:
+			corners.append(camera.unproject_position(center + Vector3(offset.x, 0.2, offset.y)))
+		if Geometry2D.is_point_in_polygon(point, corners):
+			var score: float = camera.unproject_position(center + Vector3(0, 0.2, 0)).distance_squared_to(point)
+			if score < best_score:
+				best_score = score
+				legacy_hit = index
+	if legacy_hit >= 0:
+		select_plot(legacy_hit)
+		return true
+	var grid_hit: String = ""
+	for entry: Dictionary in game.territory.buildings:
+		if entry.has("legacy_plot"):
+			continue
+		var center: Vector3 = game.territory.building_center(entry)
+		var half_x: float = float(entry.width) * TerritoryGrid.CELL_SIZE / 2
+		var half_z: float = float(entry.height) * TerritoryGrid.CELL_SIZE / 2
+		var corners := PackedVector2Array()
+		for offset in [Vector2(-half_x, -half_z), Vector2(half_x, -half_z), Vector2(half_x, half_z), Vector2(-half_x, half_z)]:
+			corners.append(camera.unproject_position(center + Vector3(offset.x, 0.2, offset.y)))
+		if Geometry2D.is_point_in_polygon(point, corners):
+			var score: float = camera.unproject_position(center + Vector3(0, 0.2, 0)).distance_squared_to(point)
+			if score < best_score:
+				best_score = score
+				grid_hit = entry.instance_id
+	if grid_hit != "":
+		select_grid_house(grid_hit)
+		return true
+	return false
 
 func select_grid_house(identifier: String) -> void:
 	grid_selected_id = identifier
@@ -828,19 +902,24 @@ func select_territory_cell(cell: Vector2i) -> void:
 	log_territory_probe()
 
 func build_territory_sheet() -> void:
-	action_height = 380
+	action_height = 420
 	header(tr_text("Освоение территории", "Expand the city"))
 	for tool in ["clear", "road", "house"]:
 		var title := tr_text("Расчистить", "Clear") if tool == "clear" else (tr_text("Дорога", "Road") if tool == "road" else tr_text("Дом", "House"))
 		var choice := button(mode_switcher, title, set_territory_tool.bind(tool))
 		choice.custom_minimum_size.y = 72
-		choice.add_theme_font_size_override("font_size", 19)
+		choice.add_theme_font_size_override("font_size", 16)
 		if territory_tool == tool:
 			choice.add_theme_stylebox_override("normal", style(Color("d6eafa"), 12, Color("aad2ee")))
-	var note := label(20, sheet_column, tr_text("Выберите клетку на карте, проверьте контур и подтвердите. Дом занимает 2×2 клетки.", "Select a map cell, check the outline, then confirm. A home occupies 2×2 cells."))
+	var note := label(19, sheet_column, tr_text("Порядок: расчистить лес → соединить дорогу → выбрать дом. Лес тёмно-зелёный, свободная земля светлая.", "Order: clear forest → connect a road → choose a home. Forest is dark green; cleared land is light green."))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var reason := territory_reason()
+	var cell_state: String = game.territory.state_at(territory_cell.x, territory_cell.y) if territory_cell.x >= 0 else "outside"
+	var cell_name: String = str({"forest": tr_text("Лес", "Forest"), "free": tr_text("Свободная земля", "Free land"), "road": tr_text("Дорога", "Road"), "occupied": tr_text("Занято", "Occupied"), "outside": tr_text("Клетка не выбрана", "No cell selected")}.get(cell_state, tr_text("Недоступно", "Unavailable")))
+	var cell_status := label(18, sheet_column, tr_text("Выбрано: ", "Selected: ") + cell_name)
+	cell_status.name = "TerrainCellStatus"
 	var hint := label(20, sheet_column, placement_hint(reason))
+	hint.name = "TerrainPlacementHint"
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_color_override("font_color", Color("41875a") if reason == "" else INK)
 	var cost := 5 if territory_tool == "clear" else (12 if territory_tool == "road" else Catalog.cost("house"))
@@ -868,7 +947,11 @@ func placement_hint(reason: String) -> String:
 		"clear_first": return tr_text("Сначала расчистите весь отмеченный участок.", "Clear the entire highlighted footprint first.")
 		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
 		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
-	return tr_text("Можно разместить. Дорога и обратный путь доступны.", "Ready to place. Road access and a return path are available.") if territory_tool != "clear" else tr_text("Дерево будет убрано, клетка освободится.", "The tree will be removed, freeing the cell.")
+	if territory_tool == "clear":
+		return tr_text("Расчистка стоит 5. Для дома очистите все клетки его контура 2×2.", "Clear for 5. Clear all four cells in the 2×2 home footprint.")
+	if territory_tool == "road":
+		return tr_text("Дорога стоит 12 за клетку. Начните у существующей дороги; поворот можно сделать следующей клеткой.", "Road costs 12 per tile. Start beside an existing road; add a turn with the next tile.")
+	return tr_text("Дом занимает 2×2 клетки и стоит %d. Разместите его рядом с соединённой дорогой.", "A home uses 2×2 cells and costs %d. Place it next to a connected road.") % Catalog.cost("house")
 
 func set_territory_tool(tool: String) -> void:
 	territory_tool = tool
@@ -984,6 +1067,10 @@ func build_sheet() -> void:
 		build_grid_upgrade_sheet()
 	elif selection_kind == "transit":
 		build_transit_sheet()
+	elif selection_kind == "stop":
+		build_stop_sheet()
+	elif selection_kind == "stop_place":
+		build_stop_placement_sheet()
 	elif selection_kind in ["signal", "leak"]:
 		action_height = 500
 		header(t("leak_title") if selection_kind == "leak" else t("signal_title"), "pipe_white")
@@ -1104,6 +1191,7 @@ func influence_targets(index: int, kind: String) -> Array[Dictionary]:
 	return result
 
 func update_preview() -> void:
+	clear_children(stop_candidate_visuals)
 	# Любой выход из предпросмотра восстанавливает реальную модель.
 	for object in territory_visuals.get_children():
 		if object.has_meta("grid_instance_id"):
@@ -1150,18 +1238,23 @@ func update_preview() -> void:
 				edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
 		return
 	if placing_stop:
-		var point: Vector3 = game.transit.stop_position(stop_candidate)
-		for i in range(4):
-			var first: Vector3 = point + Vector3(cos(PI * i / 2) * game.Transit.WALK_RADIUS, 0.3, sin(PI * i / 2) * game.Transit.WALK_RADIUS)
-			var second: Vector3 = point + Vector3(cos(PI * (i + 1) / 2) * game.Transit.WALK_RADIUS, 0.3, sin(PI * (i + 1) / 2) * game.Transit.WALK_RADIUS)
-			var length := first.distance_to(second)
-			var edge := Art.box(highlights, (first + second) / 2, Vector3(0.18, 0.08, length), Color("8ed6f8"))
-			edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
-		for entry: Dictionary in game.all_buildings():
-			if entry.type_id == "house" and game.transit.in_range(entry.position, stop_candidate):
-				outline(entry.position, Color("a7f384"))
-		preview = create_object(world, "bus_stop", "stop_preview", point)
-		preview.interaction_area.collision_layer = 0
+		for row in range(6):
+			if not stop_candidate_valid(row):
+				continue
+			var point: Vector3 = game.transit.stop_position(row)
+			var candidate := create_object(stop_candidate_visuals, "bus_stop", "stop_candidate_%d" % row, point)
+			candidate.interaction_area.collision_layer = 0
+			make_ghost(candidate, Color("48b8ed"))
+			var badge := Label3D.new()
+			badge.name = "ValidStopBadge"
+			badge.text = "●"
+			badge.font_size = 64
+			badge.outline_size = 12
+			badge.modulate = Color("35a8e5")
+			badge.position = Vector3(0, 4.6, 0)
+			badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			badge.no_depth_test = true
+			candidate.add_child(badge)
 		return
 	if selection_kind == "upgrade" and selected >= 0:
 		var point := map_position(game.plot_position(selected))
@@ -1283,6 +1376,11 @@ func _process(delta: float) -> void:
 	for marker_name in ["LeakMarker", "SignalMarker"]:
 		var marker := world.get_node(marker_name) as Node3D
 		marker.position.y = 5.2 + sin(elapsed * 2) * 0.15
+	for road_signal in territory_visuals.get_children():
+		if not road_signal.has_meta("expansion_intersection"):
+			continue
+		var offset: float = road_signal.get_meta("signal_offset", 0.0)
+		road_signal.set_traffic_state(scenery.traffic_controller.phase("H", elapsed + offset), scenery.traffic_controller.phase("V", elapsed + offset))
 	update_fire_visuals()
 	save_clock += delta
 	if save_clock > 2:
@@ -1290,7 +1388,13 @@ func _process(delta: float) -> void:
 		save_clock = 0
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if placing_stop:
+			cancel_stop_placement()
+		else:
+			close_sheet()
+		get_viewport().set_input_as_handled()
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
 		game.save_game()
 		if audio != null:
 			audio.shutdown()
@@ -1666,7 +1770,44 @@ func open_transit() -> void:
 	selected = -1
 	placing_stop = false
 	moving_stop_index = -1
+	selected_stop_index = -1
 	refresh()
+
+func open_stop_card(index: int) -> void:
+	if index < 0 or index >= game.transit.stops.size():
+		return
+	selection_kind = "stop"
+	selected_stop_index = index
+	selected = -1
+	placing_stop = false
+	moving_stop_index = -1
+	active_tab = "district"
+	refresh()
+
+func tapped_existing_stop(point: Vector2) -> int:
+	for index in range(game.transit.stops.size()):
+		var marker := camera.unproject_position(game.transit.stop_position(game.transit.stops[index]) + Vector3(0, 1.2, 0))
+		if marker.distance_to(point) <= stop_tap_radius():
+			return index
+	return -1
+
+func tapped_stop_candidate(point: Vector2) -> int:
+	for row in range(6):
+		if not stop_candidate_valid(row):
+			continue
+		var marker := camera.unproject_position(game.transit.stop_position(row) + Vector3(0, 1.6, 0))
+		if marker.distance_to(point) <= stop_tap_radius():
+			return row
+	return -1
+
+func stop_tap_radius() -> float:
+	return 46.0 * render_scale / viewport_container.stretch_shrink
+
+func stop_candidate_valid(row: int) -> bool:
+	if row < 0 or row >= 6 or row in game.transit.stops:
+		return false
+	var road: Vector2i = game.territory.nearest_road(game.transit.stop_position(row))
+	return not game.territory.path_to_city(road.x, road.y).is_empty()
 
 func build_transit_sheet() -> void:
 	action_height = 420
@@ -1680,19 +1821,7 @@ func build_transit_sheet() -> void:
 		locked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		return
 	if game.transit.stops.size() < 2:
-		if placing_stop:
-			var explanation := label(21, sheet_column, tr_text("Нажмите у дороги на карте. Контур — пешая доступность, зелёные рамки — охваченные дома.", "Tap near the road. The outline shows walking range; green borders mark covered homes."))
-			explanation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			var row := hbox(sheet_column)
-			button(row, "‹", change_stop_candidate.bind(-1))
-			label(22, row, tr_text("Место ", "Site ") + str(stop_candidate + 1))
-			button(row, "›", change_stop_candidate.bind(1))
-			var moving := moving_stop_index >= 0
-			var confirm := button(sheet_column, tr_text("Перенести сюда", "Move stop here") if moving else tr_text("Поставить остановку · 40", "Place stop · 40"), confirm_stop, true)
-			confirm.disabled = (stop_candidate in game.transit.stops and (not moving or game.transit.stops[moving_stop_index] != stop_candidate)) or (not moving and game.budget < 40)
-			button(sheet_column, t("cancel"), open_transit)
-		else:
-			button(sheet_column, tr_text("Разместить остановку · 40", "Place a stop · 40"), begin_stop_placement, true)
+		button(sheet_column, tr_text("Разместить остановку · 40", "Place a stop · 40"), begin_stop_placement, true)
 	else:
 		for index in range(game.transit.stops.size()):
 			var stop_row := hbox(sheet_column)
@@ -1700,14 +1829,34 @@ func build_transit_sheet() -> void:
 			button(stop_row, tr_text("Перенести", "Move"), begin_move_stop.bind(index))
 		var launch := button(sheet_column, tr_text("Маршрут работает", "Route running") if game.transit.active else tr_text("Запустить автобус · 60", "Start bus · 60"), launch_transit, true)
 		launch.disabled = game.transit.active or game.budget < 60
-	if placing_stop:
-		return
 	var note := label(20, sheet_column, tr_text("Один маршрут по западной улице. Остановки парные; автобус делает рейсы между ними. Полезна связь жилья с депо (работа) или кафе.", "One route on the western street, with paired stops and a shuttle bus. Connect homes to the depot (jobs) or a café."))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+func build_stop_sheet() -> void:
+	action_height = 290
+	if selected_stop_index < 0 or selected_stop_index >= game.transit.stops.size():
+		selection_kind = "transit"
+		build_transit_sheet()
+		return
+	header(tr_text("Остановка", "Bus stop"), "pin")
+	label(21, sheet_column, tr_text("Остановка %d · охват маршрута: %d жителей", "Stop %d · route coverage: %d residents") % [selected_stop_index + 1, game.transit_metrics().covered])
+	button(sheet_column, tr_text("Перенести", "Move stop"), begin_move_stop.bind(selected_stop_index), true).name = "MoveStopButton"
+	button(sheet_column, t("cancel"), open_transit).name = "CloseStopButton"
+
+func build_stop_placement_sheet() -> void:
+	action_height = 265
+	header(tr_text("Перенос остановки", "Move bus stop"), "pin")
+	var instruction := label(23, sheet_column, tr_text("Выберите новое место у дороги", "Choose a new place by the road"), true)
+	instruction.name = "MoveStopInstruction"
+	instruction.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label(19, sheet_column, tr_text("Старая остановка и маршрут останутся до выбора места.", "The old stop and route stay in place until you choose a location."))
+	button(sheet_column, tr_text("Отмена", "Cancel"), cancel_stop_placement).name = "CancelStopPlacement"
 
 func begin_stop_placement() -> void:
 	placing_stop = true
 	moving_stop_index = -1
+	selected_stop_index = -1
+	selection_kind = "stop_place"
 	stop_candidate = 0 if game.transit.stops.is_empty() else 4
 	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
 	refresh()
@@ -1717,6 +1866,8 @@ func begin_move_stop(index: int) -> void:
 		return
 	placing_stop = true
 	moving_stop_index = index
+	selected_stop_index = index
+	selection_kind = "stop_place"
 	stop_candidate = game.transit.stops[index]
 	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
 	refresh()
@@ -1726,14 +1877,28 @@ func change_stop_candidate(delta: int) -> void:
 	set_camera_focus(game.transit.stop_position(stop_candidate) + Vector3(7, 0, 7))
 	refresh()
 
-func confirm_stop() -> void:
-	var success: bool = game.move_stop(moving_stop_index, stop_candidate) if moving_stop_index >= 0 else game.place_stop(stop_candidate)
+func confirm_stop(row: int = -1) -> void:
+	if row < 0:
+		row = stop_candidate
+	if not stop_candidate_valid(row):
+		audio.play_ui("deny")
+		return
+	var success: bool = game.move_stop(moving_stop_index, row) if moving_stop_index >= 0 else game.place_stop(row)
 	if success:
 		placing_stop = false
 		moving_stop_index = -1
+		selected_stop_index = -1
+		selection_kind = "transit"
+		transit_signature = ""
 		audio.play_ui("success")
 	else:
 		audio.play_ui("deny")
+	refresh()
+
+func cancel_stop_placement() -> void:
+	placing_stop = false
+	moving_stop_index = -1
+	selection_kind = "stop" if selected_stop_index >= 0 else "transit"
 	refresh()
 
 func launch_transit() -> void:

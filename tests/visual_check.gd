@@ -84,7 +84,7 @@ func capture() -> void:
 		scene.selection_kind = "plot"
 		scene.quality_mode = mode == "condition"
 		scene.set_camera_focus(scene.map_position(scene.game.plot_position(16)) + Vector3(7, 0, 7))
-	if mode in ["transit", "stop", "transit_en"]:
+	if mode in ["transit", "stop", "stop_move", "transit_en"]:
 		scene.game.leak_fixed = true
 		scene.game.signal_fixed = true
 		scene.game.buildings[9] = "cafe"
@@ -95,6 +95,10 @@ func capture() -> void:
 		if mode == "stop":
 			scene.placing_stop = true
 			scene.stop_candidate = 4
+		elif mode == "stop_move":
+			scene.game.place_stop(4)
+			scene.open_stop_card(1)
+			scene.begin_move_stop(1)
 		else:
 			scene.game.place_stop(4)
 			scene.game.start_transit()

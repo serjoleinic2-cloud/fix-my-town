@@ -127,7 +127,7 @@ const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "ser
 const CATALOG_ITEMS := {
 	"residential": ["house"],
 	"commercial": ["cafe"],
-	"infrastructure": ["clear", "road"],
+	"infrastructure": ["clear"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"landscaping": ["park", "lawn", "flower_bed", "street_tree", "bush"]
 }

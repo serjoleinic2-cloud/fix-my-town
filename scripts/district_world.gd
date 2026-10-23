@@ -33,11 +33,22 @@ func build() -> void:
 		Art.box(self, Vector3(34, 0.8, z), Vector3(0.12, 1.3, 0.12), Color("687776"))
 	Art.box(self, Vector3(34, 1.3, 0), Vector3(0.09, 0.09, 148), Color("687776"))
 	for z in [-43.2, -28.8, -14.4, 0, 14.4, 28.8, 43.2]:
-		Art.box(self, Vector3(-17, 0.05, z), Vector3(98, 0.13, 5.7), Color("b6b2a3"))
-		Art.box(self, Vector3(-17, 0.13, z), Vector3(98, 0.08, 4.2), Color("777d80"))
+		# Keep the legacy district on the same compact profile as expansion
+		# streets: 2.8 m asphalt with two 0.9 m sidewalks.
+		Art.box(self, Vector3(-17, 0.14, z), Vector3(98, 0.08, 2.8), Color("777d80"))
+		for side in [-1.0, 1.0]:
+			Art.box(self, Vector3(-17, 0.16, z + side * 1.85), Vector3(98, 0.1, 0.9), Color("b6b2a3"))
 	for x in [-57.6, -43.2, -28.8, -14.4, 0, 14.4, 28.8]:
-		Art.box(self, Vector3(x, 0.055, 0), Vector3(5.7, 0.14, 96), Color("b6b2a3"))
-		Art.box(self, Vector3(x, 0.14, 0), Vector3(4.2, 0.08, 96), Color("777d80"))
+		Art.box(self, Vector3(x, 0.14, 0), Vector3(2.8, 0.08, 96), Color("777d80"))
+		for side in [-1.0, 1.0]:
+			Art.box(self, Vector3(x + side * 1.85, 0.16, 0), Vector3(0.9, 0.1, 96), Color("b6b2a3"))
+	# Broken centre markings use the same short dashes as expansion roads.
+	for z in [-43.2, -28.8, -14.4, 0, 14.4, 28.8, 43.2]:
+		for x in [-50.4, -36.0, -21.6, -7.2, 7.2, 21.6]:
+			Art.box(self, Vector3(x, 0.205, z), Vector3(0.62, 0.018, 0.055), Color("e4e1d0"))
+	for x in [-57.6, -43.2, -28.8, -14.4, 0, 14.4, 28.8]:
+		for z in [-36.0, -21.6, -7.2, 7.2, 21.6, 36.0]:
+			Art.box(self, Vector3(x, 0.205, z), Vector3(0.055, 0.018, 0.62), Color("e4e1d0"))
 	# Р Р°Р·РјРµС‚РєР° РЅРµ РїСЂРѕС…РѕРґРёС‚ С‡РµСЂРµР· РїРµСЂРµРєСЂС‘СЃС‚РєРё.
 	for z in [-43.2, -28.8, -14.4, 0, 14.4, 28.8, 43.2]:
 		for x in [-50.4, -36, -21.6, -7.2, 7.2, 21.6]:

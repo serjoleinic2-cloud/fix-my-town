@@ -504,7 +504,9 @@ func _start_construction(fields: Dictionary) -> bool:
 	var road_cell: Vector2i = territory.nearest_road(site)
 	var truck_target := territory.cell_world(road_cell.x, road_cell.y) if road_cell.x >= 0 else site
 	var truck_start_cell := road_cell
-	var access_path := territory.path_to_city(road_cell.x, road_cell.y) if road_cell.x >= 0 else []
+	var access_path: Array[Vector2i] = []
+	if road_cell.x >= 0:
+		access_path = territory.path_to_city(road_cell.x, road_cell.y)
 	if access_path.size() > 1:
 		truck_start_cell = access_path[access_path.size() - 2]
 	elif road_cell.x >= 0:

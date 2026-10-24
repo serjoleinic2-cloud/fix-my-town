@@ -59,22 +59,26 @@ var district_tasks: Array = [
 ]
 var save_path: String = SAVE_PATH
 
-func _init() -> void:
+func _init(legacy_test_fixture: bool = false) -> void:
 	incident_rng.seed = incident_seed
+	if not legacy_test_fixture:
+		return
 	for i in range(24):
 		levels.append(1)
 		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
 	buildings[2] = "depot"
-	territory = TerritoryGrid.new(buildings)
-	# The default simulation fixture keeps the legacy district for older saves
-	# and scenario tests. Main explicitly resets a new game to natural terrain.
+	territory = TerritoryGrid.new()
+	territory.initialize_legacy_road_network()
+	territory.migrate_legacy(buildings)
+	# Legacy fixture creation is explicitly requested by automated scenario tests;
+	# normal app construction and New Game use the empty default.
 
 func start_empty_city() -> void:
-	# A clean sandbox for testing the first placement decisions. Keep the
-	# terrain grid and roads, but remove every legacy building and incident.
+	# A clean sandbox for testing the first placement decisions. Remove every
+	# legacy plot, road, building, vehicle job, and incident.
 	budget = 0
 	empty_city_mode = true
-	city_layout_version = 2
+	city_layout_version = 3
 	subsidy_debt = 0
 	subsidy_threshold = 0
 	subsidy_installment = 0
@@ -87,14 +91,9 @@ func start_empty_city() -> void:
 	for i in range(24):
 		buildings.append("empty")
 		levels.append(1)
-	territory = TerritoryGrid.new(buildings)
-	# A new city starts with terrain only; no legacy road grid survives the reset.
-	for row in range(TerritoryGrid.HEIGHT):
-		for col in range(TerritoryGrid.WIDTH):
-			territory.cells[row][col] = "forest"
-	territory.reset_visibility()
+	territory = TerritoryGrid.new()
 	# The player sees only a small starting pocket; the rest remains in white fog.
-	territory.reveal_area(12, 20, 3)
+	territory.initialize_natural_terrain(12, 20, 3)
 	incident_seed = 48291
 	incident_rng.seed = incident_seed
 	income_clock = 0.0
@@ -1466,7 +1465,10 @@ func check_complete() -> void:
 	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
 
 func save_game() -> void:
-	territory.sync_legacy(buildings)
+	# Fixed-plot compatibility sync is forbidden for clean-grid cities: the
+	# 24 empty legacy slots would otherwise recreate their old free pads.
+	if not empty_city_mode:
+		territory.sync_legacy(buildings)
 	var points: Array = []
 	for point: Vector3 in route:
 		points.append([point.x, point.y, point.z])
@@ -1522,7 +1524,7 @@ func load_game() -> bool:
 			return false
 	if data.has("empty_city_mode") and typeof(data.empty_city_mode) != TYPE_BOOL:
 		return false
-	if data.has("city_layout_version") and (not (data.city_layout_version is int or data.city_layout_version is float) or not is_finite(float(data.city_layout_version)) or int(data.city_layout_version) != float(data.city_layout_version) or int(data.city_layout_version) < 0 or int(data.city_layout_version) > 2):
+	if data.has("city_layout_version") and (not (data.city_layout_version is int or data.city_layout_version is float) or not is_finite(float(data.city_layout_version)) or int(data.city_layout_version) != float(data.city_layout_version) or int(data.city_layout_version) < 0 or int(data.city_layout_version) > 3):
 		return false
 	var loaded_subsidy_debt := int(data.get("subsidy_debt", 0))
 	var loaded_subsidy_threshold := int(data.get("subsidy_threshold", 0))
@@ -1592,9 +1594,13 @@ func load_game() -> bool:
 	if district_data != null:
 		if not loaded_territory.restore(district_data):
 			return false
+		if not bool(data.get("empty_city_mode", false)):
+			loaded_territory.sync_legacy(stored)
 	else:
-		loaded_territory = TerritoryGrid.new(stored)
-	loaded_territory.sync_legacy(stored)
+		# The only production migration point: saves written before the territory
+		# grid existed. New Game never calls either legacy conversion method.
+		loaded_territory.initialize_legacy_road_network()
+		loaded_territory.migrate_legacy(stored)
 	for stop in loaded_transit.stops:
 		if stop is Dictionary:
 			var cell := Vector2i(int(stop.col), int(stop.row))

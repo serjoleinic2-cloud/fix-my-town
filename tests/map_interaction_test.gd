@@ -42,7 +42,7 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	viewport.add_child(scene)
 	scene.set_process(false)
-	scene.game = Simulation.new()
+	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://map_interaction_test.json"
 	scene.game.empty_city_mode = false
 	scene.scenery.visible = true

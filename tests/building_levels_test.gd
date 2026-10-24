@@ -10,7 +10,7 @@ func check(condition: bool, message: String) -> void:
 func _initialize() -> void:
 	call_deferred("run")
 func run() -> void:
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://building_levels_test.json"
 	game.budget = 5000
 	game.leak_fixed = true
@@ -43,7 +43,7 @@ func run() -> void:
 	var park_income: int = game.building_income(14)
 	check(game.upgrade(14) and game.upgrade(14) and game.building_income(14) < park_income, "Park raises maintenance with level")
 	game.save_game()
-	var loaded := Simulation.new()
+	var loaded := Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game() and loaded.levels == game.levels and loaded.metrics() == game.metrics(), "All levels and characteristics survive save/load")
 	predicted = loaded.project_change(16, true)
@@ -57,7 +57,7 @@ func run() -> void:
 	loaded.budget = 0
 	check(not loaded.upgrade(16) and loaded.building_level(16) == 1, "Unaffordable improvement is safe")
 	# Удаление последней полезной точки обнуляет спрос, не закрывает достижение.
-	var route := Simulation.new()
+	var route := Simulation.new(true)
 	route.save_path = "user://building_route_test.json"
 	route.buildings.fill("empty")
 	route.levels.fill(1)
@@ -98,7 +98,7 @@ func run() -> void:
 		scene.game.save_path = "user://test_startup.json"
 		viewport.add_child(scene)
 		scene.set_process(false)
-		scene.game = Simulation.new()
+		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://levels_ui_test.json"
 		scene.game.budget = 5000
 		scene.game.empty_city_mode = false
@@ -149,7 +149,7 @@ func run() -> void:
 				scene.confirm_upgrade(16, kind, 1)
 				check(scene.game.budget == money and scene.game.building_level(16) == 2, "Stale confirmation cannot charge twice")
 				scene.game.save_game()
-				var restored := Simulation.new()
+				var restored := Simulation.new(true)
 				restored.save_path = scene.game.save_path
 				check(restored.load_game(), "UI upgrade save loads")
 				scene.game = restored

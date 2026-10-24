@@ -14,7 +14,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://expansion_scenario_test.json"
 	game.budget = 5000
 	game.leak_fixed = true
@@ -71,7 +71,7 @@ func run() -> void:
 		var phase: String = game.job_phase
 		if not saved_phases.has(phase):
 			game.save_game()
-			var loaded := Simulation.new()
+			var loaded := Simulation.new(true)
 			loaded.save_path = game.save_path
 			check(loaded.load_game(), "Reload service phase: " + phase)
 			check(loaded.target_instance_id == far_id and loaded.vehicle == game.vehicle and loaded.route == game.route, "Target and exact route persist: " + phase)
@@ -92,7 +92,7 @@ func run() -> void:
 	check(saved_phases.has("travel") and saved_phases.has("repair") and saved_phases.has("return"), "All service phases have survived reload")
 	check(game.territory.building_by_id(far_id).get("inspected", false), "Inspection result persists")
 	game.save_game()
-	var final := Simulation.new()
+	var final := Simulation.new(true)
 	final.save_path = game.save_path
 	check(final.load_game() and final.metrics() == game.metrics(), "City economy, quality, route demand and levels reload consistently")
 	check(final.territory.building_by_id(near_id).get("level", 1) == 2, "Expansion visual level survives restart")
@@ -108,7 +108,7 @@ func run() -> void:
 	check(final.territory.state_at(15, 19) == "occupied" and not final.build_grid_road(15, 19), "Service footprint cannot be overbuilt with a road")
 	check(not final.build_grid_house(15, 19), "Service footprint cannot be overbuilt with a house")
 	final.save_game()
-	var service_reload := Simulation.new()
+	var service_reload := Simulation.new(true)
 	service_reload.save_path = game.save_path
 	check(service_reload.load_game() and service_reload.territory.building_by_id(station.instance_id).type_id == "fire_station", "Player-built service location survives save and load")
 	traffic.queue_free()

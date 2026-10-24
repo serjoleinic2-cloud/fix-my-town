@@ -13,7 +13,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://territory_grid_test.json"
 	var old_buildings: int = game.buildings.count("house") + game.buildings.count("depot")
 	var old_population: int = game.population()
@@ -31,7 +31,7 @@ func run() -> void:
 	game.save_game()
 	var grid_roundtrip := Grid.new()
 	check(grid_roundtrip.restore(game.territory.data()), "Territory grid round-trips its own data")
-	var loaded := Simulation.new()
+	var loaded := Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game(), "Grid city save loads")
 	check(loaded.territory.state_at(14, 21) == "road" and loaded.territory.buildings.any(func(entry): return entry.type_id == "house" and entry.col == 15 and entry.row == 21), "Road and building survive reload")

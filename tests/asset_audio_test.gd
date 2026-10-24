@@ -18,11 +18,12 @@ func run() -> void:
 	root.add_child(scene)
 	await process_frame
 	scene.set_process(false)
-	scene.game = Simulation.new()
+	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://asset_test.json"
 	scene.audio.settings_path = "user://audio_test.json"
 	scene.refresh()
 	check(scene.game.dispatch("leak"), "Dispatch before replacement")
+	scene.refresh()
 	scene.game.tick(1)
 	scene.car.position = scene.map_position(scene.game.vehicle)
 	var before_budget: int = scene.game.budget
@@ -49,7 +50,7 @@ func run() -> void:
 	check(scene.car.visual_root.get_child(0) == alternate_visual, "UI refresh must not reset model")
 	check(scene.game.budget == before_budget and scene.game.vehicle == before_vehicle and scene.game.route == before_route, "Replacement must not change gameplay")
 	scene.game.save_game()
-	var loaded = Simulation.new()
+	var loaded = Simulation.new(true)
 	loaded.save_path = scene.game.save_path
 	check(loaded.load_game(), "Load after GLB replacement")
 	check(loaded.job == "leak" and loaded.target_type_id() == "water_leak", "Permanent job target")
@@ -98,4 +99,3 @@ func run() -> void:
 	await create_timer(0.15).timeout
 	print("ASSET + AUDIO CHECKS: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
-

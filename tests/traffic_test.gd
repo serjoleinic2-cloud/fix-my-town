@@ -178,7 +178,7 @@ func run() -> void:
 	check(traffic.intersections.size() == 49, "Integrated scenario retains all intersections")
 	traffic.set_active_count(8)
 	traffic.clock = 0
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://traffic_test.json"
 	for kind in ["signal", "leak"]:
 		check(game.dispatch(kind), "Dispatch integrated scenario")

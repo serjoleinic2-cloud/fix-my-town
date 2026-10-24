@@ -16,14 +16,14 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var legacy_game := Simulation.new()
+	var legacy_game := Simulation.new(true)
 	legacy_game.save_path = "user://legacy_upgrade_work_test.json"
 	legacy_game.budget = 400
 	check(legacy_game.start_legacy_upgrade(16), "Start a legacy-house upgrade worksite")
 	legacy_game.tick(2.25)
 	var legacy_upgrade_progress := legacy_game.construction_progress()
 	legacy_game.save_game()
-	var legacy_resume := Simulation.new()
+	var legacy_resume := Simulation.new(true)
 	legacy_resume.save_path = legacy_game.save_path
 	check(legacy_resume.load_game() and legacy_resume.construction_job.kind == "upgrade_legacy", "Legacy upgrade work restores after restart")
 	check(is_equal_approx(legacy_resume.construction_progress(), legacy_upgrade_progress), "Legacy upgrade progress is restored")
@@ -31,7 +31,7 @@ func run() -> void:
 	check(legacy_resume.building_level(16) == 2 and legacy_resume.construction_job.is_empty(), "Legacy house level changes after the saved work finishes")
 	DirAccess.remove_absolute(legacy_game.save_path)
 
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://construction_work_test.json"
 	game.budget = 2000
 	for cell in [Vector2i(12, 19), Vector2i(13, 19), Vector2i(12, 20), Vector2i(13, 20)]:
@@ -49,7 +49,7 @@ func run() -> void:
 	game.tick(1.6)
 	var first_progress := game.construction_progress()
 	game.save_game()
-	var loaded := Simulation.new()
+	var loaded := Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game() and loaded.construction_job.kind == "build_grid", "In-progress construction is restored")
 	check(is_equal_approx(loaded.construction_progress(), first_progress), "Saved work progress is restored exactly")
@@ -70,7 +70,7 @@ func run() -> void:
 	loaded.tick(2.0)
 	var upgrade_progress := loaded.construction_progress()
 	loaded.save_game()
-	var upgrade_reload := Simulation.new()
+	var upgrade_reload := Simulation.new(true)
 	upgrade_reload.save_path = loaded.save_path
 	check(upgrade_reload.load_game() and upgrade_reload.construction_job.kind == "upgrade_grid", "Unfinished upgrade restores after a restart")
 	check(is_equal_approx(upgrade_reload.construction_progress(), upgrade_progress), "Upgrade progress survives reload")
@@ -83,7 +83,7 @@ func run() -> void:
 	upgrade_reload.tick(2.5)
 	var demolition_progress := upgrade_reload.construction_progress()
 	upgrade_reload.save_game()
-	var resumed := Simulation.new()
+	var resumed := Simulation.new(true)
 	resumed.save_path = upgrade_reload.save_path
 	check(resumed.load_game() and resumed.construction_job.kind == "demolish_grid", "Unfinished demolition is restored")
 	check(is_equal_approx(resumed.construction_progress(), demolition_progress), "Demolition progress survives reload")

@@ -1,6 +1,7 @@
 extends SceneTree
 
 const Simulation = preload("res://scripts/simulation.gd")
+const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 var failures: int = 0
 
 func check(condition: bool, message: String) -> void:
@@ -20,7 +21,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var game = Simulation.new()
+	var game = Simulation.new(true)
 	game.save_path = "user://test_progress.json"
 	check(game.buildings.size() == 24, "Expected 24 plots")
 	check(game.dispatch("signal"), "Signal dispatch failed")
@@ -29,7 +30,7 @@ func run() -> void:
 	game.tick(2)
 	game.language = "en"
 	game.save_game()
-	var resumed = Simulation.new()
+	var resumed = Simulation.new(true)
 	resumed.save_path = game.save_path
 	check(resumed.load_game(), "Save must load")
 	check(resumed.job == "signal" and resumed.vehicle == game.vehicle, "Active route must resume")
@@ -49,28 +50,28 @@ func run() -> void:
 	check(not resumed.build(-1, "park"), "Reject invalid plot")
 	check(not resumed.build(24, "park"), "Reject invalid plot")
 	check(resumed.placement_bonus(9, "cafe") > resumed.placement_bonus(23, "cafe"), "Location must affect bonus")
-	var loaded = Simulation.new()
+	var loaded = Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game() and loaded.completed and loaded.buildings[3] == "park", "Completed district must persist")
 	loaded.budget = 0
 	check(not loaded.build(7, "cafe"), "Reject unaffordable construction")
-	var slow = Simulation.new()
+	var slow = Simulation.new(true)
 	slow.save_path = "user://test_slow.json"
 	slow.dispatch("leak")
 	var slow_time := finish_job(slow)
-	var fast = Simulation.new()
+	var fast = Simulation.new(true)
 	fast.save_path = "user://test_fast.json"
 	fast.signal_fixed = true
 	fast.dispatch("leak")
 	var fast_time := finish_job(fast)
 	check(slow_time > fast_time + 3, "Broken signal must delay vehicle")
-	var poor = Simulation.new()
+	var poor = Simulation.new(true)
 	poor.save_path = "user://test_poor.json"
 	poor.budget = 0
 	check(not poor.dispatch("leak"), "Reject unaffordable dispatch")
 	poor.tick(12)
 	check(poor.budget == maxi(0, poor.income() - poor.incident_penalty()), "Zero budget recovers only through earned net income")
-	var staged = Simulation.new()
+	var staged = Simulation.new(true)
 	staged.save_path = "user://test_phases.json"
 	staged.dispatch("leak")
 	staged.route_index = staged.route.size()
@@ -78,12 +79,12 @@ func run() -> void:
 	staged.job_phase = "repair"
 	staged.repair_left = 2.0
 	staged.save_game()
-	var phase_resume = Simulation.new()
+	var phase_resume = Simulation.new(true)
 	phase_resume.save_path = staged.save_path
 	check(phase_resume.load_game() and phase_resume.job_phase == "repair" and phase_resume.repair_left == 2.0, "Repair phase must persist")
 	phase_resume.tick(2.1)
 	check(phase_resume.leak_fixed and phase_resume.job_phase == "return", "Repair begins return trip")
-	var return_resume = Simulation.new()
+	var return_resume = Simulation.new(true)
 	return_resume.save_path = staged.save_path
 	check(return_resume.load_game() and return_resume.job_phase == "return", "Return trip must persist")
 	finish_job(return_resume)
@@ -92,27 +93,41 @@ func run() -> void:
 	corrupt.store_string('{"version":1,"buildings":[]}')
 	corrupt.close()
 	check(not game.load_game(), "Reject corrupt save")
-	var old_layout := Simulation.new()
+	var old_layout := Simulation.new(true)
 	old_layout.save_path = "user://test_startup.json"
 	old_layout.save_game()
 	var old_data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(old_layout.save_path))
 	old_data.erase("city_layout_version")
+	old_data.erase("districts")
 	old_data.empty_city_mode = false
 	var old_file := FileAccess.open(old_layout.save_path, FileAccess.WRITE)
 	old_file.store_string(JSON.stringify(old_data))
 	old_file.close()
+	var migrated := Simulation.new()
+	migrated.save_path = "user://test_startup.json"
+	check(migrated.load_game() and not migrated.territory.buildings.is_empty(), "Loading a pre-grid save migrates its legacy plots")
 	var scene = load("res://main.tscn").instantiate()
 	scene.game.save_path = "user://test_startup.json"
 	root.add_child(scene)
 	await process_frame
 	check(scene.game.empty_city_mode and scene.game.budget == 0 and scene.game.income() == 0, "A clean app start opens a zero-budget empty city")
-	check(scene.plots.get_child_count() == 0 and not scene.scenery.visible and not scene.car.visible and not scene.fire_car.visible, "The clean map has no old plots, town geometry, or service vehicle")
-	check(scene.game.district_house_count() == 0 and scene.game.territory.buildings.is_empty() and scene.game.city_layout_version == 2, "An old saved district migrates to a blank natural city exactly once")
+	var no_legacy_cells := true
+	var roads_in_clean_map := 0
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
+			if scene.game.territory.state_at(col, row) != "forest":
+				no_legacy_cells = false
+			if scene.game.territory.state_at(col, row) == "road":
+				roads_in_clean_map += 1
+	check(scene.plots.get_child_count() == 0 and scene.car == null and scene.fire_car == null and scene.leak_effect == null, "The clean map does not create legacy plots, service vehicles, or incident effects")
+	check(scene.world.get_node_or_null("LeakMarker") == null and scene.world.get_node_or_null("SignalMarker") == null and scene.fire_markers.is_empty(), "The clean map does not create incident markers")
+	check(scene.game.district_house_count() == 0 and scene.game.all_buildings().is_empty() and scene.game.territory.buildings.is_empty() and no_legacy_cells and roads_in_clean_map == 0 and scene.game.city_layout_version == 3, "An old saved district migrates to natural terrain without retaining its 24 plots")
+	check(scene.scenery.traffic_controller.vehicles.is_empty() and scene.scenery.traffic_controller.intersections.is_empty() and scene.scenery.get_child_count() == 1, "No traffic vehicles, road signals, or legacy scenery are instantiated on clean start")
 	var subsidy_card := scene.subsidy_dialog.find_child("SubsidyOfferCard", true, false) as Control
 	var subsidy_buttons: Array = scene.subsidy_dialog.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Получить"))
 	check(subsidy_card != null and subsidy_buttons.size() == 2 and subsidy_card.get_global_rect().end.y <= scene.screen.size.y, "The startup subsidy options fit inside the phone screen")
 	# Проверки изолированы от пользовательского сохранения.
-	scene.game = Simulation.new()
+	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://test_ui.json"
 	# This section still exercises the retained legacy interaction layer, while
 	# startup itself is now explicitly verified as an empty natural city.

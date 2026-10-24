@@ -13,14 +13,14 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://transit_quality_test.json"
 	check(not game.place_stop(Vector2i(18, 0)), "Transit waits for completed scenario")
 	check(game.WATER_AFFECTED_HOMES.size() == 3, "Exactly three affected houses")
 	for i in range(24):
 		if game.buildings[i] == "house":
 			check(game.has_water(i) == (i not in game.WATER_AFFECTED_HOMES), "Addressed water supply")
-	var isolated := Simulation.new()
+	var isolated := Simulation.new(true)
 	isolated.buildings.fill("empty")
 	isolated.buildings[8] = "house"
 	isolated.buildings[1] = "house"
@@ -87,7 +87,7 @@ func run() -> void:
 	check(game.transit.trips >= 2 and game.transit.last_delay > 0, "Bus follows its route and waits at the broken traffic signal")
 	check(traffic.vehicles[2].node.visible, "Managed route bus remains visible in traffic")
 	game.save_game()
-	var loaded := Simulation.new()
+	var loaded := Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game(), "Transit save loads")
 	check(loaded.transit.stops == game.transit.stops and loaded.transit.active and loaded.transit.trips == game.transit.trips, "Stops and active route persist")
@@ -119,7 +119,7 @@ func run() -> void:
 		var scene = load("res://main.tscn").instantiate()
 		viewport.add_child(scene)
 		scene.set_process(false)
-		scene.game = Simulation.new()
+		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://transit_ui_test.json"
 		scene.refresh()
 		for i in range(24):

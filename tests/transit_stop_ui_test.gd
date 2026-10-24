@@ -1,6 +1,7 @@
 extends SceneTree
 
 const Simulation = preload("res://scripts/simulation.gd")
+const DistrictWorld = preload("res://scripts/district_world.gd")
 var failures: int = 0
 
 func check(condition: bool, message: String) -> void:
@@ -20,10 +21,16 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	viewport.add_child(scene)
 	scene.set_process(false)
-	scene.game = Simulation.new()
+	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://transit_stop_ui_test.json"
 	scene.game.empty_city_mode = false
-	scene.scenery.visible = true
+	# This is a legacy-traffic UI fixture. Build its streets explicitly; the
+	# normal application scene intentionally starts with no traffic objects.
+	scene.world.remove_child(scene.scenery)
+	scene.scenery.queue_free()
+	scene.scenery = DistrictWorld.new()
+	scene.world.add_child(scene.scenery)
+	scene.scenery.build()
 	scene.scenery.traffic_controller.set_active_count(24)
 	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
 		scene.subsidy_dialog.hide()

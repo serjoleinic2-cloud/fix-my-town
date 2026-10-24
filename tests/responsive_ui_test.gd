@@ -35,7 +35,7 @@ func run() -> void:
 		scene.set_process(false)
 		# The layout suite covers legacy service/building panels. Main now starts
 		# new installs in an empty-city mode, so explicitly install this fixture.
-		scene.game = Simulation.new()
+		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://test_responsive.json"
 		scene.game.empty_city_mode = false
 		scene.scenery.visible = true

@@ -14,10 +14,8 @@ var revealed: Array = []
 var expansion_cols: Vector2i = EXPANSION_COLS
 var expansion_rows: Vector2i = EXPANSION_ROWS
 
-func _init(legacy_buildings: Array = []) -> void:
+func _init() -> void:
 	reset()
-	if legacy_buildings.size() == 24:
-		migrate_legacy(legacy_buildings)
 
 func reset() -> void:
 	expansion_cols = EXPANSION_COLS
@@ -34,11 +32,23 @@ func reset() -> void:
 		visibility_line.fill(true)
 		revealed.append(visibility_line)
 	buildings.clear()
-	# The existing district is a connected orthogonal road grid.
+
+func initialize_legacy_road_network() -> void:
+	# Used by the old-save loader and explicit test fixtures only.
 	for row in range(HEIGHT):
 		for col in range(WIDTH):
 			if (row <= 18 and row % 3 == 0) or (col <= 18 and col % 3 == 0 and row <= 18):
 				cells[row][col] = "road"
+
+func initialize_natural_terrain(start_col: int = 12, start_row: int = 20, visible_radius: int = 3) -> void:
+	# A new city starts as uninterrupted forest. Legacy roads belong to the old
+	# showcase layout and must never leak into a clean sandbox.
+	reset()
+	for row in range(HEIGHT):
+		for col in range(WIDTH):
+			cells[row][col] = "forest"
+	reset_visibility()
+	reveal_area(start_col, start_row, visible_radius)
 
 func set_expansion_level(level: int) -> void:
 	# Expand the playable ring while keeping a much larger hidden backing grid.

@@ -22,7 +22,7 @@ func run() -> void:
 		scene.game.save_path = "user://test_startup.json"
 		viewport.add_child(scene)
 		scene.set_process(false)
-		scene.game = Simulation.new()
+		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://expansion_ui_test.json"
 		scene.game.budget = 5000
 		var straight_links: Array[Vector2i] = [Vector2i.LEFT, Vector2i.RIGHT]

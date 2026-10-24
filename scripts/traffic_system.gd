@@ -24,6 +24,14 @@ var reservations: Dictionary = {}
 var last_states: Dictionary = {}
 var route_rng := RandomNumberGenerator.new()
 
+func initialize_empty() -> void:
+	# Keep routing/traffic APIs available without creating streets, signals or
+	# vehicle nodes for a brand-new town.
+	route_rng.seed = 48291
+	cars.clear()
+	vehicles.clear()
+	intersections.clear()
+
 func build() -> void:
 	route_rng.seed = 48291
 	for ix in range(ROAD_X.size()):
@@ -93,7 +101,8 @@ func find_intersection(x: float, z: float) -> Dictionary:
 	return {}
 
 func get_problem_signal() -> Node3D:
-	return find_intersection(-14.4, 0).node
+	var problem_intersection := find_intersection(-14.4, 0)
+	return problem_intersection.get("node") as Node3D
 
 func step(delta: float) -> void:
 	clock += delta

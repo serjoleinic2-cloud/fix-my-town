@@ -14,7 +14,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var empty := Simulation.new()
+	var empty := Simulation.new(false)
 	empty.save_path = "user://empty_city_test.json"
 	empty.start_empty_city()
 	var has_roads := false
@@ -36,7 +36,7 @@ func run() -> void:
 	check(empty.territory.has_constructed_network(), "First house creates an automatic road contour")
 	check(empty.territory.is_revealed(13, 20) and empty.territory.is_revealed(16, 20), "Buildings reveal nearby cells")
 	check(empty.build_grid_building(16, 20, "house"), "Second house can extend the network linearly")
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://review_regression_test.json"
 	game.budget = 5000
 	check(game.incident_penalty() == 5 and game.net_income() == game.income() - 5, "Unresolved service failures reduce periodic net income")
@@ -44,7 +44,7 @@ func run() -> void:
 	game.tick(12.0, false)
 	check(game.budget == game.income() - game.incident_penalty(), "A populated legacy city recovers only through earned net income")
 	game.budget = 5000
-	var neglected := Simulation.new()
+	var neglected := Simulation.new(true)
 	neglected.save_path = "user://neglect_test.json"
 	neglected.signal_fixed = true
 	neglected.tick(72.0, false)
@@ -54,6 +54,7 @@ func run() -> void:
 	# Transit regression uses an explicitly prepared road network; a new city
 	# itself must remain roadless until the first building is placed.
 	game.territory.reset()
+	game.territory.initialize_legacy_road_network()
 	game.build(9, "cafe")
 	game.place_stop(0)
 	game.place_stop(4)
@@ -87,7 +88,7 @@ func run() -> void:
 	check(not game.territory.buildings.any(func(entry): return entry.get("legacy_plot", -1) == 0), "Demolition releases legacy footprint in territory")
 	check(game.build(0, "cafe"), "Rebuild legacy lot as cafe")
 	check(game.territory.buildings.any(func(entry): return entry.get("legacy_plot", -1) == 0 and entry.type_id == "cafe"), "Rebuilt type is synchronized with territory")
-	var loaded := Simulation.new()
+	var loaded := Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game() and loaded.buildings[0] == "cafe", "Rebuilt district reloads")
 	check(loaded.territory.buildings.size() == game.territory.buildings.size(), "Synchronization does not duplicate building anchors")

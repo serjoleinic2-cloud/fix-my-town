@@ -110,6 +110,11 @@ func build() -> void:
 	traffic_controller.build()
 	traffic = traffic_controller.cars
 
+func initialize_empty() -> void:
+	traffic_controller = TrafficSystem.new()
+	add_child(traffic_controller)
+	traffic_controller.initialize_empty()
+
 func animate(time: float) -> void:
 	var remaining := maxf(0, time - animation_time)
 	animation_time = time

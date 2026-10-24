@@ -12,7 +12,7 @@ const INK = Color("252c38")
 const BLUE = Color("258ed2")
 const PAPER = Color("fbf9f4")
 const SETTINGS_PATH = "user://graphics_settings.json"
-var game = Simulation.new()
+var game = Simulation.new(false)
 var audio: Node
 var camera: Camera3D
 var world: Node3D
@@ -250,11 +250,21 @@ func t(key: String) -> String:
 	return TEXT[key][0 if game.language == "ru" else 1]
 
 func _ready() -> void:
-	var restored := game.load_game()
-	# Version 1 discards legacy fixed plots, roads and buildings for the new
-	# natural-grid start. Old layouts are migrated once, then the new city saves
-	# normally and is not reset on later launches.
-	var clean_start_required: bool = not restored or game.city_layout_version < 2
+	# Read only the layout version before restoring. Previous showcase saves are
+	# intentionally discarded at ordinary startup, so do not construct their
+	# legacy road grid even transiently. load_game() still performs the explicit
+	# legacy migration when a caller actually requests loading that save.
+	var restored := false
+	if FileAccess.file_exists(game.save_path):
+		var save_file := FileAccess.open(game.save_path, FileAccess.READ)
+		if save_file != null:
+			var save_header: Variant = JSON.parse_string(save_file.get_as_text())
+			if save_header is Dictionary and int(save_header.get("city_layout_version", 0)) >= 3:
+				restored = game.load_game()
+	# Version 3 removes both the former showcase layout and the tiled plot-like
+	# terrain presentation. It is a one-time migration; later launches preserve
+	# the player's new city.
+	var clean_start_required: bool = not restored or game.city_layout_version < 3
 	if clean_start_required:
 		game.start_empty_city()
 		game.save_game()
@@ -608,14 +618,18 @@ func build_world() -> void:
 	environment.environment.ambient_light_energy = 0.8
 	environment.environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	world.add_child(environment)
-	scenery = DistrictWorld.new()
-	world.add_child(scenery)
-	scenery.build()
 	var empty_city: bool = game.empty_city_mode or (game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty())
 	clean_start_visual = empty_city
 	if empty_city:
-		# Do not show the legacy showcase streets in a brand-new city.
-		scenery.visible = false
+		# A clean city gets an empty traffic controller only. Do not instantiate
+		# the legacy roads, intersection signals, traffic, lamps, or showcase trees.
+		scenery = DistrictWorld.new()
+		world.add_child(scenery)
+		scenery.initialize_empty()
+	else:
+		scenery = DistrictWorld.new()
+		world.add_child(scenery)
+		scenery.build()
 	var backdrop := Node3D.new()
 	backdrop.name = "NeighborhoodBackdrop"
 	world.add_child(backdrop)
@@ -639,18 +653,17 @@ func build_world() -> void:
 	construction_root = Node3D.new()
 	construction_root.name = "ConstructionWorksite"
 	world.add_child(construction_root)
-	signal_object = scenery.traffic_controller.get_problem_signal()
-	leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
-	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
-	fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
-	fire_car.position = car.position
-	car.visible = not clean_start_visual and game.job != "fire" and (game.job != "" or game.legacy_problem_available("leak") or game.legacy_problem_available("signal"))
-	fire_car.visible = not clean_start_visual and game.job == "fire"
-	leak_effect.visible = not clean_start_visual and game.legacy_problem_available("leak")
-	signal_object.visible = not clean_start_visual and game.legacy_problem_available("signal")
-	fire_car.set_language(game.language)
-	make_marker("SignalMarker", Vector3(-14.4, 5, 0))
-	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
+	if game.legacy_problem_available("signal"):
+		signal_object = scenery.traffic_controller.get_problem_signal()
+		make_marker("SignalMarker", Vector3(-14.4, 5, 0))
+	if game.legacy_problem_available("leak"):
+		leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
+		make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
+	if game.job != "" and game.job != "fire":
+		car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
+	if game.job == "fire" or not game.fire_assignments().is_empty():
+		fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
+		fire_car.set_language(game.language)
 	transit_visuals = Node3D.new()
 	world.add_child(transit_visuals)
 	stop_candidate_visuals = Node3D.new()
@@ -737,6 +750,9 @@ func sync_construction_site() -> void:
 	progress_label.text = ("РАБОТЫ · %d%%" % percentage) if game.language == "ru" else ("WORKS · %d%%" % percentage)
 
 func make_marker(marker_name: String, point: Vector3) -> void:
+	var existing := world.get_node_or_null(marker_name)
+	if existing != null:
+		return
 	var marker := Sprite3D.new()
 	marker.name = marker_name
 	marker.texture = load("res://assets/icons/problem_marker.svg")
@@ -904,6 +920,19 @@ func redraw_territory() -> void:
 	var tile_visuals := Node3D.new()
 	tile_visuals.name = "GridCells"
 	territory_visuals.add_child(tile_visuals)
+	if game.empty_city_mode:
+		# Natural ground is one continuous surface. Cell borders are logical only;
+		# drawing a box for every forest cell made the fresh map look like old lots.
+		var ground := MeshInstance3D.new()
+		var ground_mesh := PlaneMesh.new()
+		ground_mesh.size = Vector2(TerritoryGrid.WIDTH * TerritoryGrid.CELL_SIZE, TerritoryGrid.HEIGHT * TerritoryGrid.CELL_SIZE)
+		var ground_material := StandardMaterial3D.new()
+		ground_material.albedo_color = Color("607e4c")
+		ground_material.roughness = 1.0
+		ground.mesh = ground_mesh
+		ground.material_override = ground_material
+		ground.position = TerritoryGrid.ORIGIN + Vector3((TerritoryGrid.WIDTH - 1) * TerritoryGrid.CELL_SIZE * 0.5, -0.015, (TerritoryGrid.HEIGHT - 1) * TerritoryGrid.CELL_SIZE * 0.5)
+		tile_visuals.add_child(ground)
 	# Старый квартал нарисован DistrictWorld исторически. Закрываем газоном удалённые сегменты, чтобы карта совпадала с сеткой.
 	var row_range := range(TerritoryGrid.HEIGHT) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
 	var col_range := range(TerritoryGrid.WIDTH) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1)
@@ -920,8 +949,6 @@ func redraw_territory() -> void:
 				continue
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
-			var color := Color("607e4c") if state == "forest" else Color("9fbd77")
-			Art.box(tile_visuals, center + Vector3(0, 0.045, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.08, 0.09, TerritoryGrid.CELL_SIZE - 0.08), color)
 			if state == "forest":
 				# Forest cells deliberately use several deterministic variants so
 				# the expansion reads as a natural edge rather than a repeated wall
@@ -929,13 +956,16 @@ func redraw_territory() -> void:
 				# saving and loading.
 				var forest_seed := absi(row * 53 + col * 17 + row * col)
 				var forest_variant := forest_seed % 10
+				var forest_rng := RandomNumberGenerator.new()
+				forest_rng.seed = forest_seed
+				var forest_center := center + Vector3(forest_rng.randf_range(-1.25, 1.25), 0.1, forest_rng.randf_range(-1.25, 1.25))
 				if forest_variant < 4:
-					Art.tree(tile_visuals, center + Vector3(0, 0.1, 0), 0.9 + float(forest_seed % 3) * 0.08, true, forest_seed)
+					Art.tree(tile_visuals, forest_center, 0.9 + float(forest_seed % 3) * 0.08, true, forest_seed)
 				elif forest_variant < 7:
-					Art.tree(tile_visuals, center + Vector3(-0.25, 0.1, 0.15), 0.75 + float(forest_seed % 4) * 0.08, false, forest_seed)
+					Art.tree(tile_visuals, forest_center, 0.75 + float(forest_seed % 4) * 0.08, false, forest_seed)
 				elif forest_variant < 9:
-					Art.tree(tile_visuals, center + Vector3(-0.75, 0.1, 0.45), 0.38, false, forest_seed)
-					Art.tree(tile_visuals, center + Vector3(0.65, 0.1, -0.5), 0.3, false, forest_seed + 1)
+					Art.tree(tile_visuals, forest_center + Vector3(-0.75, 0, 0.45), 0.38, false, forest_seed)
+					Art.tree(tile_visuals, forest_center + Vector3(0.65, 0, -0.5), 0.3, false, forest_seed + 1)
 				# The remaining variant is an open clearing: grass remains visible
 				# and the player can immediately read it as a future work site.
 			elif state == "road":
@@ -1172,8 +1202,8 @@ func map_input(event: InputEvent) -> void:
 			return
 	for kind in ["leak", "signal"]:
 		var fixed: bool = game.leak_fixed if kind == "leak" else game.signal_fixed
-		var marker := world.get_node("LeakMarker" if kind == "leak" else "SignalMarker") as Node3D
-		if game.legacy_problem_available(kind) and not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
+		var marker := world.get_node_or_null("LeakMarker" if kind == "leak" else "SignalMarker") as Node3D
+		if marker != null and game.legacy_problem_available(kind) and not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
 			select_problem(kind)
 			return
 	if selection_kind != "territory" and select_projected_building(point):
@@ -2046,6 +2076,7 @@ func clear_children(parent: Node) -> void:
 func refresh() -> void:
 	if world == null or camera == null:
 		return
+	ensure_legacy_visuals()
 	var current_quality: float = game.district_quality()
 	if last_quality >= 0 and not is_equal_approx(current_quality, last_quality):
 		quality_trend = "↑" if current_quality > last_quality else "↓"
@@ -2083,9 +2114,14 @@ func refresh() -> void:
 	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.update_lights()
-	leak_effect.visible = not clean_start_visual and game.legacy_problem_available("leak")
-	world.get_node("LeakMarker").visible = not clean_start_visual and game.legacy_problem_available("leak")
-	world.get_node("SignalMarker").visible = not clean_start_visual and game.legacy_problem_available("signal")
+	if leak_effect != null and is_instance_valid(leak_effect):
+		leak_effect.visible = game.legacy_problem_available("leak")
+	var leak_marker := world.get_node_or_null("LeakMarker") as Node3D
+	if leak_marker != null:
+		leak_marker.visible = game.legacy_problem_available("leak")
+	var signal_marker := world.get_node_or_null("SignalMarker") as Node3D
+	if signal_marker != null:
+		signal_marker.visible = game.legacy_problem_available("signal")
 	build_sheet()
 	update_preview()
 	sync_construction_site()
@@ -2409,6 +2445,42 @@ func dispatch() -> void:
 		audio.play_ui("deny")
 	refresh()
 
+func ensure_legacy_visuals() -> void:
+	if world == null or scenery == null:
+		return
+	if game.job != "" and game.job != "fire" and (car == null or not is_instance_valid(car)):
+		car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
+	if game.job == "fire" and (fire_car == null or not is_instance_valid(fire_car)):
+		fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
+		fire_car.set_language(game.language)
+	if game.legacy_problem_available("leak"):
+		if leak_effect == null or not is_instance_valid(leak_effect):
+			leak_effect = create_object(world, "water_leak", "leak_0", map_position(Vector3(-9, 0.24, 6)))
+		make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
+	else:
+		if leak_effect != null and is_instance_valid(leak_effect):
+			leak_effect.queue_free()
+			leak_effect = null
+		var old_leak_marker := world.get_node_or_null("LeakMarker")
+		if old_leak_marker != null:
+			old_leak_marker.queue_free()
+	if game.legacy_problem_available("signal"):
+		if signal_object == null or not is_instance_valid(signal_object):
+			signal_object = scenery.traffic_controller.get_problem_signal()
+			if signal_object == null:
+				signal_object = create_object(world, "traffic_signal", "LegacyProblemSignal", Vector3(-14.4, 0.18, 0))
+		make_marker("SignalMarker", Vector3(-14.4, 5, 0))
+	else:
+		if signal_object != null and is_instance_valid(signal_object):
+			signal_object.queue_free()
+			signal_object = null
+		var old_signal_marker := world.get_node_or_null("SignalMarker")
+		if old_signal_marker != null:
+			old_signal_marker.queue_free()
+	if game.job == "" and car != null and is_instance_valid(car):
+		car.queue_free()
+		car = null
+
 func dispatch_fire() -> void:
 	if game.dispatch_fire(selected_fire_id):
 		var assignment: Dictionary = game.fire_assignment(selected_fire_id)
@@ -2480,8 +2552,16 @@ func sync_fire_engine_nodes() -> void:
 		if audio != null and not active_ids.has(identifier):
 			audio.set_loop("fire_siren_" + identifier, "siren", "Effects", false)
 	if not game.fire_assignments().any(func(assignment): return bool(assignment.get("primary", false))):
-		fire_car.instance_id = "fire_engine_0"
-		fire_car.visible = false
+		if fire_car != null and is_instance_valid(fire_car):
+			fire_car.queue_free()
+			fire_car = null
+	for identifier in fire_engine_nodes.keys():
+		if active_ids.has(identifier):
+			continue
+		var inactive_engine: Node3D = fire_engine_nodes[identifier]
+		if is_instance_valid(inactive_engine):
+			inactive_engine.queue_free()
+		fire_engine_nodes.erase(identifier)
 	if audio != null:
 		for loop_key in audio.loops.keys():
 			if str(loop_key).begins_with("fire_siren_") and not active_siren_ids.has(str(loop_key).trim_prefix("fire_siren_")):
@@ -2491,7 +2571,7 @@ func sync_police_vehicle() -> void:
 	var police := world.get_node_or_null("PoliceVehicle") as Node3D
 	if game.police_job.is_empty():
 		if police != null:
-			police.visible = false
+			police.queue_free()
 		if audio != null:
 			audio.set_loop("police_siren", "siren", "Effects", false)
 		return
@@ -2531,8 +2611,9 @@ func update_crew_status() -> void:
 		status.text = t("busy") % [t(game.job), phase_text]
 
 func _process(delta: float) -> void:
-	if car == null:
+	if world == null or camera == null:
 		return
+	ensure_legacy_visuals()
 	elapsed += delta
 	completion_left = maxf(0, completion_left - delta)
 	if fire_notice_left > 0:
@@ -2549,8 +2630,8 @@ func _process(delta: float) -> void:
 			diagnostic_clock = 0
 			print("FMT_METRICS ", JSON.stringify({"quality": quality, "fps": Engine.get_frames_per_second(), "citizens_pool": citizen_pool.get_child_count() if citizen_pool != null else 0, "citizens_on_screen": on_screen_citizen_count(), "map_size": str(viewport_container.get_child(0).size), "draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), "safe_top": safe_top, "safe_bottom": safe_bottom, "selection": selection_kind, "job": game.job, "leak_fixed": game.leak_fixed, "signal_fixed": game.signal_fixed}))
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
-	scenery.traffic_controller.service_position = car.position
-	scenery.traffic_controller.service_active = game.job != ""
+	scenery.traffic_controller.service_position = car.position if car != null else Vector3(1000, 0, 1000)
+	scenery.traffic_controller.service_active = game.job != "" and game.job != "fire" and car != null
 	scenery.traffic_controller.blocking_positions.clear()
 	sync_construction_site()
 	var construction_truck: Node3D = construction_objects.get("truck")
@@ -2578,7 +2659,8 @@ func _process(delta: float) -> void:
 			var police_intended := police_current.distance_to(police_next)
 			if police_intended > 0.0001:
 				fire_motion["police"] = scenery.traffic_controller.service_travel_distance(police_current, police_current.move_toward(police_next, delta * 2.8), delta, "police", false, str(game.police_job.incident_id)) / police_intended
-	scenery.traffic_controller.vehicles[2].managed = game.transit.active
+	if scenery.traffic_controller.vehicles.size() > 2:
+		scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
 	check_traffic_jam_notice()
 	game.transit.tick(delta, scenery.traffic_controller, game.territory)
@@ -2604,15 +2686,17 @@ func _process(delta: float) -> void:
 	sync_construction_site()
 	audio.sync(game, camera.size / 2.2, delta)
 	update_crew_status()
-	car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
-	fire_car.position = car.position
-	car.visible = not clean_start_visual and game.job != "fire" and (game.job != "" or game.legacy_problem_available("leak") or game.legacy_problem_available("signal"))
-	fire_car.visible = not clean_start_visual and game.job == "fire"
-	if fire_car.visual_root.get_child_count() > 0:
+	if car != null and is_instance_valid(car):
+		car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
+		car.visible = game.job != "fire" and game.job != ""
+	if fire_car != null and is_instance_valid(fire_car):
+		fire_car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
+		fire_car.visible = game.job == "fire"
+	if fire_car != null and is_instance_valid(fire_car) and fire_car.visual_root.get_child_count() > 0:
 		var primary_model: Node = fire_car.visual_root.get_child(0)
 		if primary_model.has_method("set_emergency_lights"):
 			primary_model.set_emergency_lights(game.job == "fire" and game.job_phase == "travel", elapsed)
-	if game.job != "" and game.route_index < game.route.size():
+	if car != null and game.job != "" and game.job != "fire" and game.route_index < game.route.size():
 		var direction: Vector3 = map_position(game.route[game.route_index]) - car.position
 		if direction.length() > 0.01:
 			car.rotation.y = atan2(direction.x, direction.z)
@@ -2620,14 +2704,17 @@ func _process(delta: float) -> void:
 				car.position.z += signf(direction.x)
 			else:
 				car.position.x -= signf(direction.z)
-	fire_car.position = car.position
-	fire_car.rotation = car.rotation
+	if fire_car != null and is_instance_valid(fire_car) and car != null and is_instance_valid(car):
+		fire_car.position = car.position
+		fire_car.rotation = car.rotation
 	sync_fire_engine_nodes()
 	sync_police_vehicle()
-	leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
+	if leak_effect != null and is_instance_valid(leak_effect):
+		leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
 	for marker_name in ["LeakMarker", "SignalMarker"]:
-		var marker := world.get_node(marker_name) as Node3D
-		marker.position.y = 5.2 + sin(elapsed * 2) * 0.15
+		var marker := world.get_node_or_null(marker_name) as Node3D
+		if marker != null:
+			marker.position.y = 5.2 + sin(elapsed * 2) * 0.15
 	for road_signal in territory_visuals.get_children():
 		if not road_signal.has_meta("expansion_intersection"):
 			continue
@@ -2775,13 +2862,11 @@ func confirm_reset() -> void:
 	dialog.confirmed.connect(func():
 		var previous_language: String = game.language
 		audio.reset_state()
-		game = Simulation.new()
+		game = Simulation.new(false)
 		game.start_empty_city()
 		game.language = previous_language
 		game.save_game()
-		selection_kind = "signal"
-		selected = -1
-		refresh())
+		get_tree().reload_current_scene())
 	dialog.close_requested.connect(dialog.queue_free)
 	dialog.canceled.connect(func():
 		audio.play_ui("cancel")

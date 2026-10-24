@@ -43,7 +43,7 @@ func run() -> void:
 	ruin_test.queue_free()
 
 	var save_path := "user://fire_scenario_test.json"
-	var game = Simulation.new()
+	var game = Simulation.new(true)
 	game.save_path = save_path
 	game.budget = 5000
 	game.leak_fixed = true
@@ -56,7 +56,7 @@ func run() -> void:
 	check(game.start_fire(), "Opening incident starts at its stable house ID")
 	check(game.fires[Simulation.FIRST_FIRE_TARGET].phase == "warning", "Ignition begins with a visible warning stage")
 	var warning_before: float = game.fire_warning_left(Simulation.FIRST_FIRE_TARGET)
-	var offline_reload = Simulation.new()
+	var offline_reload = Simulation.new(true)
 	offline_reload.save_path = save_path
 	check(offline_reload.load_game(), "Warning state loads from the player-built station save")
 	check(is_equal_approx(offline_reload.fire_warning_left(Simulation.FIRST_FIRE_TARGET), warning_before), "Closed-game time does not advance warning")
@@ -77,7 +77,7 @@ func run() -> void:
 		game.fires[identifier].elapsed = 12.0
 		game.fires[identifier].spread_checked = true
 	game.save_game()
-	offline_reload = Simulation.new()
+	offline_reload = Simulation.new(true)
 	offline_reload.save_path = save_path
 	var loaded_second_scene: bool = offline_reload.load_game()
 	check(loaded_second_scene, "Two simultaneous fire states load")
@@ -94,7 +94,7 @@ func run() -> void:
 	check(not offline_reload.route.is_empty() and not offline_reload.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].route.is_empty(), "Both trucks receive saved road routes")
 
 	offline_reload.save_game()
-	var in_transit = Simulation.new()
+	var in_transit = Simulation.new(true)
 	in_transit.save_path = save_path
 	check(in_transit.load_game(), "Two outbound fire assignments load")
 	check(in_transit.fire_jobs.has(Simulation.FIRST_FIRE_NEIGHBOR) and in_transit.route.size() == offline_reload.route.size(), "Both vehicle routes and phases restore")
@@ -111,7 +111,7 @@ func run() -> void:
 	check(police_dispatched, "Police can be called to a blocked fire location")
 	if police_dispatched:
 		check(in_transit.police_job.depot_instance_id == police_id, "Police respond from the player-built police station")
-	var police_reload = Simulation.new()
+	var police_reload = Simulation.new(true)
 	police_reload.save_path = save_path
 	var police_loaded: bool = police_reload.load_game() and not police_reload.police_job.is_empty()
 	check(police_loaded, "Police route and clearance phase survive reload")
@@ -125,7 +125,7 @@ func run() -> void:
 			police_reload.tick(1.0, true)
 		check(police_reload.jam_cleared[Simulation.FIRST_FIRE_NEIGHBOR], "Police clears the fire-engine blockage")
 		check(police_reload.police_job.phase == "return", "Police returns to its own station after clearing the lane")
-	var clear_reload = Simulation.new()
+	var clear_reload = Simulation.new(true)
 	clear_reload.save_path = save_path
 	var clear_loaded: bool = clear_reload.load_game()
 	check(clear_loaded, "Cleared lane and returning police state restore")
@@ -144,7 +144,7 @@ func run() -> void:
 	for i in range(5):
 		clear_reload.tick(1.0, true)
 	check(clear_reload.house_damage(Simulation.FIRST_FIRE_TARGET) == damage_stopped, "Extinguished house stops accumulating damage")
-	var damaged_save = Simulation.new()
+	var damaged_save = Simulation.new(true)
 	damaged_save.save_path = save_path
 	check(damaged_save.load_game() and damaged_save.fires.is_empty(), "Extinguished state persists without replaying the incident")
 	damaged_save.budget = 5000 # Keep the restoration/upgrade assertions independent of incident accounting.
@@ -159,7 +159,7 @@ func run() -> void:
 		damaged_save.tick(1.0, true)
 	check(damaged_save.is_ruined(Simulation.FIRST_FIRE_TARGET), "100 percent fire damage leaves persistent ruins")
 	check(damaged_save.record_residents(damaged_save.legacy_record(0)) == 0, "Destroyed house loses its residents")
-	var ruined_load = Simulation.new()
+	var ruined_load = Simulation.new(true)
 	ruined_load.save_path = save_path
 	damaged_save.save_game()
 	check(ruined_load.load_game() and ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Ruins survive save and reload")
@@ -173,13 +173,13 @@ func run() -> void:
 	check(ruined_load.start_legacy_upgrade(0) and ruined_load.construction_job.get("kind", "") == "upgrade_legacy", "Further improvement is a separate action after restoration")
 	ruined_load.tick(6.1)
 	check(ruined_load.building_level(0) == 2, "The restored home reaches level two only after a second worksite")
-	var final_load = Simulation.new()
+	var final_load = Simulation.new(true)
 	final_load.save_path = save_path
 	ruined_load.save_game()
 	check(final_load.load_game() and not final_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Rebuilt home is saved")
 
 	# Grid ruins follow the same two-step rule and never jump directly to level two.
-	var grid_save := Simulation.new()
+	var grid_save := Simulation.new(true)
 	grid_save.save_path = "user://grid_ruin_restore_test.json"
 	grid_save.budget = 5000
 	for cell in [Vector2i(12, 19), Vector2i(13, 19), Vector2i(14, 19), Vector2i(15, 19), Vector2i(14, 20), Vector2i(15, 20)]:

@@ -16,7 +16,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.buildings[3] = "cafe"
 	game.transit.stops = [0, 5]
 	game.transit.active = true

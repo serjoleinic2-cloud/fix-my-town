@@ -13,6 +13,15 @@ func run() -> void:
 	DirAccess.remove_absolute(scene.game.save_path)
 	root.add_child(scene)
 	scene.set_process(false)
+	scene.game = preload("res://scripts/simulation.gd").new()
+	scene.game.save_path = "user://completion_test.json"
+	scene.game.empty_city_mode = false
+	scene.scenery.visible = true
+	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+		scene.subsidy_dialog.hide()
+		scene.subsidy_dialog.queue_free()
+		scene.subsidy_dialog = null
+	scene.refresh()
 	scene.close_sheet()
 	check(scene.mission.visible and scene.mission_icon.texture.resource_path.ends_with("ui_drop.svg"), "Leak task has water icon")
 	scene.game.leak_fixed = true

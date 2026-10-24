@@ -30,6 +30,7 @@ var notified_fire_ids: Dictionary = {}
 var fire_notice: PanelContainer
 var fire_notice_label: Label
 var fire_notice_left: float = 0.0
+var subsidy_dialog: Control
 var jam_notice_cooldown: float = 0.0
 var signal_object: Node3D
 var leak_effect: Node3D
@@ -250,12 +251,19 @@ func t(key: String) -> String:
 
 func _ready() -> void:
 	var restored := game.load_game()
-	# A clean Android install is the test entry point: start with an empty
-	# district instead of showing the legacy showcase houses. Existing saves
-	# still take precedence and are restored normally.
-	if OS.has_feature("android") and not restored and not FileAccess.file_exists(game.save_path):
+	# A clean install on every platform starts in the same empty natural district.
+	# Existing saves are left intact and restored normally.
+	var clean_start_required: bool = not restored or (OS.has_feature("android") and not game.empty_city_mode)
+	if clean_start_required:
 		game.start_empty_city()
 		game.save_game()
+	elif game.empty_city_mode and game.all_buildings().is_empty() and (game.leak_fixed or game.signal_fixed):
+		# Normalize early test builds that marked nonexistent legacy services as repaired.
+		game.leak_fixed = false
+		game.signal_fixed = false
+		game.save_game()
+	if game.empty_city_mode:
+		focus_point = game.territory.cell_world(12, 20)
 	for identifier in game.fires:
 		notified_fire_ids[str(identifier)] = true
 	if OS.is_debug_build() and OS.has_feature("android"):
@@ -570,6 +578,7 @@ func update_layout() -> void:
 		mode_switcher.position = Vector2(safe_left, safe_top + 92)
 		mode_switcher.size = Vector2(minf(360, size_value.x - safe_left - safe_right - tools_width - 16), 72)
 	updating_layout = false
+	layout_subsidy_offer()
 
 func map_position(point: Vector3) -> Vector3:
 	return DistrictWorld.world_position(point)
@@ -577,7 +586,7 @@ func map_position(point: Vector3) -> Vector3:
 func build_world() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 76
+	camera.size = 52 if game.empty_city_mode else 76
 	camera.far = 400
 	world.add_child(camera)
 	set_camera_focus(focus_point)
@@ -601,7 +610,7 @@ func build_world() -> void:
 	scenery = DistrictWorld.new()
 	world.add_child(scenery)
 	scenery.build()
-	var empty_city: bool = game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty()
+	var empty_city: bool = game.empty_city_mode or (game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty())
 	clean_start_visual = empty_city
 	if empty_city:
 		# Do not show the legacy showcase streets in a brand-new city.
@@ -634,7 +643,7 @@ func build_world() -> void:
 	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
 	fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
 	fire_car.position = car.position
-	car.visible = not clean_start_visual and game.job != "fire"
+	car.visible = not clean_start_visual and game.job != "fire" and (game.job != "" or game.legacy_problem_available("leak") or game.legacy_problem_available("signal"))
 	fire_car.visible = not clean_start_visual and game.job == "fire"
 	leak_effect.visible = not clean_start_visual and game.legacy_problem_available("leak")
 	signal_object.visible = not clean_start_visual and game.legacy_problem_available("signal")
@@ -805,9 +814,10 @@ func update_fire_visuals() -> void:
 		smoke_effect.scale = Vector3.ONE * (1.0 + sin(elapsed * 2.3) * 0.08)
 
 func redraw_plots() -> void:
-	var empty_city: bool = game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty()
+	var empty_city: bool = game.empty_city_mode or (game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty())
 	plots.visible = not empty_city
 	if empty_city:
+		clear_children(plots)
 		redraw_territory()
 		return
 	for i in range(24):
@@ -874,7 +884,7 @@ func update_fog_overlay() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(TerritoryGrid.CELL_SIZE, TerritoryGrid.CELL_SIZE)
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.93, 0.96, 0.96, 0.90)
+	material.albedo_color = Color(0.97, 0.985, 0.985, 1.0) if game.empty_city_mode else Color(0.93, 0.96, 0.96, 0.90)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -893,10 +903,20 @@ func redraw_territory() -> void:
 	var tile_visuals := Node3D.new()
 	tile_visuals.name = "GridCells"
 	territory_visuals.add_child(tile_visuals)
-	# The whole world is one consistent cell grid. There is no hidden legacy
-	# road rectangle or prebuilt 24-plot district on a new-city start.
-	for row in range(TerritoryGrid.HEIGHT):
-		for col in range(TerritoryGrid.WIDTH):
+	# Старый квартал нарисован DistrictWorld исторически. Закрываем газоном удалённые сегменты, чтобы карта совпадала с сеткой.
+	var row_range := range(TerritoryGrid.HEIGHT) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
+	var col_range := range(TerritoryGrid.WIDTH) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1)
+	if not game.empty_city_mode:
+		for row in range(0, TerritoryGrid.EXPANSION_ROWS.x):
+			for col in range(0, TerritoryGrid.EXPANSION_COLS.y + 1):
+				var expected_road := (row % 3 == 0) or (col % 3 == 0 and row <= 18)
+				if expected_road and game.territory.state_at(col, row) != "road":
+					var legacy_center: Vector3 = game.territory.cell_world(col, row)
+					Art.box(tile_visuals, legacy_center + Vector3(0, 0.28, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.1, 0.18, TerritoryGrid.CELL_SIZE - 0.1), Color("91a66f"))
+	for row in row_range:
+		for col in col_range:
+			if game.empty_city_mode and not game.territory.is_revealed(col, row):
+				continue
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
 			var color := Color("607e4c") if state == "forest" else Color("9fbd77")
@@ -998,7 +1018,7 @@ func redraw_territory() -> void:
 					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
 					road_light.interaction_area.collision_layer = 0
 	for entry: Dictionary in game.territory.buildings:
-		if entry.row < game.territory.expansion_rows.x or entry.row > game.territory.expansion_rows.y:
+		if not game.empty_city_mode and (entry.row < TerritoryGrid.EXPANSION_ROWS.x or entry.row > TerritoryGrid.EXPANSION_ROWS.y):
 			continue
 		var position: Vector3 = game.territory.building_center(entry)
 		var object := create_object(territory_visuals, entry.type_id, entry.instance_id, position)
@@ -2058,6 +2078,7 @@ func refresh() -> void:
 	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
 	progress_bar.value = completed_steps
 	redraw_plots()
+	maybe_offer_subsidy()
 	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.update_lights()
@@ -2584,7 +2605,7 @@ func _process(delta: float) -> void:
 	update_crew_status()
 	car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
 	fire_car.position = car.position
-	car.visible = not clean_start_visual and game.job != "fire"
+	car.visible = not clean_start_visual and game.job != "fire" and (game.job != "" or game.legacy_problem_available("leak") or game.legacy_problem_available("signal"))
 	fire_car.visible = not clean_start_visual and game.job == "fire"
 	if fire_car.visual_root.get_child_count() > 0:
 		var primary_model: Node = fire_car.visual_root.get_child(0)
@@ -2687,7 +2708,7 @@ func apply_quality() -> void:
 	sunlight.shadow_enabled = quality != "low"
 	var viewport := viewport_container.get_child(0) as SubViewport
 	viewport.msaa_3d = Viewport.MSAA_DISABLED if quality == "low" else (Viewport.MSAA_2X if quality == "medium" else Viewport.MSAA_4X)
-	scenery.traffic_controller.set_active_count(8 if quality == "low" else (16 if quality == "medium" else 24))
+	scenery.traffic_controller.set_active_count(0 if game.empty_city_mode else (8 if quality == "low" else (16 if quality == "medium" else 24)))
 	if citizen_pool != null and is_instance_valid(citizen_pool):
 		citizen_pool.set_quality(quality)
 	Engine.max_fps = 30 if quality == "low" else 60
@@ -3429,4 +3450,68 @@ func request_demolition(index: int) -> void:
 	dialog.popup_centered(Vector2i(480, 570))
 
 func update_mission_visibility() -> void:
-	mission.visible = not sheet.visible and (not game.completed or completion_left > 0)
+	mission.visible = not game.empty_city_mode and not sheet.visible and (not game.completed or completion_left > 0)
+
+func maybe_offer_subsidy() -> void:
+	if not game.can_offer_subsidy() or (subsidy_dialog != null and is_instance_valid(subsidy_dialog)):
+		return
+	var overlay := ColorRect.new()
+	overlay.name = "SubsidyOfferOverlay"
+	overlay.color = Color(0.09, 0.12, 0.14, 0.48)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.add_child(overlay)
+	var panel := PanelContainer.new()
+	panel.name = "SubsidyOfferCard"
+	panel.theme = ui_theme
+	panel.add_theme_stylebox_override("panel", style(PAPER, 18, Color("e4ded2")))
+	overlay.add_child(panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	panel.add_child(margin)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	margin.add_child(column)
+	var title_row := hbox(column, 4)
+	var heading := label(23, title_row, tr_text("Поддержка города", "City support"), true)
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var close_button := button(title_row, "×", Callable(self, "close_subsidy_offer"))
+	close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	close_button.custom_minimum_size = Vector2(56, 56)
+	var subheading := label(21, column, tr_text("Бюджет исчерпан", "The city budget is empty"), true)
+	var terms := label(18, column)
+	terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	terms.text = tr_text("500 монет: удержание 100 за каждые 1000 дохода.\n1000 монет: удержание 200 за каждые 2000 дохода.\nДоход между порогами накапливается. Новая субсидия — после полного погашения долга.", "500 coins: repay 100 for each 1,000 income.\n1,000 coins: repay 200 for each 2,000 income.\nIncome between thresholds accumulates. Another grant is available after full repayment.")
+	var options := VBoxContainer.new()
+	options.add_theme_constant_override("separation", 8)
+	column.add_child(options)
+	subsidy_dialog = overlay
+	var grant_500 := button(options, tr_text("Получить 500 монет", "Receive 500 coins"), func(): choose_subsidy(500), true)
+	var grant_1000 := button(options, tr_text("Получить 1000 монет", "Receive 1,000 coins"), func(): choose_subsidy(1000))
+	grant_500.custom_minimum_size.y = 72
+	grant_1000.custom_minimum_size.y = 72
+	layout_subsidy_offer()
+
+func choose_subsidy(amount: int) -> void:
+	if game.take_subsidy(amount):
+		close_subsidy_offer()
+		refresh()
+
+func close_subsidy_offer() -> void:
+	if subsidy_dialog != null and is_instance_valid(subsidy_dialog):
+		subsidy_dialog.queue_free()
+	subsidy_dialog = null
+
+func layout_subsidy_offer() -> void:
+	if subsidy_dialog == null or not is_instance_valid(subsidy_dialog) or screen == null:
+		return
+	var panel := subsidy_dialog.get_node_or_null("SubsidyOfferCard") as Control
+	if panel == null:
+		return
+	var available := screen.size - Vector2(32, safe_top + safe_bottom + 48)
+	var panel_size := Vector2(minf(500, available.x), minf(460, available.y))
+	panel.position = Vector2((screen.size.x - panel_size.x) * 0.5, safe_top + (available.y - panel_size.y) * 0.5)
+	panel.size = panel_size

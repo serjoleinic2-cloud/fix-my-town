@@ -22,11 +22,13 @@ func run() -> void:
 		for state in row:
 			if state == "road":
 				has_roads = true
-	check(empty.district_house_count() == 0 and not has_roads, "New city starts without houses or inherited roads")
+	check(empty.district_house_count() == 0 and not has_roads and empty.empty_city_mode, "New city starts as an empty natural grid without inherited buildings or roads")
+	check(empty.income() == 0 and empty.budget == 0 and empty.job == "" and empty.fires.is_empty(), "Fresh city has no budget income, service vehicle job, or incidents")
 	check(empty.incident_penalty() == 0, "Empty city has no legacy service penalty")
 	check(empty.territory.is_revealed(12, 20) and not empty.territory.is_revealed(4, 4), "New city starts with a small visible pocket")
 	empty.tick(180.0, true)
 	check(empty.incidents.is_empty(), "Empty city does not generate incidents on empty terrain")
+	check(empty.can_offer_subsidy() and empty.take_subsidy(500), "The player can select a startup grant before earning income")
 	for row in range(19, 23):
 		for col in range(12, 21):
 			empty.territory.clear_cell(col, row)
@@ -40,7 +42,7 @@ func run() -> void:
 	check(game.incident_penalty() == 5 and game.net_income() == game.income() - 5, "Unresolved service failures reduce periodic net income")
 	game.budget = 0
 	game.tick(12.0, false)
-	check(game.budget > 0, "Zero budget receives a small operating subsidy instead of causing a loss state")
+	check(game.budget == game.income() - game.incident_penalty(), "A populated legacy city recovers only through earned net income")
 	game.budget = 5000
 	var neglected := Simulation.new()
 	neglected.save_path = "user://neglect_test.json"

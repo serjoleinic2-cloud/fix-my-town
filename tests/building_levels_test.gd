@@ -101,6 +101,12 @@ func run() -> void:
 		scene.game = Simulation.new()
 		scene.game.save_path = "user://levels_ui_test.json"
 		scene.game.budget = 5000
+		scene.game.empty_city_mode = false
+		scene.scenery.visible = true
+		if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+			scene.subsidy_dialog.hide()
+			scene.subsidy_dialog.queue_free()
+			scene.subsidy_dialog = null
 		for language in ["ru", "en"]:
 			scene.game.language = language
 			for kind in ["house", "cafe", "park"]:

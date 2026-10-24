@@ -69,7 +69,7 @@ func run() -> void:
 	poor.budget = 0
 	check(not poor.dispatch("leak"), "Reject unaffordable dispatch")
 	poor.tick(12)
-	check(poor.budget == poor.income(), "Income recovery prevents soft lock")
+	check(poor.budget == maxi(0, poor.income() - poor.incident_penalty()), "Zero budget recovers only through earned net income")
 	var staged = Simulation.new()
 	staged.save_path = "user://test_phases.json"
 	staged.dispatch("leak")
@@ -96,9 +96,23 @@ func run() -> void:
 	scene.game.save_path = "user://test_startup.json"
 	root.add_child(scene)
 	await process_frame
+	check(scene.game.empty_city_mode and scene.game.budget == 0 and scene.game.income() == 0, "A clean app start opens a zero-budget empty city")
+	check(scene.plots.get_child_count() == 0 and not scene.scenery.visible and not scene.car.visible and not scene.fire_car.visible, "The clean map has no old plots, town geometry, or service vehicle")
+	check(scene.game.district_house_count() == 0 and scene.game.territory.buildings.is_empty(), "The fogged city contains no inherited buildings")
+	var subsidy_card := scene.subsidy_dialog.find_child("SubsidyOfferCard", true, false) as Control
+	var subsidy_buttons: Array = scene.subsidy_dialog.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Получить"))
+	check(subsidy_card != null and subsidy_buttons.size() == 2 and subsidy_card.get_global_rect().end.y <= scene.screen.size.y, "The startup subsidy options fit inside the phone screen")
 	# Проверки изолированы от пользовательского сохранения.
 	scene.game = Simulation.new()
 	scene.game.save_path = "user://test_ui.json"
+	# This section still exercises the retained legacy interaction layer, while
+	# startup itself is now explicitly verified as an empty natural city.
+	scene.scenery.visible = true
+	scene.game.empty_city_mode = false
+	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+		scene.subsidy_dialog.hide()
+		scene.subsidy_dialog.queue_free()
+		scene.subsidy_dialog = null
 	scene.refresh()
 	check(scene.stats.text.contains("Бюджет"), "Russian UI")
 	scene.switch_language()
@@ -132,13 +146,16 @@ func run() -> void:
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
+	scene.game.leak_fixed = false
+	scene.game.signal_fixed = false
+	scene.refresh()
 	click.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(7))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selected == 7, "Map picking")
-	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-9, 0, 6))) * scene.viewport_container.stretch_shrink
+	click.position = scene.camera.unproject_position(scene.world.get_node("LeakMarker").position) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selection_kind == "leak", "Leak on map opens action panel")
-	click.position = scene.camera.unproject_position(scene.map_position(Vector3(-6.3, 0, 0))) * scene.viewport_container.stretch_shrink
+	click.position = scene.camera.unproject_position(scene.world.get_node("SignalMarker").position) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selection_kind == "signal", "Signal on map opens action panel")
 	# Tap projected roof positions (not ground centers) across the full row set.

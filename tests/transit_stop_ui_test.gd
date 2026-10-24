@@ -22,6 +22,13 @@ func run() -> void:
 	scene.set_process(false)
 	scene.game = Simulation.new()
 	scene.game.save_path = "user://transit_stop_ui_test.json"
+	scene.game.empty_city_mode = false
+	scene.scenery.visible = true
+	scene.scenery.traffic_controller.set_active_count(24)
+	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+		scene.subsidy_dialog.hide()
+		scene.subsidy_dialog.queue_free()
+		scene.subsidy_dialog = null
 	scene.game.completed = true
 	scene.game.budget = 1000
 	scene.game.transit.stops = [0, 4]

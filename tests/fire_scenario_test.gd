@@ -147,13 +147,14 @@ func run() -> void:
 	var damaged_save = Simulation.new()
 	damaged_save.save_path = save_path
 	check(damaged_save.load_game() and damaged_save.fires.is_empty(), "Extinguished state persists without replaying the incident")
+	damaged_save.budget = 5000 # Keep the restoration/upgrade assertions independent of incident accounting.
 	var residents_damaged := damaged_save.population()
 	check(damaged_save.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A player can restore an extinguished home")
 	check(damaged_save.population() > residents_damaged, "Restoration returns residents")
 
 	# Ignore a third ignition until it reaches ruin; the result must survive a restart.
 	check(damaged_save.start_fire(Simulation.FIRST_FIRE_TARGET), "A repaired home may suffer a later incident")
-	check(damaged_save.upgrade(0), "A restored home can be upgraded before a later fire")
+	check(damaged_save.upgrade(0) and damaged_save.upgrade(0), "A restored home can reach level three before a later fire")
 	for i in range(190):
 		damaged_save.tick(1.0, true)
 	check(damaged_save.is_ruined(Simulation.FIRST_FIRE_TARGET), "100 percent fire damage leaves persistent ruins")
@@ -162,13 +163,14 @@ func run() -> void:
 	ruined_load.save_path = save_path
 	damaged_save.save_game()
 	check(ruined_load.load_game() and ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Ruins survive save and reload")
+	ruined_load.budget = 5000
 	check(ruined_load.repair_fire_damage(Simulation.FIRST_FIRE_TARGET), "A ruin starts a visible restoration worksite")
 	check(ruined_load.construction_job.get("kind", "") == "restore_legacy", "Ruins use a dedicated restoration construction kind")
 	check(ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET) and ruined_load.building_level(0) == 3, "A ruin stays damaged and keeps its old level until work finishes")
 	ruined_load.tick(6.1)
 	check(not ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Restoration removes the ruin state only after construction")
 	check(ruined_load.building_level(0) == 1, "A rebuilt ruin returns as a one-storey home")
-	check(ruined_load.upgrade(0) and ruined_load.construction_job.get("kind", "") == "upgrade_legacy", "Further improvement is a separate action after restoration")
+	check(ruined_load.start_legacy_upgrade(0) and ruined_load.construction_job.get("kind", "") == "upgrade_legacy", "Further improvement is a separate action after restoration")
 	ruined_load.tick(6.1)
 	check(ruined_load.building_level(0) == 2, "The restored home reaches level two only after a second worksite")
 	var final_load = Simulation.new()

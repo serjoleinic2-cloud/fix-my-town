@@ -44,6 +44,10 @@ func run() -> void:
 	scene.set_process(false)
 	scene.game = Simulation.new()
 	scene.game.save_path = "user://map_interaction_test.json"
+	scene.game.empty_city_mode = false
+	scene.scenery.visible = true
+	scene.scenery.traffic_controller.set_active_count(0)
+	scene.refresh()
 	for frame in range(12):
 		await process_frame
 	var original_zoom: float = scene.camera.size
@@ -109,6 +113,7 @@ func run() -> void:
 	scene.map_input(tap)
 	check(scene.territory_cell == road_cell, "Road selection uses the same visible grid cell as forest placement")
 	scene.car.position = Vector3(35, 0.18, 72)
+	scene.car.visible = true
 	scene.set_camera_focus(scene.car.position)
 	tap.position = scene.camera.unproject_position(scene.car.position + Vector3(0, 0.9, 0))
 	scene.close_sheet()

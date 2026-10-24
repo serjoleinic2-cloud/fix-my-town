@@ -12,6 +12,11 @@ const DistrictWorld = preload("res://scripts/district_world.gd")
 
 const SAVE_PATH = "user://progress.json"
 var budget: int = 300
+var empty_city_mode: bool = false
+var subsidy_debt: int = 0
+var subsidy_threshold: int = 0
+var subsidy_installment: int = 0
+var subsidy_income_accumulated: int = 0
 var language: String = "ru"
 var leak_fixed: bool = false
 var signal_fixed: bool = false
@@ -60,15 +65,18 @@ func _init() -> void:
 		buildings.append("empty" if i in [3, 7, 9, 14] else "house")
 	buildings[2] = "depot"
 	territory = TerritoryGrid.new(buildings)
-	# New city starts as untouched land: no inherited legacy roads.
-	for row in range(TerritoryGrid.HEIGHT):
-		for col in range(TerritoryGrid.WIDTH):
-			territory.cells[row][col] = "forest"
+	# The default simulation fixture keeps the legacy district for older saves
+	# and scenario tests. Main explicitly resets a new game to natural terrain.
 
 func start_empty_city() -> void:
 	# A clean sandbox for testing the first placement decisions. Keep the
 	# terrain grid and roads, but remove every legacy building and incident.
-	budget = 300
+	budget = 0
+	empty_city_mode = true
+	subsidy_debt = 0
+	subsidy_threshold = 0
+	subsidy_installment = 0
+	subsidy_income_accumulated = 0
 	leak_fixed = false
 	signal_fixed = false
 	completed = false
@@ -91,6 +99,11 @@ func start_empty_city() -> void:
 	service_neglect_clock = 0.0
 	job = ""
 	job_phase = "travel"
+	target_instance_id = ""
+	depot_instance_id = "pine_district_legacy_2"
+	job_vehicle_id = ""
+	vehicle = Vector3.ZERO
+	repair_left = 4.0
 	route.clear()
 	route_index = 0
 	fires.clear()
@@ -100,6 +113,7 @@ func start_empty_city() -> void:
 	police_job.clear()
 	jam_cleared.clear()
 	construction_job.clear()
+	fire_jobs.clear()
 	incidents.clear()
 	incident_clock = 0.0
 	fire_triggered = false
@@ -368,7 +382,28 @@ func income() -> int:
 	var total := 0
 	for entry: Dictionary in all_buildings():
 		total += record_income(entry)
-	return maxi(4, total)
+	return total
+
+func can_offer_subsidy() -> bool:
+	return budget <= 0 and income() <= 0 and subsidy_debt <= 0
+
+func take_subsidy(amount: int) -> bool:
+	if not can_offer_subsidy() or amount not in [500, 1000]:
+		return false
+	budget += amount
+	subsidy_debt = amount
+	subsidy_threshold = 1000 if amount == 500 else 2000
+	subsidy_installment = 100 if amount == 500 else 200
+	subsidy_income_accumulated = 0
+	save_game()
+	return true
+
+func subsidy_payment_for_income(gross_income: int) -> int:
+	if subsidy_debt <= 0 or subsidy_threshold <= 0 or subsidy_installment <= 0 or gross_income <= 0:
+		return 0
+	var accrued := subsidy_income_accumulated + gross_income
+	var installments := floori(float(accrued) / float(subsidy_threshold))
+	return mini(subsidy_debt, installments * subsidy_installment)
 
 func incident_penalty() -> int:
 	# Unresolved failures drain the treasury every accounting period. Fires are
@@ -386,8 +421,8 @@ func incident_penalty() -> int:
 	return penalty
 
 func net_income() -> int:
-	var result := income() - incident_penalty()
-	return maxi(1, result) if budget <= 0 else result
+	var gross := income()
+	return gross - incident_penalty() - subsidy_payment_for_income(gross)
 
 func apply_service_neglect_damage(amount: int, identifiers: Array) -> void:
 	for identifier in identifiers:
@@ -1238,11 +1273,20 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		service_neglect_clock += delta
 	if income_clock >= 12.0:
 		income_clock -= 12.0
-		var financial_change := income() - incident_penalty()
-		# A city at zero receives a small operating subsidy, so lack of money
-		# never becomes a hard loss condition or a permanent soft lock.
-		if budget <= 0:
-			financial_change = maxi(1, financial_change)
+		var gross_income := income()
+		var repayment := subsidy_payment_for_income(gross_income)
+		if subsidy_debt > 0 and gross_income > 0:
+			var accrued := subsidy_income_accumulated + gross_income
+			var charged_installments := ceili(float(repayment) / float(maxi(1, subsidy_installment)))
+			if repayment >= subsidy_debt:
+				subsidy_debt = 0
+				subsidy_threshold = 0
+				subsidy_installment = 0
+				subsidy_income_accumulated = 0
+			else:
+				subsidy_debt -= repayment
+				subsidy_income_accumulated = accrued - charged_installments * subsidy_threshold
+		var financial_change := gross_income - incident_penalty() - repayment
 		budget = maxi(0, budget + financial_change)
 		if service_neglect_clock >= 60.0:
 			var neglect_cycles := floori(service_neglect_clock / 60.0)
@@ -1444,7 +1488,9 @@ func save_game() -> void:
 		encoded_police_job.route = police_points
 		var police_position: Vector3 = encoded_police_job.vehicle
 		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
-	var data := {"version": 7, "levels": levels, "completed": completed, "city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
+	var data := {"version": 8, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode,
+		"subsidy_debt": subsidy_debt, "subsidy_threshold": subsidy_threshold, "subsidy_installment": subsidy_installment, "subsidy_income_accumulated": subsidy_income_accumulated,
+		"city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
 		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
@@ -1465,7 +1511,21 @@ func load_game() -> bool:
 	if file == null:
 		return false
 	var data = JSON.parse_string(file.get_as_text())
-	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7]:
+	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8]:
+		return false
+	for key in ["subsidy_debt", "subsidy_threshold", "subsidy_installment", "subsidy_income_accumulated"]:
+		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
+			return false
+	if data.has("empty_city_mode") and typeof(data.empty_city_mode) != TYPE_BOOL:
+		return false
+	var loaded_subsidy_debt := int(data.get("subsidy_debt", 0))
+	var loaded_subsidy_threshold := int(data.get("subsidy_threshold", 0))
+	var loaded_subsidy_installment := int(data.get("subsidy_installment", 0))
+	var loaded_subsidy_accumulated := int(data.get("subsidy_income_accumulated", 0))
+	if loaded_subsidy_debt == 0:
+		if loaded_subsidy_threshold != 0 or loaded_subsidy_installment != 0 or loaded_subsidy_accumulated != 0:
+			return false
+	elif not ((loaded_subsidy_threshold == 1000 and loaded_subsidy_installment == 100) or (loaded_subsidy_threshold == 2000 and loaded_subsidy_installment == 200)) or loaded_subsidy_accumulated >= loaded_subsidy_threshold:
 		return false
 	var stored = data.get("buildings", [])
 	if not stored is Array or stored.size() != 24:
@@ -1729,6 +1789,11 @@ func load_game() -> bool:
 	transit = loaded_transit
 	territory = loaded_territory
 	budget = clampi(int(data.budget), 0, 1000000)
+	empty_city_mode = bool(data.get("empty_city_mode", false))
+	subsidy_debt = loaded_subsidy_debt
+	subsidy_threshold = loaded_subsidy_threshold
+	subsidy_installment = loaded_subsidy_installment
+	subsidy_income_accumulated = loaded_subsidy_accumulated
 	language = "en" if data.get("language") == "en" else "ru"
 	leak_fixed = data.leak_fixed
 	signal_fixed = data.signal_fixed

@@ -33,6 +33,18 @@ func run() -> void:
 		scene.settings_path = "user://test_graphics.json"
 		viewport.add_child(scene)
 		scene.set_process(false)
+		# The layout suite covers legacy service/building panels. Main now starts
+		# new installs in an empty-city mode, so explicitly install this fixture.
+		scene.game = Simulation.new()
+		scene.game.save_path = "user://test_responsive.json"
+		scene.game.empty_city_mode = false
+		scene.scenery.visible = true
+		scene.scenery.traffic_controller.set_active_count(0)
+		if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+			scene.subsidy_dialog.hide()
+			scene.subsidy_dialog.queue_free()
+			scene.subsidy_dialog = null
+		scene.refresh()
 		scene.safe_override = Vector4(20, 40, 20, 36)
 		scene.update_layout()
 		for i in range(3):

@@ -90,7 +90,9 @@ func run() -> void:
 			scene.game.language = language
 			scene.open_territory()
 			scene.set_territory_tool("house")
-			scene.territory_cell = Vector2i(17, 27)
+			# The unlocked area grows with city level; pick a footprint that
+			# crosses its current edge instead of relying on a fixed old boundary.
+			scene.territory_cell = Vector2i(scene.game.territory.expansion_cols.y, scene.game.territory.expansion_rows.y)
 			scene.refresh()
 			check(scene.territory_reason() == "outside" and scene.sheet.find_child("ConfirmTerritory", true, false).disabled, "An invalid footprint is explained and cannot be purchased")
 			var budget: int = scene.game.budget

@@ -175,7 +175,11 @@ func run() -> void:
 		scene.audio.shutdown()
 		await create_timer(0.1).timeout
 		viewport.queue_free()
-		await process_frame
+		# Scene redraws queue old VisualRoot children for deletion; let the
+		# queued nodes and the SubViewport fully leave the ObjectDB before the
+		# headless process exits (the check script treats leak warnings as errors).
+		for _frame in range(3):
+			await process_frame
 	if failures == 0:
 		print("BUILDING LEVEL CHECKS: PASS")
 	quit(0 if failures == 0 else 1)

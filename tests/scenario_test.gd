@@ -92,13 +92,22 @@ func run() -> void:
 	corrupt.store_string('{"version":1,"buildings":[]}')
 	corrupt.close()
 	check(not game.load_game(), "Reject corrupt save")
+	var old_layout := Simulation.new()
+	old_layout.save_path = "user://test_startup.json"
+	old_layout.save_game()
+	var old_data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(old_layout.save_path))
+	old_data.erase("city_layout_version")
+	old_data.empty_city_mode = false
+	var old_file := FileAccess.open(old_layout.save_path, FileAccess.WRITE)
+	old_file.store_string(JSON.stringify(old_data))
+	old_file.close()
 	var scene = load("res://main.tscn").instantiate()
 	scene.game.save_path = "user://test_startup.json"
 	root.add_child(scene)
 	await process_frame
 	check(scene.game.empty_city_mode and scene.game.budget == 0 and scene.game.income() == 0, "A clean app start opens a zero-budget empty city")
 	check(scene.plots.get_child_count() == 0 and not scene.scenery.visible and not scene.car.visible and not scene.fire_car.visible, "The clean map has no old plots, town geometry, or service vehicle")
-	check(scene.game.district_house_count() == 0 and scene.game.territory.buildings.is_empty(), "The fogged city contains no inherited buildings")
+	check(scene.game.district_house_count() == 0 and scene.game.territory.buildings.is_empty() and scene.game.city_layout_version == 2, "An old saved district migrates to a blank natural city exactly once")
 	var subsidy_card := scene.subsidy_dialog.find_child("SubsidyOfferCard", true, false) as Control
 	var subsidy_buttons: Array = scene.subsidy_dialog.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Получить"))
 	check(subsidy_card != null and subsidy_buttons.size() == 2 and subsidy_card.get_global_rect().end.y <= scene.screen.size.y, "The startup subsidy options fit inside the phone screen")

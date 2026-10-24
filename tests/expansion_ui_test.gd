@@ -179,7 +179,7 @@ func run() -> void:
 			for dx in range(2):
 				scene.open_territory()
 				scene.set_territory_tool("clear")
-				scene.territory_cell = Vector2i(12 + dx, 19 + dy)
+				scene.territory_cell = Vector2i(14 + dx, 19 + dy)
 				scene.refresh()
 				scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
 				await process_frame
@@ -190,18 +190,18 @@ func run() -> void:
 		scene.open_territory()
 		scene.set_territory_tool("service")
 		scene.set_service_type("fire_station")
-		scene.territory_cell = Vector2i(12, 19)
+		scene.territory_cell = Vector2i(14, 19)
 		scene.refresh()
 		var service_choice_visible: bool = scene.sheet.find_children("*", "Button", true, false).any(func(item): return item.text == scene.t("fire_station"))
 		var service_valid: bool = scene.territory_reason() == "" and not scene.sheet.find_child("ConfirmTerritory", true, false).disabled
 		scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
 		await process_frame
-		check(service_valid and not scene.game.construction_job.is_empty() and scene.game.construction_job.type_id == "fire_station" and scene.game.territory.state_at(13, 20) == "free", "Service selection starts a worksite without occupying its lot early")
+		check(service_valid and not scene.game.construction_job.is_empty() and scene.game.construction_job.type_id == "fire_station" and scene.game.territory.state_at(15, 20) == "free", "Service selection starts a worksite without occupying its lot early")
 		var service_task: Dictionary = scene.game.construction_job.duplicate(true)
 		scene.game.tick(6.1)
 		scene.handle_construction_finish(service_task)
 		scene.refresh()
-		check(scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(13, 20) == "occupied", "Finished player-placed fire station occupies its full footprint")
+		check(scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(15, 20) == "occupied", "Finished player-placed fire station occupies its full footprint")
 		scene.game.buildings[3] = "cafe"
 		scene.select_plot(3)
 		check(scene.action_height < 430 and scene.sheet.get_global_rect().end.y <= scene.navbar.position.y + 1, "Café card fits its content without a fixed empty footer")

@@ -26,19 +26,27 @@ func run() -> void:
 	check(game.territory.building_by_id(Simulation.FIRE_STATION_ID).is_empty(), "A new city has no automatically placed fire station")
 	var before: Dictionary = game.metrics()
 	var roads := [Vector2i(9, 19), Vector2i(9, 20), Vector2i(9, 21), Vector2i(10, 21), Vector2i(11, 21), Vector2i(11, 22)]
-	var lots := [Vector2i(10, 19), Vector2i(12, 21)]
+	var near_lot := Vector2i(10, 19)
 	var budget := game.budget
 	check(not game.build_grid_road(17, 27) and game.budget == budget, "Invalid placement has no charge")
 	for cell in roads:
 		check(game.clear_grid_cell(cell.x, cell.y), "Clear a road cell")
 		check(game.build_grid_road(cell.x, cell.y), "Build a connected road with a turn")
-	for lot in lots:
-		for dy in range(2):
-			for dx in range(2):
-				check(game.clear_grid_cell(lot.x + dx, lot.y + dy), "Clear the whole footprint")
-		check(game.build_grid_house(lot.x, lot.y), "Build a home by the new road")
+	for dy in range(2):
+		for dx in range(2):
+			check(game.clear_grid_cell(near_lot.x + dx, near_lot.y + dy), "Clear the whole footprint")
+	check(game.build_grid_house(near_lot.x, near_lot.y), "Build a home by the new road")
+	# The first home's automatic road ring occupies the adjacent cells. Extend
+	# a branch beyond the ring before placing the farther home.
+	for cell in [Vector2i(12, 22), Vector2i(13, 22)]:
+		check(game.clear_grid_cell(cell.x, cell.y) and game.build_grid_road(cell.x, cell.y), "Extend a connected road beyond the automatic house contour")
+	var far_lot := Vector2i(13, 23)
+	for dy in range(2):
+		for dx in range(2):
+			check(game.clear_grid_cell(far_lot.x + dx, far_lot.y + dy), "Clear the whole far footprint")
+	check(game.build_grid_house(far_lot.x, far_lot.y), "Build a farther home by the connected road")
 	var near_id: String = game.territory.building_at(10, 19).instance_id
-	var far_id: String = game.territory.building_at(12, 21).instance_id
+	var far_id: String = game.territory.building_at(13, 23).instance_id
 	check(game.metrics().population == before.population + 16 and game.metrics().income == before.income + 2, "Both expansion homes enter the shared economy")
 	check(game.transit_metrics().served == before.served + 8 and game.transit_metrics().covered == before.covered + 8, "Only the home within walking distance enters route coverage and demand")
 	var weighted := 0
@@ -93,12 +101,12 @@ func run() -> void:
 	check(final.territory.state_at(10, 19) == "free", "Expansion footprint is released")
 	for dy in range(2):
 		for dx in range(2):
-			check(final.clear_grid_cell(12 + dx, 19 + dy), "Clear a service-building footprint")
-	check(final.build_grid_service(12, 19, "fire_station"), "Player can place a fire station beside a connected road")
-	var station: Dictionary = final.territory.building_at(12, 19)
+			check(final.clear_grid_cell(15 + dx, 19 + dy), "Clear a service-building footprint")
+	check(final.build_grid_service(15, 19, "fire_station"), "Player can place a fire station beside a connected road")
+	var station: Dictionary = final.territory.building_at(15, 19)
 	check(station.type_id == "fire_station" and station.get("service_building", false), "Fire station uses a stable type and a saved footprint")
-	check(final.territory.state_at(12, 19) == "occupied" and not final.build_grid_road(12, 19), "Service footprint cannot be overbuilt with a road")
-	check(not final.build_grid_house(12, 19), "Service footprint cannot be overbuilt with a house")
+	check(final.territory.state_at(15, 19) == "occupied" and not final.build_grid_road(15, 19), "Service footprint cannot be overbuilt with a road")
+	check(not final.build_grid_house(15, 19), "Service footprint cannot be overbuilt with a house")
 	final.save_game()
 	var service_reload := Simulation.new()
 	service_reload.save_path = game.save_path

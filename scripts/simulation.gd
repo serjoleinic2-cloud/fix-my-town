@@ -13,6 +13,7 @@ const DistrictWorld = preload("res://scripts/district_world.gd")
 const SAVE_PATH = "user://progress.json"
 var budget: int = 300
 var empty_city_mode: bool = false
+var city_layout_version: int = 0
 var subsidy_debt: int = 0
 var subsidy_threshold: int = 0
 var subsidy_installment: int = 0
@@ -73,6 +74,7 @@ func start_empty_city() -> void:
 	# terrain grid and roads, but remove every legacy building and incident.
 	budget = 0
 	empty_city_mode = true
+	city_layout_version = 2
 	subsidy_debt = 0
 	subsidy_threshold = 0
 	subsidy_installment = 0
@@ -1490,7 +1492,7 @@ func save_game() -> void:
 		encoded_police_job.route = police_points
 		var police_position: Vector3 = encoded_police_job.vehicle
 		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
-	var data := {"version": 8, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode,
+	var data := {"version": 8, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
 		"subsidy_debt": subsidy_debt, "subsidy_threshold": subsidy_threshold, "subsidy_installment": subsidy_installment, "subsidy_income_accumulated": subsidy_income_accumulated,
 		"city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
@@ -1519,6 +1521,8 @@ func load_game() -> bool:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
 			return false
 	if data.has("empty_city_mode") and typeof(data.empty_city_mode) != TYPE_BOOL:
+		return false
+	if data.has("city_layout_version") and (not (data.city_layout_version is int or data.city_layout_version is float) or not is_finite(float(data.city_layout_version)) or int(data.city_layout_version) != float(data.city_layout_version) or int(data.city_layout_version) < 0 or int(data.city_layout_version) > 2):
 		return false
 	var loaded_subsidy_debt := int(data.get("subsidy_debt", 0))
 	var loaded_subsidy_threshold := int(data.get("subsidy_threshold", 0))
@@ -1792,6 +1796,7 @@ func load_game() -> bool:
 	territory = loaded_territory
 	budget = clampi(int(data.budget), 0, 1000000)
 	empty_city_mode = bool(data.get("empty_city_mode", false))
+	city_layout_version = int(data.get("city_layout_version", 0))
 	subsidy_debt = loaded_subsidy_debt
 	subsidy_threshold = loaded_subsidy_threshold
 	subsidy_installment = loaded_subsidy_installment

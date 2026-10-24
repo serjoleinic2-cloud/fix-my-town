@@ -251,9 +251,10 @@ func t(key: String) -> String:
 
 func _ready() -> void:
 	var restored := game.load_game()
-	# A clean install on every platform starts in the same empty natural district.
-	# Existing saves are left intact and restored normally.
-	var clean_start_required: bool = not restored or (OS.has_feature("android") and not game.empty_city_mode)
+	# Version 1 discards legacy fixed plots, roads and buildings for the new
+	# natural-grid start. Old layouts are migrated once, then the new city saves
+	# normally and is not reset on later launches.
+	var clean_start_required: bool = not restored or game.city_layout_version < 2
 	if clean_start_required:
 		game.start_empty_city()
 		game.save_game()

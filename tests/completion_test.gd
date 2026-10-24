@@ -15,6 +15,7 @@ func run() -> void:
 	scene.set_process(false)
 	scene.game = preload("res://scripts/simulation.gd").new()
 	scene.game.save_path = "user://completion_test.json"
+	scene.game.city_layout_version = 2
 	scene.game.empty_city_mode = false
 	scene.scenery.visible = true
 	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):

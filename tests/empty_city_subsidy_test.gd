@@ -15,13 +15,27 @@ func run() -> void:
 	var city := Simulation.new()
 	city.save_path = "user://empty_city_subsidy_test.json"
 	city.start_empty_city()
+	check(city.city_layout_version == 2 and city.territory.buildings.is_empty(), "New game uses the clean natural-grid layout")
+	# The first building of a fresh town creates its own connected street ring.
+	for row in range(18, 24):
+		for col in range(10, 16):
+			city.territory.cells[row][col] = "free"
+	check(city.territory.place_building(12, 20, "house"), "The first building can be placed on cleared natural land")
+	var perimeter_is_road := true
+	for row in range(19, 23):
+		for col in range(11, 15):
+			var inside_building := col in [12, 13] and row in [20, 21]
+			if not inside_building and city.territory.state_at(col, row) != "road":
+				perimeter_is_road = false
+	check(perimeter_is_road, "Building placement forms roads around the entire footprint")
+	city.start_empty_city()
 	check(city.budget == 0 and city.income() == 0 and city.can_offer_subsidy(), "Empty city offers a subsidy only at zero budget and zero income")
 	check(city.take_subsidy(500), "Player can choose the 500 grant")
 	check(city.budget == 500 and city.subsidy_debt == 500 and city.subsidy_threshold == 1000 and city.subsidy_installment == 100, "500 grant creates the correct repayment terms")
 	check(not city.can_offer_subsidy() and not city.take_subsidy(1000), "A second grant is blocked while the first debt is outstanding")
 	var resumed := Simulation.new()
 	resumed.save_path = city.save_path
-	check(resumed.load_game() and resumed.empty_city_mode and resumed.subsidy_debt == 500 and resumed.subsidy_threshold == 1000, "Empty city and subsidy debt survive save/load")
+	check(resumed.load_game() and resumed.empty_city_mode and resumed.city_layout_version == 2 and resumed.subsidy_debt == 500 and resumed.subsidy_threshold == 1000, "Empty city layout and subsidy debt survive save/load")
 	resumed.buildings[3] = "cafe"
 	resumed.subsidy_income_accumulated = 994
 	resumed.tick(12.0, false)

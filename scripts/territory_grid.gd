@@ -191,12 +191,13 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 		elif not has_access and automatic_path.is_empty():
 			return false
 		for path_cell: Vector2i in automatic_path:
-			if state_at(path_cell.x, path_cell.y) == "free":
+			if state_at(path_cell.x, path_cell.y) in ["free", "forest"]:
 				cells[path_cell.y][path_cell.x] = "road"
-		# Existing roads may touch the footprint, but always add the free perimeter
-		# cells so each building has a readable local street contour.
+		# Every new building gets a continuous one-cell road contour. Free ground
+		# and forest are converted as part of construction; existing roads join
+		# the contour, while occupied building cells remain untouched.
 		for contour_cell: Vector2i in building_contour(entry_for_access):
-			if state_at(contour_cell.x, contour_cell.y) == "free":
+			if state_at(contour_cell.x, contour_cell.y) in ["free", "forest"]:
 				cells[contour_cell.y][contour_cell.x] = "road"
 	for dy in range(footprint.y):
 		for dx in range(footprint.x):
@@ -309,17 +310,12 @@ func has_constructed_network() -> bool:
 
 func building_contour(entry: Dictionary) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
-	var seen: Dictionary = {}
-	for dy in range(entry.height):
-		for dx in range(entry.width):
-			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var cell := Vector2i(entry.col + dx, entry.row + dy) + offset
-				var inside: bool = cell.x >= entry.col and cell.x < entry.col + entry.width and cell.y >= entry.row and cell.y < entry.row + entry.height
-				if inside or not in_bounds(cell.x, cell.y) or seen.has(cell):
-					continue
-				seen[cell] = true
-				if state_at(cell.x, cell.y) == "free":
-					result.append(cell)
+	for row in range(entry.row - 1, entry.row + entry.height + 1):
+		for col in range(entry.col - 1, entry.col + entry.width + 1):
+			var inside: bool = col >= entry.col and col < entry.col + entry.width and row >= entry.row and row < entry.row + entry.height
+			if inside or not in_bounds(col, row) or state_at(col, row) not in ["free", "forest"]:
+				continue
+			result.append(Vector2i(col, row))
 	return result
 
 func auto_access_path(entry: Dictionary) -> Array[Vector2i]:

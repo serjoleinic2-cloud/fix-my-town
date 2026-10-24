@@ -19,6 +19,7 @@ var world: Node3D
 var scenery: Node3D
 var plots: Node3D
 var territory_visuals: Node3D
+var clean_start_visual: bool = false
 var fog_visuals: MultiMeshInstance3D
 var car: Node3D
 var fire_car: Node3D
@@ -601,6 +602,7 @@ func build_world() -> void:
 	world.add_child(scenery)
 	scenery.build()
 	var empty_city: bool = game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty()
+	clean_start_visual = empty_city
 	if empty_city:
 		# Do not show the legacy showcase streets in a brand-new city.
 		scenery.visible = false
@@ -632,8 +634,10 @@ func build_world() -> void:
 	car = create_object(world, "repair_van", "crew_0", map_position(game.vehicle))
 	fire_car = create_object(world, "fire_engine", "fire_engine_0", map_position(game.vehicle))
 	fire_car.position = car.position
-	car.visible = game.job != "fire"
-	fire_car.visible = game.job == "fire"
+	car.visible = not clean_start_visual and game.job != "fire"
+	fire_car.visible = not clean_start_visual and game.job == "fire"
+	leak_effect.visible = not clean_start_visual and game.legacy_problem_available("leak")
+	signal_object.visible = not clean_start_visual and game.legacy_problem_available("signal")
 	fire_car.set_language(game.language)
 	make_marker("SignalMarker", Vector3(-14.4, 5, 0))
 	make_marker("LeakMarker", map_position(Vector3(-9, 5, 6)))
@@ -2057,9 +2061,9 @@ func refresh() -> void:
 	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
 	scenery.traffic_controller.update_lights()
-	leak_effect.visible = game.legacy_problem_available("leak")
-	world.get_node("LeakMarker").visible = game.legacy_problem_available("leak")
-	world.get_node("SignalMarker").visible = game.legacy_problem_available("signal")
+	leak_effect.visible = not clean_start_visual and game.legacy_problem_available("leak")
+	world.get_node("LeakMarker").visible = not clean_start_visual and game.legacy_problem_available("leak")
+	world.get_node("SignalMarker").visible = not clean_start_visual and game.legacy_problem_available("signal")
 	build_sheet()
 	update_preview()
 	sync_construction_site()
@@ -2580,8 +2584,8 @@ func _process(delta: float) -> void:
 	update_crew_status()
 	car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
 	fire_car.position = car.position
-	car.visible = game.job != "fire"
-	fire_car.visible = game.job == "fire"
+	car.visible = not clean_start_visual and game.job != "fire"
+	fire_car.visible = not clean_start_visual and game.job == "fire"
 	if fire_car.visual_root.get_child_count() > 0:
 		var primary_model: Node = fire_car.visual_root.get_child(0)
 		if primary_model.has_method("set_emergency_lights"):

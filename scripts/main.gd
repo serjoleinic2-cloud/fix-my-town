@@ -3309,7 +3309,7 @@ func build_grid_house_sheet() -> void:
 		selection_kind = "grid_upgrade"
 		refresh(), true)
 	improve.name = "UpgradeButton"
-	var next_house_stage_unlocked := not game.empty_city_mode or game.campaign_stage > entry.level
+	var next_house_stage_unlocked: bool = not game.empty_city_mode or game.campaign_stage > entry.level
 	improve.disabled = grid_ruined or entry.level >= 3 or not game.construction_job.is_empty() or not next_house_stage_unlocked
 	if grid_ruined:
 		label(18, sheet_column, tr_text("Руины нельзя улучшать. Сначала восстановите дом.", "Ruins cannot be upgraded. Rebuild the home first.")).add_theme_color_override("font_color", Color("b35b49"))

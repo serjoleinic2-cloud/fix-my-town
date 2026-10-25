@@ -13,6 +13,10 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	var frontier_reset_probe := TerritoryGrid.new()
+	frontier_reset_probe.strict_building_frontier = true
+	frontier_reset_probe.reset()
+	check(not frontier_reset_probe.strict_building_frontier, "Resetting the territory also resets its build-frontier mode")
 	var brand_new := Simulation.new()
 	var initial_roads := 0
 	for row in range(TerritoryGrid.HEIGHT):
@@ -27,47 +31,51 @@ func run() -> void:
 	city.save_path = previous_city.save_path
 	check(city.buildings.is_empty() and city.territory.buildings.is_empty(), "New Game starts from an empty state instead of the legacy test layout")
 	city.start_empty_city()
-	check(city.city_layout_version == 3 and city.territory.buildings.is_empty(), "New game uses the clean natural-grid layout")
-	var only_forest := true
+	check(city.city_layout_version == 4 and city.has_city_hall(), "New game starts with its permanent City Hall")
+	var only_foundation := city.territory.buildings.size() == 1 and city.territory.buildings[0].type_id == "city_hall"
 	var road_count := 0
+	var occupied_count := 0
 	for row in range(TerritoryGrid.HEIGHT):
 		for col in range(TerritoryGrid.WIDTH):
-			if city.territory.state_at(col, row) != "forest":
-				only_forest = false
 			if city.territory.state_at(col, row) == "road":
 				road_count += 1
-	check(only_forest and road_count == 0 and city.territory.buildings.is_empty() and city.all_buildings().is_empty(), "Clean city has only natural terrain, with no inherited roads or buildings")
+			elif city.territory.state_at(col, row) == "occupied":
+				occupied_count += 1
+	check(only_foundation and road_count == 12 and occupied_count == 4, "New city has only the City Hall, its 12-tile street ring, and natural terrain")
 	check(city.incidents.is_empty() and city.job == "" and city.fire_assignments().is_empty() and city.police_job.is_empty() and city.construction_job.is_empty(), "Clean city has no incidents or active service/construction assignments")
-	# The highlighted centre is reserved for City Hall, which creates the first street ring.
-	for row in range(18, 24):
-		for col in range(10, 16):
-			city.territory.cells[row][col] = "free"
-	check(city.territory.place_building(12, 19, "city_hall"), "The first city building is the reserved City Hall")
+	check(city.territory.placement_reason(12, 19, "clear") == "not_forest" and not city.start_grid_construction(12, 19, "house"), "The permanent City Hall cannot be cleared or built over")
+	check(city.territory.placement_reason(17, 20, "clear") == "outside", "Expansion remains hidden beyond the starting pocket")
 	var perimeter_is_road := true
 	for row in range(18, 22):
 		for col in range(11, 15):
 			var inside_building := col in [12, 13] and row in [19, 20]
 			if not inside_building and city.territory.state_at(col, row) != "road":
 				perimeter_is_road = false
-	check(perimeter_is_road, "City Hall placement forms roads around its entire footprint")
+	check(perimeter_is_road, "The starting City Hall has roads around its entire footprint")
 	city.start_empty_city()
 	check(city.budget == 0 and city.income() == 0 and city.can_offer_subsidy(), "Empty city offers a subsidy only at zero budget and zero income")
 	city.save_game()
 	var restarted := Simulation.new()
 	restarted.save_path = city.save_path
-	check(restarted.load_game() and restarted.empty_city_mode and restarted.territory.buildings.is_empty() and restarted.all_buildings().is_empty(), "Restarting a New Game does not restore old legacy plots")
-	var restart_is_natural := true
-	for row in range(TerritoryGrid.HEIGHT):
-		for col in range(TerritoryGrid.WIDTH):
-			if restarted.territory.state_at(col, row) != "forest":
-				restart_is_natural = false
-	check(restart_is_natural, "Save/load never calls legacy sync for a clean city")
+	check(restarted.load_game() and restarted.empty_city_mode and restarted.has_city_hall() and restarted.city_layout_version == 4, "Restarting preserves the starting City Hall and its current city format")
+	var old_empty_city := Simulation.new(false)
+	old_empty_city.start_empty_city()
+	old_empty_city.territory = TerritoryGrid.new()
+	old_empty_city.territory.initialize_natural_terrain(12, 20, 3)
+	old_empty_city.city_layout_version = 3
+	old_empty_city.save_path = "user://city_hall_v3_migration_test.json"
+	old_empty_city.save_game()
+	var migrated_city := Simulation.new(false)
+	migrated_city.save_path = old_empty_city.save_path
+	check(migrated_city.load_game() and migrated_city.city_layout_version == 4 and migrated_city.has_city_hall(), "An old empty-city save receives the starting City Hall once without a full reset")
+	DirAccess.remove_absolute(old_empty_city.save_path)
+	DirAccess.remove_absolute(old_empty_city.save_path + ".tmp")
 	check(city.take_subsidy(500), "Player can choose the 500 grant")
 	check(city.budget == 500 and city.subsidy_debt == 500 and city.subsidy_threshold == 1000 and city.subsidy_installment == 100, "500 grant creates the correct repayment terms")
 	check(not city.can_offer_subsidy() and not city.take_subsidy(1000), "A second grant is blocked while the first debt is outstanding")
 	var resumed := Simulation.new(true)
 	resumed.save_path = city.save_path
-	check(resumed.load_game() and resumed.empty_city_mode and resumed.city_layout_version == 3 and resumed.subsidy_debt == 500 and resumed.subsidy_threshold == 1000, "Empty city layout and subsidy debt survive save/load")
+	check(resumed.load_game() and resumed.empty_city_mode and resumed.city_layout_version == 4 and resumed.has_city_hall() and resumed.subsidy_debt == 500 and resumed.subsidy_threshold == 1000, "City foundation and subsidy debt survive save/load")
 	resumed.buildings[3] = "cafe"
 	resumed.subsidy_income_accumulated = 994
 	resumed.tick(12.0, false)

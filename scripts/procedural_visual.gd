@@ -326,19 +326,55 @@ func set_language(language: String) -> void:
 			sign.text = "СЛУЖБЫ" if language == "ru" else "SERVICE"
 
 func city_hall() -> void:
-	Art.box(self, Vector3(0, 0.55, 0), Vector3(8.5, 0.7, 8.5), Color("b7ae94"))
-	Art.box(self, Vector3(0, 3.1, 0), Vector3(7.8, 5.1, 7.0), Color("eee5cf"))
-	Art.box(self, Vector3(0, 5.85, 0), Vector3(8.4, 0.28, 7.6), Color("5b7790"))
-	for x in [-2.5, -1.25, 0.0, 1.25, 2.5]:
-		Art.cylinder(self, Vector3(x, 2.9, 3.45), 0.2, 3.5, Color("e7dcc2"), 0.0, 10)
-	Art.box(self, Vector3(0, 1.75, 3.57), Vector3(1.3, 2.8, 0.16), Color("506b82"))
-	Art.box(self, Vector3(0, 6.35, 0), Vector3(1.35, 1.15, 1.35), Color("c9bda0"))
-	Art.box(self, Vector3(0, 7.06, 0), Vector3(0.12, 1.0, 0.12), Color("77796d"))
+	# Monumental low-poly civic hall: stone forecourt, broad wings and a clear
+	# classical silhouette that reads from the fixed isometric camera.
+	Art.box(self, Vector3(0, 0.18, 0), Vector3(9.1, 0.28, 9.1), Color("b8b49f"))
+	Art.box(self, Vector3(0, 0.38, -0.15), Vector3(8.35, 0.36, 7.7), Color("e6dfcc"))
+	Art.box(self, Vector3(0, 2.98, -0.55), Vector3(5.15, 5.05, 5.65), Color("e8e1d1"))
+	Art.box(self, Vector3(-3.18, 2.55, -0.68), Vector3(1.25, 4.15, 5.15), Color("d7d2c3"))
+	Art.box(self, Vector3(3.18, 2.55, -0.68), Vector3(1.25, 4.15, 5.15), Color("d7d2c3"))
+	# Deep blue rooflines distinguish the civic building from ordinary houses.
+	Art.box(self, Vector3(0, 5.62, -0.52), Vector3(5.65, 0.34, 6.15), Color("455f78"))
+	Art.box(self, Vector3(-3.18, 4.72, -0.68), Vector3(1.55, 0.28, 5.45), Color("637b8c"))
+	Art.box(self, Vector3(3.18, 4.72, -0.68), Vector3(1.55, 0.28, 5.45), Color("637b8c"))
+	# Grand portico, repeated stone columns, and a broad public staircase.
+	Art.box(self, Vector3(0, 5.1, 2.48), Vector3(6.6, 0.42, 1.55), Color("e9e3d4"))
+	for x in [-2.55, -1.53, -0.51, 0.51, 1.53, 2.55]:
+		Art.cylinder(self, Vector3(x, 2.72, 3.12), 0.19, 4.35, Color("f2ecdc"), 0.82, 10)
+		Art.cylinder(self, Vector3(x, 0.58, 3.12), 0.29, 0.22, Color("c4bba5"), 0.94, 10)
+	for step in range(3):
+		Art.box(self, Vector3(0, 0.26 + step * 0.19, 3.64 + step * 0.43), Vector3(4.4 + step * 0.75, 0.24, 0.72), Color("c9c3b3"))
+	# Pediment with an inset blue clock medallion.
+	Art.triangles(self, PackedVector3Array([
+		Vector3(-3.35, 5.25, 3.02), Vector3(3.35, 5.25, 3.02), Vector3(0, 7.15, 3.02)
+	]), Color("eee7d8"))
+	var clock := Art.cylinder(self, Vector3(0, 5.93, 3.105), 0.43, 0.12, Color("b49b62"), 1.0, 20)
+	clock.rotation.x = PI / 2
+	var clock_face := Art.cylinder(self, Vector3(0, 5.93, 3.19), 0.33, 0.035, Color("344d64"), 1.0, 20)
+	clock_face.rotation.x = PI / 2
+	Art.box(self, Vector3(0, 6.02, 3.22), Vector3(0.045, 0.19, 0.035), Color("f2e9cd"))
+	Art.box(self, Vector3(0.07, 5.91, 3.22), Vector3(0.17, 0.045, 0.035), Color("f2e9cd"))
+	# A blue-green dome and flag form the city-centre landmark.
+	Art.cylinder(self, Vector3(0, 6.0, -0.58), 1.6, 0.62, Color("b6ad98"), 1.0, 16)
+	var dome := Art.sphere(self, Vector3(0, 6.78, -0.58), 1.42, Color("527b87"))
+	dome.scale = Vector3(1.0, 0.68, 1.0)
+	Art.cylinder(self, Vector3(0, 7.9, -0.58), 0.13, 1.45, Color("b89d5c"), 0.8, 8)
+	Art.box(self, Vector3(0.55, 8.2, -0.58), Vector3(1.0, 0.48, 0.055), Color("3f7e81"))
+	Art.box(self, Vector3(0.55, 8.2, -0.545), Vector3(0.16, 0.16, 0.025), Color("e4c675"))
+	# Tall blue entrance doors and front-facing windows make the facade legible.
+	Art.box(self, Vector3(0, 1.56, 3.2), Vector3(1.25, 2.3, 0.16), Color("3c596d"))
+	Art.box(self, Vector3(0, 1.52, 3.3), Vector3(0.05, 2.0, 0.035), Color("b6a56f"))
+	for x in [-3.16, -2.12, 2.12, 3.16]:
+		Art.box(self, Vector3(x, 3.05, 1.94), Vector3(0.58, 1.35, 0.12), Color("7fabb4"))
+		Art.box(self, Vector3(x, 3.05, 2.02), Vector3(0.66, 0.09, 0.07), Color("f0e7d6"))
+	Art.box(self, Vector3(0, 0.34, -3.8), Vector3(5.7, 0.12, 0.36), Color("71915f"))
+	for x in [-2.0, 2.0]:
+		Art.tree(self, Vector3(x, 0.38, -3.8), 0.42, false, 2)
 	var sign := Label3D.new()
 	sign.text = "МЭРИЯ"
-	sign.font_size = 36
-	sign.pixel_size = 0.01
-	sign.position = Vector3(0, 4.6, 3.62)
+	sign.font_size = 42
+	sign.pixel_size = 0.012
+	sign.position = Vector3(0, 4.75, 3.28)
 	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	add_child(sign)
 	signs.append(sign)

@@ -133,7 +133,7 @@ const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "ser
 const CATALOG_ITEMS := {
 	"residential": ["house", "elite_residence"],
 	"commercial": ["cafe", "park", "business_tower"],
-	"infrastructure": ["city_hall", "clear"],
+	"infrastructure": ["clear"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
@@ -288,7 +288,9 @@ func _ready() -> void:
 		game.signal_fixed = false
 		game.save_game()
 	if game.empty_city_mode:
-		focus_point = game.territory.cell_world(12, 20)
+		var starting_hall: Dictionary = game.territory.building_by_id("pine_district_city_hall_12_19")
+		if not starting_hall.is_empty():
+			focus_point = game.territory.building_center(starting_hall)
 	for identifier in game.fires:
 		notified_fire_ids[str(identifier)] = true
 	if OS.is_debug_build() and OS.has_feature("android"):
@@ -2556,9 +2558,12 @@ func update_preview() -> void:
 		preview.queue_free()
 		preview = null
 	clear_children(highlights)
-	if selection_kind == "territory" and territory_cell.x >= 0:
-		var color := Color("8ed6f8") if territory_reason() == "" else Color("e18470")
+	if selection_kind == "territory":
 		var selected_type := service_type if territory_tool == "service" else territory_tool
+		draw_buildable_hints(selected_type)
+		if territory_cell.x < 0:
+			return
+		var color := Color("8ed6f8") if territory_reason() == "" else Color("e18470")
 		var footprint := Vector2i.ONE if territory_tool in ["clear", "road"] else Catalog.footprint_cells(selected_type)
 		for dy in range(footprint.y):
 			for dx in range(footprint.x):
@@ -2642,6 +2647,49 @@ func update_preview() -> void:
 		item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for entry: Dictionary in influence_targets(selected, preview_kind):
 		outline(entry.position, Color("a7f384"))
+
+func draw_buildable_hints(type_id: String) -> void:
+	if type_id == "" or highlights == null:
+		return
+	var footprint := Vector2i.ONE if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id) else Catalog.footprint_cells(type_id)
+	if game.budget < catalog_cost(type_id):
+		return
+	if type_id not in ["clear", "road"] and maxi(game.city_level(), game.campaign_stage) < Catalog.unlock_level(type_id):
+		return
+	if type_id in ["elite_residence", "business_tower"] and game.renewal_credits < 2:
+		return
+	var placements: Array[Vector3] = []
+	for row in range(TerritoryGrid.HEIGHT):
+		for col in range(TerritoryGrid.WIDTH):
+			if game.empty_city_mode and not game.territory.is_revealed(col, row):
+				continue
+			var kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
+			if game.territory.placement_reason(col, row, kind) != "":
+				continue
+			var offset := Vector3((footprint.x - 1) * TerritoryGrid.CELL_SIZE * 0.5, 0.24, (footprint.y - 1) * TerritoryGrid.CELL_SIZE * 0.5)
+			placements.append(game.territory.cell_world(col, row) + offset)
+	if placements.is_empty():
+		return
+	var plane := PlaneMesh.new()
+	plane.size = Vector2.ONE
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = plane
+	multimesh.instance_count = placements.size()
+	var patch_size := Vector3(footprint.x * TerritoryGrid.CELL_SIZE - 0.9, 1.0, footprint.y * TerritoryGrid.CELL_SIZE - 0.9)
+	for index in range(placements.size()):
+		multimesh.set_instance_transform(index, Transform3D(Basis().scaled(patch_size), placements[index]))
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = Color(0.68, 0.82, 0.54, 0.19) if type_id == "clear" else Color(0.48, 0.8, 0.67, 0.17)
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var hint := MultiMeshInstance3D.new()
+	hint.name = "BuildableFrontierHints"
+	hint.multimesh = multimesh
+	hint.material_override = material
+	hint.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	highlights.add_child(hint)
 
 func make_ghost(object: Node3D, color: Color) -> void:
 	object.interaction_area.collision_layer = 0

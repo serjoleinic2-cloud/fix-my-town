@@ -18,6 +18,8 @@ func _ready() -> void:
 		cafe()
 	elif visual_type == "depot":
 		depot()
+	elif visual_type == "city_hall":
+		city_hall()
 	elif visual_type == "fire_station":
 		fire_station()
 	elif visual_type == "police_station":
@@ -47,7 +49,7 @@ func _ready() -> void:
 	elif visual_type == "empty":
 		for i in range(3):
 			Art.hedge(self, Vector3(-3 + i * 2.5, 0.24, -3.6), Vector3(0.7, 0.45, 0.55))
-	elif visual_type in ["excavator", "dump_truck"]:
+	elif visual_type in ["excavator", "dump_truck", "work_vehicle"]:
 		construction_vehicle()
 	elif visual_type == "repair_van":
 		van()
@@ -284,29 +286,25 @@ func van() -> void:
 	beacon_blue.name = "BeaconBlue"
 
 func construction_vehicle() -> void:
-	var excavator := visual_type == "excavator"
 	var yellow := Color("e5a932")
-	Art.box(self, Vector3(0, 0.55, 0), Vector3(2.2, 0.75, 3.6), Color("444b4d"))
+	var work_car := visual_type == "work_vehicle"
+	Art.box(self, Vector3(0, 0.72, 0), Vector3(2.0, 0.52, 3.7), yellow)
+	Art.box(self, Vector3(0, 1.35, 0.45), Vector3(1.75, 1.1, 1.65), yellow)
+	Art.box(self, Vector3(0, 1.48, 1.28), Vector3(1.36, 0.62, 0.08), Color("91b6bf"))
+	Art.box(self, Vector3(0, 1.13, -0.85), Vector3(1.5, 0.35, 1.55), Color("d79626"))
+	if not work_car:
+		Art.box(self, Vector3(0, 1.48, -1.45), Vector3(1.85, 0.65, 1.8), Color("efb83f"))
+		Art.box(self, Vector3(0, 1.84, -1.45), Vector3(1.92, 0.08, 1.88), Color("f4c852"))
 	for side in [-1, 1]:
-		Art.box(self, Vector3(side * 1.12, 0.48, 0), Vector3(0.28, 0.72, 3.8), Color("343a3b"))
-		for z in [-1.25, -0.65, 0, 0.65, 1.25]:
-			var roller := Art.cylinder(self, Vector3(side * 1.28, 0.45, z), 0.25, 0.12, Color("656c6d"), 0.0, 10)
-			roller.rotation.z = PI / 2
-	if excavator:
-		Art.box(self, Vector3(0, 1.1, -0.25), Vector3(1.45, 0.65, 1.65), yellow)
-		Art.box(self, Vector3(0, 1.75, -0.3), Vector3(1.25, 1.15, 1.2), yellow)
-		Art.box(self, Vector3(0, 2.0, 0.3), Vector3(1.05, 0.65, 0.12), Color("80a8ad"))
-		var upper_arm := Art.box(self, Vector3(-0.85, 2.15, 0.95), Vector3(0.42, 0.42, 2.1), yellow)
-		upper_arm.rotation.x = -0.32
-		var lower_arm := Art.box(self, Vector3(-1.25, 1.57, 2.15), Vector3(0.32, 0.32, 1.55), yellow)
-		lower_arm.rotation.x = 0.4
-		Art.box(self, Vector3(-1.35, 0.95, 2.8), Vector3(0.72, 0.42, 0.62), Color("474d4e"))
-	else:
-		Art.box(self, Vector3(0, 1.05, -0.25), Vector3(1.55, 0.7, 1.75), yellow)
-		Art.box(self, Vector3(0, 1.75, 0.25), Vector3(1.45, 1.1, 1.15), Color("e9b43b"))
-		Art.box(self, Vector3(0, 1.95, 0.86), Vector3(1.1, 0.62, 0.08), Color("83a9ad"))
-		var bed := Art.box(self, Vector3(0, 1.35, -1.35), Vector3(1.9, 0.14, 1.8), Color("a85b42"))
-		bed.rotation.x = -0.13
+		for z in [-1.15, 1.05]:
+			var wheel := Art.cylinder(self, Vector3(float(side) * 1.0, 0.46, z), 0.42, 0.22, Color("343a3b"), 0.0, 12)
+			wheel.rotation.z = PI / 2
+			var hub := Art.cylinder(self, Vector3(float(side) * 1.13, 0.46, z), 0.2, 0.04, Color("a5a8a6"), 0.0, 10)
+			hub.rotation.z = PI / 2
+	if work_car:
+		var beacon := Art.cylinder(self, Vector3(0, 2.03, 0.5), 0.23, 0.2, Color("ff8c24"), 0.0, 10)
+		beacon.name = "BeaconLamp"
+		beacon.material_override = Art.material(Color("ff8c24"))
 
 func set_serviced(value: bool) -> void:
 	for item: MeshInstance3D in windows:
@@ -316,10 +314,30 @@ func set_language(language: String) -> void:
 	for sign: Label3D in signs:
 		if visual_type == "cafe":
 			sign.text = "КАФЕ" if language == "ru" else "CAFE"
+		elif visual_type == "city_hall":
+			sign.text = "МЭРИЯ" if language == "ru" else "CITY HALL"
 		elif visual_type == "fire_station":
 			sign.text = "ПОЖАРНЫЕ" if language == "ru" else "FIRE"
 		else:
 			sign.text = "СЛУЖБЫ" if language == "ru" else "SERVICE"
+
+func city_hall() -> void:
+	Art.box(self, Vector3(0, 0.55, 0), Vector3(8.5, 0.7, 8.5), Color("b7ae94"))
+	Art.box(self, Vector3(0, 3.1, 0), Vector3(7.8, 5.1, 7.0), Color("eee5cf"))
+	Art.box(self, Vector3(0, 5.85, 0), Vector3(8.4, 0.28, 7.6), Color("5b7790"))
+	for x in [-2.5, -1.25, 0.0, 1.25, 2.5]:
+		Art.cylinder(self, Vector3(x, 2.9, 3.45), 0.2, 3.5, Color("e7dcc2"), 0.0, 10)
+	Art.box(self, Vector3(0, 1.75, 3.57), Vector3(1.3, 2.8, 0.16), Color("506b82"))
+	Art.box(self, Vector3(0, 6.35, 0), Vector3(1.35, 1.15, 1.35), Color("c9bda0"))
+	Art.box(self, Vector3(0, 7.06, 0), Vector3(0.12, 1.0, 0.12), Color("77796d"))
+	var sign := Label3D.new()
+	sign.text = "МЭРИЯ"
+	sign.font_size = 36
+	sign.pixel_size = 0.01
+	sign.position = Vector3(0, 4.6, 3.62)
+	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	add_child(sign)
+	signs.append(sign)
 
 var signal_bulbs: MultiMesh
 

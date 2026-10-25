@@ -38,18 +38,18 @@ func run() -> void:
 				road_count += 1
 	check(only_forest and road_count == 0 and city.territory.buildings.is_empty() and city.all_buildings().is_empty(), "Clean city has only natural terrain, with no inherited roads or buildings")
 	check(city.incidents.is_empty() and city.job == "" and city.fire_assignments().is_empty() and city.police_job.is_empty() and city.construction_job.is_empty(), "Clean city has no incidents or active service/construction assignments")
-	# The first building of a fresh town creates its own connected street ring.
+	# The highlighted centre is reserved for City Hall, which creates the first street ring.
 	for row in range(18, 24):
 		for col in range(10, 16):
 			city.territory.cells[row][col] = "free"
-	check(city.territory.place_building(12, 20, "house"), "The first building can be placed on cleared natural land")
+	check(city.territory.place_building(12, 19, "city_hall"), "The first city building is the reserved City Hall")
 	var perimeter_is_road := true
-	for row in range(19, 23):
+	for row in range(18, 22):
 		for col in range(11, 15):
-			var inside_building := col in [12, 13] and row in [20, 21]
+			var inside_building := col in [12, 13] and row in [19, 20]
 			if not inside_building and city.territory.state_at(col, row) != "road":
 				perimeter_is_road = false
-	check(perimeter_is_road, "Building placement forms roads around the entire footprint")
+	check(perimeter_is_road, "City Hall placement forms roads around its entire footprint")
 	city.start_empty_city()
 	check(city.budget == 0 and city.income() == 0 and city.can_offer_subsidy(), "Empty city offers a subsidy only at zero budget and zero income")
 	city.save_game()

@@ -7,7 +7,9 @@ const ORIGIN := Vector3(-57.6, 0, -43.2) # world-space centre of cell (0, 0)
 const EXPANSION_COLS := Vector2i(8, 17)
 const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
-const BUILDINGS = ["house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "lawn", "flower_bed", "street_tree", "bush"]
+const CITY_HALL_TYPE := "city_hall"
+const CITY_HALL_SITE := Vector2i(12, 19)
+const BUILDINGS = ["city_hall", "house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
@@ -51,14 +53,20 @@ func initialize_natural_terrain(start_col: int = 12, start_row: int = 20, visibl
 	reveal_area(start_col, start_row, visible_radius)
 
 func set_expansion_level(level: int) -> void:
-	# Expand the playable ring while keeping a much larger hidden backing grid.
+	# Reveal new land as a frontier around the town centre and connected roads;
+	# city level increases the reach without revealing an arbitrary rectangle.
+	var radius := 3 + maxi(0, level - 1) * 3
+	for entry: Dictionary in buildings:
+		if entry.type_id == CITY_HALL_TYPE:
+			reveal_area(entry.col, entry.row, radius + 1)
+	for row in range(HEIGHT):
+		for col in range(WIDTH):
+			if cells[row][col] == "road" and connected_road(col, row):
+				reveal_area(col, row, maxi(1, radius - 2))
+	# Kept as compatibility metadata for old UI/save consumers only.
 	var growth := maxi(0, level - 1) * 6
 	expansion_cols = Vector2i(maxi(1, EXPANSION_COLS.x - growth), mini(WIDTH - 2, EXPANSION_COLS.y + growth))
 	expansion_rows = Vector2i(maxi(1, EXPANSION_ROWS.x - growth), mini(HEIGHT - 2, EXPANSION_ROWS.y + growth))
-	for row in range(expansion_rows.x, expansion_rows.y + 1):
-		for col in range(expansion_cols.x, expansion_cols.y + 1):
-			if in_bounds(col, row):
-				revealed[row][col] = true
 
 func migrate_legacy(legacy_buildings: Array) -> void:
 	for index in range(24):
@@ -135,7 +143,7 @@ func connected_road(col: int, row: int) -> bool:
 	var reaches_city := row <= 18 and ((row % 3 == 0) or (col <= 18 and col % 3 == 0))
 	while not queue.is_empty():
 		var current: Vector2i = queue.pop_front()
-		if current.y == 18 and current.x >= 0 and current.x < WIDTH:
+		if current.y == 18 and current.x >= 0 and current.x < WIDTH or is_city_hall_access_cell(current):
 			reaches_city = true
 		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var next: Vector2i = current + offset
@@ -143,6 +151,16 @@ func connected_road(col: int, row: int) -> bool:
 				visited[next] = true
 				queue.append(next)
 	return reaches_city
+
+func is_city_hall_access_cell(cell: Vector2i) -> bool:
+	for entry: Dictionary in buildings:
+		if entry.type_id != CITY_HALL_TYPE:
+			continue
+		var inside_x: bool = cell.x >= int(entry.col) and cell.x < int(entry.col) + int(entry.width)
+		var inside_y: bool = cell.y >= int(entry.row) and cell.y < int(entry.row) + int(entry.height)
+		if (inside_x and cell.y in [entry.row - 1, entry.row + entry.height]) or (inside_y and cell.x in [entry.col - 1, entry.col + entry.width]):
+			return true
+	return false
 
 func road_orientation(col: int, row: int) -> String:
 	# Остановка ориентируется вдоль оси улицы. На узлах выбираем ось с
@@ -181,6 +199,12 @@ func build_house(col: int, row: int) -> bool:
 func place_building(col: int, row: int, type_id: String) -> bool:
 	if type_id not in BUILDINGS:
 		return false
+	if type_id == CITY_HALL_TYPE:
+		for existing: Dictionary in buildings:
+			if existing.type_id == CITY_HALL_TYPE:
+				return false
+		if Vector2i(col, row) != CITY_HALL_SITE:
+			return false
 	var footprint := Vector2i.ONE if type_id in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
 	if not in_bounds(col, row) or not in_bounds(col + footprint.x - 1, row + footprint.y - 1):
 		return false
@@ -229,7 +253,7 @@ func path_to_city(col: int, row: int) -> Array[Vector2i]:
 	var goal: Vector2i = Vector2i(-1, -1)
 	while not queue.is_empty():
 		var current: Vector2i = queue.pop_front()
-		if current.y == 18:
+		if current.y == 18 or is_city_hall_access_cell(current):
 			goal = current
 			break
 		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
@@ -339,7 +363,11 @@ func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
 			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 				var edge := Vector2i(entry.col + dx, entry.row + dy) + offset
 				var inside: bool = edge.x >= entry.col and edge.x < entry.col + entry.width and edge.y >= entry.row and edge.y < entry.row + entry.height
-				if not inside and in_bounds(edge.x, edge.y) and state_at(edge.x, edge.y) == "free" and not previous.has(edge):
+				if inside or not in_bounds(edge.x, edge.y):
+					continue
+				if state_at(edge.x, edge.y) == "road" and connected_road(edge.x, edge.y):
+					return [edge]
+				if state_at(edge.x, edge.y) == "free" and not previous.has(edge):
 					queue.append(edge)
 					previous[edge] = Vector2i(-1, -1)
 	var cursor := 0
@@ -350,7 +378,7 @@ func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
 			var next := current + offset
 			if not in_bounds(next.x, next.y) or previous.has(next):
 				continue
-			if state_at(next.x, next.y) == "road":
+			if state_at(next.x, next.y) == "road" and connected_road(next.x, next.y):
 				var path: Array[Vector2i] = [current]
 				var step := current
 				while previous[step].x >= 0:
@@ -364,14 +392,12 @@ func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
 
 func placement_reason(col: int, row: int, tool: String) -> String:
 	var footprint := Vector2i.ONE if tool in ["clear", "road", "landscaping"] or tool in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
-	# Старые улицы тоже можно перестраивать: строительство дороги является
-	# общей операцией города, а ограничения расширения относятся к расчистке и
-	# размещению зданий.
-	var expansion_only := tool != "road"
-	if expansion_only and (col < expansion_cols.x or col + footprint.x - 1 > expansion_cols.y or row < expansion_rows.x or row + footprint.y - 1 > expansion_rows.y):
-		return "outside"
 	if not in_bounds(col, row) or col + footprint.x > WIDTH or row + footprint.y > HEIGHT:
 		return "outside"
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			if not is_revealed(col + dx, row + dy):
+				return "outside"
 	if tool == "clear":
 		return "" if state_at(col, row) == "forest" else "not_forest"
 	for dy in range(footprint.y):
@@ -383,7 +409,7 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 	var entry := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
 	if not has_constructed_network():
 		return "" if not building_contour(entry).is_empty() else "no_road"
-	return "" if not access_path(entry, Vector2i(12, 18)).is_empty() or not auto_access_path(entry).is_empty() else "no_road"
+	return "" if not auto_access_path(entry).is_empty() else "no_road"
 
 func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
 	if state_at(col, row) != "road":

@@ -59,6 +59,39 @@ func run() -> void:
 		loaded.tick(0.1)
 	check(loaded.leak_fixed, "Task completes after replacement and load")
 	var audio = scene.audio
+	var legacy_audio_game = scene.game
+	var clean_audio_game = Simulation.new(false)
+	clean_audio_game.save_path = "user://audio_clean_city.json"
+	clean_audio_game.start_empty_city()
+	clean_audio_game.save_game()
+	audio.set_loop("water", "water", "Effects", true, Vector3(-9, 0.5, 6))
+	audio.sync(clean_audio_game, 33, 0.1)
+	check(not audio.loops.has("water"), "A clean new city has no legacy water loop")
+	audio.warning_clock = 24.0
+	var clean_warning_voices_before: int = audio.voices.size()
+	audio.sync(clean_audio_game, 33, 0.1)
+	check(audio.voices.size() == clean_warning_voices_before, "An empty city does not emit false incident warnings")
+	var loaded_clean_audio_game = Simulation.new(false)
+	loaded_clean_audio_game.save_path = clean_audio_game.save_path
+	check(loaded_clean_audio_game.load_game(), "Clean city save loads for audio regression")
+	audio.set_loop("water", "water", "Effects", true, Vector3(-9, 0.5, 6))
+	audio.reset_state()
+	check(not audio.loops.has("water"), "New Game immediately stops a previous water loop")
+	audio.sync(loaded_clean_audio_game, 33, 0.1)
+	check(not audio.loops.has("water"), "Water loop does not return after restarting a clean city")
+	audio.sync(legacy_audio_game, 33, 0.1)
+	check(audio.loops.has("water"), "An active legacy leak starts its water loop")
+	audio.warning_clock = 24.0
+	var warning_voices_before: int = audio.voices.size()
+	audio.sync(legacy_audio_game, 33, 0.1)
+	check(audio.voices.size() > warning_voices_before, "Active leak can produce a periodic warning")
+	legacy_audio_game.leak_fixed = true
+	audio.sync(legacy_audio_game, 33, 0.1)
+	check(not audio.loops.has("water"), "Repairing the leak immediately stops water")
+	legacy_audio_game.leak_fixed = false
+	audio.sync(legacy_audio_game, 33, 0.1)
+	scene.game = legacy_audio_game
+	scene.refresh()
 	var city: AudioStreamWAV = audio.stream("city", true)
 	check(city.get_length() >= 60 and city.stereo, "Ambience is a long stereo field-recording loop")
 	audio.set_paused(false)
@@ -91,6 +124,7 @@ func run() -> void:
 	for type_id: String in Catalog.TYPES:
 		check(ResourceLoader.exists(Catalog.scene_path(type_id)), "Catalog resource exists: " + type_id)
 	DirAccess.remove_absolute(scene.game.save_path)
+	DirAccess.remove_absolute(clean_audio_game.save_path)
 	DirAccess.remove_absolute(audio.settings_path)
 	scene.audio.shutdown()
 	await create_timer(0.2).timeout

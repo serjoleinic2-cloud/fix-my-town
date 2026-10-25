@@ -2,6 +2,7 @@ extends RefCounted
 
 # Постоянные игровые типы и единственная точка выбора визуальных сцен.
 const TYPES = {
+	"city_hall": {"icon": "res://assets/icons/city_hall.svg", "scene": "res://scenes/visuals/city_hall.tscn", "cost": 180, "footprint": Vector2(9, 9)},
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
 	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
@@ -16,6 +17,7 @@ const TYPES = {
 	"cafe": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/cafe.tscn", "cost": 120, "mood": 5, "footprint": Vector2(9, 9)},
 	"park": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/park.tscn", "cost": 100, "mood": 5, "footprint": Vector2(9, 9)},
 	"repair_van": {"scene": "res://scenes/visuals/repair_van.tscn", "footprint": Vector2(1.8, 3.0)},
+	"work_vehicle": {"scene": "res://scenes/visuals/work_vehicle.tscn", "footprint": Vector2(2.4, 4.0)},
 	"excavator": {"scene": "res://scenes/visuals/excavator.tscn", "footprint": Vector2(2.4, 4.0)},
 	"dump_truck": {"scene": "res://scenes/visuals/dump_truck.tscn", "footprint": Vector2(2.4, 4.4)},
 	"fire_engine": {"scene": "res://scenes/visuals/fire_engine.tscn", "footprint": Vector2(2.2, 4.2)},
@@ -45,7 +47,7 @@ const ALTERNATIVES = {
 	"repair_van": "res://scenes/visuals/repair_van_alternate.tscn"
 }
 const UNLOCK_LEVELS = {
-	"house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1,
+	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
 }

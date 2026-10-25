@@ -131,6 +131,10 @@ func run() -> void:
 	scene.game.save_path = "user://test_ui.json"
 	# This section still exercises the retained legacy interaction layer, while
 	# startup itself is now explicitly verified as an empty natural city.
+	# The clean-start camera is centered on the new hub. Reframe explicitly for
+	# this legacy 24-plot fixture so map-picking assertions test input, not framing.
+	scene.camera.size = 76.0
+	scene.set_camera_focus(Vector3.ZERO)
 	scene.scenery.visible = true
 	scene.game.empty_city_mode = false
 	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):

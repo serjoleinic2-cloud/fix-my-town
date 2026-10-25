@@ -136,12 +136,17 @@ func set_loop(key: String, sound: String, channel: String, enabled: bool, positi
 		active.position = DistrictWorld.world_position(position_value)
 	active.stream_paused = paused
 
+func stop_loop(key: String) -> void:
+	set_loop(key, "", "Effects", false)
+
 func sync(game: RefCounted, zoom: float, delta: float) -> void:
 	zoom_gain = clampf(33.0 / zoom, 0.5, 1.4)
 	if paused:
 		return
 	warning_clock += delta
 	ambience_fade = minf(1, ambience_fade + delta / 2.0)
+	var leak_active: bool = game.legacy_problem_available("leak")
+	var signal_active: bool = game.legacy_problem_available("signal")
 	if not initialized:
 		last_signal = game.signal_fixed
 		last_leak = game.leak_fixed
@@ -150,17 +155,17 @@ func sync(game: RefCounted, zoom: float, delta: float) -> void:
 	if (not last_leak and game.leak_fixed) or (not last_signal and game.signal_fixed):
 		play_ui("success")
 		play("reaction", "Effects", last_vehicle)
-	if not last_leak and game.leak_fixed:
-		set_loop("water", "water", "Effects", false)
+	if not leak_active:
+		stop_loop("water")
 	if not last_completed and game.completed:
 		play_ui("level_up")
 	# В полевой записи уже есть птицы и редкий дальний транспорт.
 	set_loop("city", "city", "Ambience", true, null, ambience_fade * 0.6)
-	set_loop("water", "water", "Effects", not game.leak_fixed, Vector3(-9, 0.5, 6))
+	set_loop("water", "water", "Effects", leak_active, Vector3(-9, 0.5, 6))
 	var moving: bool = game.job != "" and game.route_index < game.route.size()
 	set_loop("engine", "engine", "Effects", moving, game.vehicle)
 	set_loop("repair", "repair", "Effects", game.job != "" and game.job_phase != "return" and not moving, game.vehicle)
-	if warning_clock >= 24 and (not game.leak_fixed or not game.signal_fixed or not game.fires.is_empty()):
+	if warning_clock >= 24 and (leak_active or signal_active or not game.fires.is_empty()):
 		play_ui("warning")
 		warning_clock = 0
 	last_job = game.job
@@ -217,6 +222,7 @@ func shutdown() -> void:
 	streams.clear()
 
 func reset_state() -> void:
+	stop_loop("water")
 	shutdown()
 	initialized = false
 	last_job = ""
@@ -225,4 +231,3 @@ func reset_state() -> void:
 
 func _exit_tree() -> void:
 	shutdown()
-

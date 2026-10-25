@@ -11,6 +11,8 @@ func check(value: bool, message: String) -> void:
 
 func finish_task(game: RefCounted, seconds: float) -> void:
 	game.tick(seconds)
+	if not game.construction_job.is_empty() and game.construction_job.get("kind", "") == "departing":
+		game.tick(1.3)
 
 func _initialize() -> void:
 	call_deferred("run")
@@ -28,7 +30,9 @@ func run() -> void:
 	check(legacy_resume.load_game() and legacy_resume.construction_job.kind == "upgrade_legacy", "Legacy upgrade work restores after restart")
 	check(is_equal_approx(legacy_resume.construction_progress(), legacy_upgrade_progress), "Legacy upgrade progress is restored")
 	legacy_resume.tick(3.8)
-	check(legacy_resume.building_level(16) == 2 and legacy_resume.construction_job.is_empty(), "Legacy house level changes after the saved work finishes")
+	check(legacy_resume.building_level(16) == 2 and legacy_resume.construction_job.get("kind", "") == "departing", "Legacy house level changes when work finishes before vehicles leave")
+	legacy_resume.tick(1.3)
+	check(legacy_resume.construction_job.is_empty(), "Legacy worksite clears after both vehicles leave")
 	DirAccess.remove_absolute(legacy_game.save_path)
 
 	var game := Simulation.new(true)
@@ -74,7 +78,7 @@ func run() -> void:
 	upgrade_reload.save_path = loaded.save_path
 	check(upgrade_reload.load_game() and upgrade_reload.construction_job.kind == "upgrade_grid", "Unfinished upgrade restores after a restart")
 	check(is_equal_approx(upgrade_reload.construction_progress(), upgrade_progress), "Upgrade progress survives reload")
-	upgrade_reload.tick(4.1)
+	finish_task(upgrade_reload, 4.1)
 	check(int(upgrade_reload.territory.building_by_id(identifier).level) == 2 and upgrade_reload.construction_job.is_empty(), "Upgrade changes level only when work finishes")
 	var before_population := loaded.population()
 	before_population = upgrade_reload.population()
@@ -87,15 +91,15 @@ func run() -> void:
 	resumed.save_path = upgrade_reload.save_path
 	check(resumed.load_game() and resumed.construction_job.kind == "demolish_grid", "Unfinished demolition is restored")
 	check(is_equal_approx(resumed.construction_progress(), demolition_progress), "Demolition progress survives reload")
-	resumed.tick(3.6)
+	finish_task(resumed, 3.6)
 	check(resumed.territory.building_by_id(identifier).is_empty() and resumed.territory.state_at(12, 19) == "free", "Demolition frees the complete footprint")
 	check(resumed.population() < before_population, "Demolition recalculates population immediately")
 	check(resumed.start_grid_construction(12, 19, "lawn"), "A freed cell accepts landscaping")
-	resumed.tick(6.1)
+	finish_task(resumed, 6.1)
 	check(resumed.territory.building_at(12, 19).type_id == "lawn", "Landscaping is placed after work finishes")
 	var lawn_id := str(resumed.territory.building_at(12, 19).instance_id)
 	check(resumed.start_grid_demolition(lawn_id), "Landscaping can be demolished from its object card")
-	resumed.tick(6.1)
+	finish_task(resumed, 6.1)
 	check(resumed.territory.building_at(12, 19).is_empty(), "Landscaping demolition frees one cell")
 	check(Catalog.unlock_level("police_station") == 2 and Catalog.unlock_level("hospital") == 3, "Service buildings use city-level unlocks")
 	check(Catalog.is_service("fire_station") and Catalog.is_landscaping("flower_bed"), "Catalog retains stable gameplay types")

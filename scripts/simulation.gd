@@ -120,10 +120,9 @@ func start_empty_city() -> void:
 	fire_triggered = false
 	transit = Transit.new()
 	district_tasks = [
-		{"id": "clear_3", "title": "Расчистить 3 участка", "done": false},
-		{"id": "build_4", "title": "Построить 4 дома", "done": false},
-		{"id": "fire_station", "title": "Построить пожарное депо", "done": false},
-		{"id": "quality_60", "title": "Довести качество до 60", "done": false}
+		{"id": "city_hall", "title": "Построить городской центр", "done": false},
+		{"id": "first_home", "title": "Построить первый дом", "done": false},
+		{"id": "first_service", "title": "Построить первую службу", "done": false}
 	]
 
 func plot_position(index: int) -> Vector3:
@@ -162,6 +161,13 @@ func district_task_progress() -> int:
 	for task: Dictionary in district_tasks:
 		var complete := bool(task.get("done", false))
 		match str(task.id):
+			"city_hall": complete = has_city_hall()
+			"first_home": complete = district_house_count() >= 1
+			"first_service":
+				for entry: Dictionary in territory.buildings:
+					if Catalog.is_service(entry.type_id):
+						complete = true
+						break
 			"clear_3": complete = cleared >= 3
 			"build_4": complete = district_house_count() >= 4
 			"fire_station": complete = has_service_building("fire_station")
@@ -444,10 +450,23 @@ func start_legacy_construction(index: int, type_id: String) -> bool:
 func start_grid_construction(col: int, row: int, type_id: String) -> bool:
 	if not construction_job.is_empty() or budget < Catalog.cost(type_id):
 		return false
+	if not initial_building_allowed(col, row, type_id):
+		return false
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else ("service" if Catalog.is_service(type_id) else "house")
 	if territory.placement_reason(col, row, placement_kind) != "" or city_level() < Catalog.unlock_level(type_id):
 		return false
 	return _start_construction({"kind": "build_grid", "type_id": type_id, "col": col, "row": row, "cost": Catalog.cost(type_id)})
+
+func has_city_hall() -> bool:
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == TerritoryGrid.CITY_HALL_TYPE:
+			return true
+	return false
+
+func initial_building_allowed(col: int, row: int, type_id: String) -> bool:
+	if not empty_city_mode or has_city_hall():
+		return type_id != TerritoryGrid.CITY_HALL_TYPE
+	return type_id == TerritoryGrid.CITY_HALL_TYPE and Vector2i(col, row) == TerritoryGrid.CITY_HALL_SITE
 
 func start_grid_upgrade(identifier: String) -> bool:
 	if not construction_job.is_empty():
@@ -475,7 +494,7 @@ func start_grid_clear(col: int, row: int) -> bool:
 	return _start_construction({"kind": "clear", "type_id": "", "col": col, "row": row, "cost": 5})
 
 func start_grid_road(col: int, row: int) -> bool:
-	if not construction_job.is_empty() or budget < 12 or territory.placement_reason(col, row, "road") != "":
+	if not construction_job.is_empty() or (empty_city_mode and not has_city_hall()) or budget < 12 or territory.placement_reason(col, row, "road") != "":
 		return false
 	return _start_construction({"kind": "road", "type_id": "", "col": col, "row": row, "cost": 12})
 
@@ -523,23 +542,28 @@ func _start_construction(fields: Dictionary) -> bool:
 			var route_point := territory.cell_world(route_cell.x, route_cell.y)
 			road_route.append([route_point.x, route_point.y, route_point.z])
 	if road_route.size() < 2:
-		road_route = [[truck_start.x, truck_start.y, truck_start.z], [truck_target.x, truck_target.y, truck_target.z]]
+		var truck_from := site + Vector3(-8.0, 0.0, -1.0)
+		var truck_to := site + Vector3(2.8, 0.0, -1.0)
+		var work_from := site + Vector3(-8.0, 0.0, 1.0)
+		var work_to := site + Vector3(-2.8, 0.0, 1.0)
+		road_route = [[truck_from.x, truck_from.y, truck_from.z], [truck_to.x, truck_to.y, truck_to.z]]
+		data.work_vehicle_route = [[work_from.x, work_from.y, work_from.z], [work_to.x, work_to.y, work_to.z]]
 	data.truck_route = road_route
 	data.truck_start_position = road_route[0].duplicate()
 	data.truck_target_position = road_route[road_route.size() - 1].duplicate()
 	data.truck_position = data.truck_start_position.duplicate()
 	truck_start = Vector3(data.truck_start_position[0], data.truck_start_position[1], data.truck_start_position[2])
 	truck_target = Vector3(data.truck_target_position[0], data.truck_target_position[1], data.truck_target_position[2])
-	var digger_start := truck_start
-	var digger_target := truck_target
-	if truck_start_cell.x != road_cell.x or truck_start_cell.y != road_cell.y:
+	var work_route: Array = data.get("work_vehicle_route", []).duplicate(true)
+	if work_route.is_empty():
 		var lateral := Vector3(0, 0, 0.82) if truck_start_cell.y == road_cell.y else Vector3(0.82, 0, 0)
-		digger_start += lateral
-		digger_target += lateral
-	data.excavator_start_position = [digger_start.x, digger_start.y, digger_start.z]
-	data.excavator_target_position = [digger_target.x, digger_target.y, digger_target.z]
+		for point: Array in road_route:
+			var shifted := Vector3(float(point[0]), float(point[1]), float(point[2])) + lateral
+			work_route.append([shifted.x, shifted.y, shifted.z])
+	data.excavator_route = work_route
+	data.excavator_start_position = work_route[0].duplicate()
+	data.excavator_target_position = work_route[-1].duplicate()
 	data.excavator_position = data.excavator_start_position.duplicate()
-	data.excavator_route = road_route.duplicate(true)
 	data.arrival_duration = 0.8
 	construction_job = data
 	save_game()
@@ -628,8 +652,12 @@ func construction_progress() -> float:
 
 func _finish_construction() -> bool:
 	var task := construction_job.duplicate(true)
+	if str(task.get("kind", "")) == "departing":
+		construction_job.clear()
+		save_game()
+		return true
 	construction_job = {}
-	var kind := str(task.kind)
+	var kind := str(task.get("completed_kind", task.get("kind", "")))
 	var result := false
 	match kind:
 		"build_legacy": result = build(int(task.index), str(task.type_id), true)
@@ -648,6 +676,25 @@ func _finish_construction() -> bool:
 		construction_job.failed = true
 		save_game()
 		return false
+	# Preserve the worksite until the two vehicles visibly roll away.
+	var departure := task.duplicate(true)
+	departure.kind = "departing"
+	departure.completed_kind = str(task.get("kind", ""))
+	departure.total = 1.25
+	departure.remaining = 1.25
+	for route_key in ["truck_route", "excavator_route"]:
+		var exit_route: Array = departure.get(route_key, []).duplicate(true)
+		exit_route.reverse()
+		departure[route_key] = exit_route
+	if not departure.get("truck_route", []).is_empty():
+		departure.truck_start_position = departure.truck_route[0].duplicate()
+		departure.truck_target_position = departure.truck_route[-1].duplicate()
+		departure.truck_position = departure.truck_start_position.duplicate()
+	if not departure.get("excavator_route", []).is_empty():
+		departure.excavator_start_position = departure.excavator_route[0].duplicate()
+		departure.excavator_target_position = departure.excavator_route[-1].duplicate()
+		departure.excavator_position = departure.excavator_start_position.duplicate()
+	construction_job = departure
 	save_game()
 	return true
 
@@ -670,7 +717,7 @@ func clear_grid_cell(col: int, row: int, reserved: bool = false) -> bool:
 	return true
 
 func build_grid_road(col: int, row: int, reserved: bool = false) -> bool:
-	if (not reserved and budget < 12) or territory.placement_reason(col, row, "road") != "" or not territory.place_road(col, row):
+	if (empty_city_mode and not has_city_hall()) or (not reserved and budget < 12) or territory.placement_reason(col, row, "road") != "" or not territory.place_road(col, row):
 		return false
 	if not reserved:
 		budget -= 12
@@ -683,7 +730,7 @@ func build_grid_house(col: int, row: int) -> bool:
 func build_grid_building(col: int, row: int, type_id: String, reserved: bool = false) -> bool:
 	if not Catalog.TYPES.has(type_id) or type_id in ["empty", "ruins", "repair_van", "fire_engine", "police_car", "civilian_car", "bus_stop", "city_bus", "traffic_signal", "water_leak"]:
 		return false
-	if city_level() < Catalog.unlock_level(type_id):
+	if not initial_building_allowed(col, row, type_id) or city_level() < Catalog.unlock_level(type_id):
 		return false
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else ("service" if Catalog.is_service(type_id) else "house")
 	var price: int = Catalog.cost(type_id)
@@ -699,7 +746,7 @@ func build_grid_service(col: int, row: int, type_id: String) -> bool:
 
 func can_demolish_grid_building(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or Catalog.is_service(entry.type_id):
+	if entry.is_empty() or entry.has("legacy_plot") or Catalog.is_service(entry.type_id) or entry.type_id == TerritoryGrid.CITY_HALL_TYPE:
 		return false
 	if job != "" and (target_instance_id == identifier or depot_instance_id == identifier):
 		return false
@@ -1742,7 +1789,7 @@ func load_game() -> bool:
 		return false
 	if not raw_construction.is_empty():
 		var construction_kind := str(raw_construction.get("kind", ""))
-		if construction_kind not in ["build_legacy", "build_grid", "upgrade_legacy", "upgrade_grid", "restore_legacy", "restore_grid", "clear", "road", "demolish_grid", "demolish_legacy", "demolish_road"]:
+		if construction_kind not in ["build_legacy", "build_grid", "upgrade_legacy", "upgrade_grid", "restore_legacy", "restore_grid", "clear", "road", "demolish_grid", "demolish_legacy", "demolish_road", "departing"]:
 			return false
 		for key in ["remaining", "total"]:
 			var number: Variant = raw_construction.get(key, null)
@@ -1792,7 +1839,10 @@ func load_game() -> bool:
 			if raw_construction.has(position_key) and not valid_point(raw_construction[position_key]):
 				return false
 		loaded_construction = raw_construction.duplicate(true)
-		normalize_construction_vehicle_paths(loaded_construction, loaded_territory)
+		if str(loaded_construction.get("kind", "")) != "departing":
+			var has_saved_routes: bool = loaded_construction.get("truck_route", []) is Array and loaded_construction.get("truck_route", []).size() >= 2 and loaded_construction.get("excavator_route", []) is Array and loaded_construction.get("excavator_route", []).size() >= 2
+			if not has_saved_routes:
+				normalize_construction_vehicle_paths(loaded_construction, loaded_territory)
 	if stored_job == "fire" and stored_phase != "return" and (not loaded_fires.has(stored_target) or loaded_fires.is_empty()):
 		return false
 	var triggered: Variant = data.get("fire_triggered", not loaded_fires.is_empty())

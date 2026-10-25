@@ -129,10 +129,10 @@ const QUALITY_NAMES = [["Критическое", "Неблагополучно�
 const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "landscaping"]
 const CATALOG_ITEMS := {
 	"residential": ["house"],
-	"commercial": ["cafe"],
-	"infrastructure": ["clear"],
+	"commercial": ["cafe", "park"],
+	"infrastructure": ["city_hall", "clear"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
-	"landscaping": ["park", "lawn", "flower_bed", "street_tree", "bush"]
+	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
 const TEXT = {
 	"title": ["FIX MY TOWN · Мэрия", "FIX MY TOWN · City Hall"],
@@ -148,6 +148,7 @@ const TEXT = {
 	"busy": ["Бригада: %s • %s", "Crew: %s • %s"], "travel": ["в пути", "on the way"], "repairing": ["ремонт %d сек.", "repair %d sec"], "return": ["возвращается", "returning"], "idle": ["Бригада свободна • выбор участка на карте", "Crew ready • select a plot on the map"],
 	"empty": ["Участок %d • доступ к дороге\nБонус зависит от соседних домов и объектов.", "Plot %d • road access\nBonus depends on nearby homes and amenities."],
 	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Дом рабочих", "Workers depot"],
+	"city_hall": ["Городской центр", "City Hall"],
 	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
 	"occupied": ["%s • участок %d", "%s • plot %d"],
@@ -207,8 +208,8 @@ const TEXT = {
 	"construction_build": ["Идут строительные работы", "Construction in progress"],
 	"construction_demolish": ["Идёт снос", "Demolition in progress"],
 	"construction_upgrade": ["Идёт модернизация здания", "Building upgrade in progress"],
-	"construction_duration": ["Экскаватор и самосвал работают около 6 секунд. Прогресс сохраняется; вне игры время остановлено.", "The excavator and dump truck work for about 6 seconds. Progress is saved and pauses while the game is closed."],
-	"construction_status": ["Экскаватор и самосвал работают · %d%%", "Excavator and dump truck working · %d%%"],
+	"construction_duration": ["Рабочая техника выполняет короткую задачу. Прогресс сохраняется; вне игры время остановлено.", "The work crew completes a short task. Progress is saved and pauses while the game is closed."],
+	"construction_status": ["Идут работы", "Work in progress"],
 	"service": ["Службы", "Services"],
 	"forest": ["Лес", "Forest"],
 	"free": ["Свободно", "Free"],
@@ -220,7 +221,8 @@ const TEXT = {
 	"catalog_size": ["Участок: %s", "Lot: %s"],
 	"catalog_requires": ["Требования: %s", "Requirements: %s"],
 	"catalog_price": ["Цена: %d", "Cost: %d"],
-	"catalog_requirement_house": ["Расчищенные клетки 2×2 и доступ к дороге", "Cleared 2×2 cells with road access"],
+	"catalog_requirement_house": ["Расчищенные клетки 2×2 и связь с дорогой города", "Cleared 2×2 cells connected to a city road"],
+	"catalog_requirement_city_hall": ["Отмеченный центральный участок 2×2; сначала расчистите его", "Highlighted central 2×2 site; clear it first"],
 	"catalog_requirement_landscape": ["Одна свободная расчищенная клетка", "One cleared free cell"],
 	"catalog_requirement_clear": ["Выберите лесную клетку", "Select a forest cell"],
 	"catalog_requirement_road": ["Свободная клетка рядом с соединённой дорогой", "Free cell beside a connected road"],
@@ -650,6 +652,8 @@ func build_world() -> void:
 	territory_visuals.name = "ExpansionTerritory"
 	world.add_child(territory_visuals)
 	build_fog_overlay()
+	if game.empty_city_mode and not game.has_city_hall():
+		create_city_hall_site_guide()
 	construction_root = Node3D.new()
 	construction_root.name = "ConstructionWorksite"
 	world.add_child(construction_root)
@@ -684,6 +688,24 @@ func create_object(parent: Node3D, type_id: String, persistent_id: String, point
 	object.position = point
 	return object
 
+func create_city_hall_site_guide() -> void:
+	var guide := Node3D.new()
+	guide.name = "CityHallSiteGuide"
+	world.add_child(guide)
+	var point: Vector3 = game.territory.cell_world(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.y) + Vector3(TerritoryGrid.CELL_SIZE * 0.5, 0.12, TerritoryGrid.CELL_SIZE * 0.5)
+	var ghost_hall := create_object(guide, "city_hall", "CityHallSitePreview", point)
+	make_ghost(ghost_hall, Color("78c8ed"))
+	ghost_hall.interaction_area.collision_layer = 0
+	var label_3d := Label3D.new()
+	label_3d.name = "CityHallSiteLabel"
+	label_3d.text = tr_text("МЭРИЯ · ОЧИСТИТЕ 2×2", "CITY HALL · CLEAR 2×2")
+	label_3d.font_size = 56
+	label_3d.pixel_size = 0.009
+	label_3d.position = point + Vector3(0, 8.4, 0)
+	label_3d.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label_3d.no_depth_test = true
+	world.add_child(label_3d)
+
 func sync_construction_site() -> void:
 	if construction_root == null:
 		return
@@ -700,7 +722,7 @@ func sync_construction_site() -> void:
 		return
 	var site := Vector3(float(raw_position[0]), float(raw_position[1]), float(raw_position[2]))
 	if construction_objects.is_empty():
-		var digger := create_object(construction_root, "excavator", "ConstructionExcavator", Vector3(float(raw_digger[0]), float(raw_digger[1]), float(raw_digger[2])))
+		var digger := create_object(construction_root, "work_vehicle", "ConstructionWorkVehicle", Vector3(float(raw_digger[0]), float(raw_digger[1]), float(raw_digger[2])))
 		digger.interaction_area.collision_layer = 0
 		var truck := create_object(construction_root, "dump_truck", "ConstructionDumpTruck", Vector3(float(raw_truck[0]), float(raw_truck[1]), float(raw_truck[2])))
 		truck.interaction_area.collision_layer = 0
@@ -708,8 +730,13 @@ func sync_construction_site() -> void:
 		var signs := Node3D.new()
 		signs.name = "WorkSigns"
 		construction_root.add_child(signs)
+		var work_sign_positions: Array[Vector3] = []
+		var nearest_road: Vector2i = game.territory.nearest_road(site)
+		var road_point: Vector3 = game.territory.cell_world(nearest_road.x, nearest_road.y) if nearest_road.x >= 0 else site
+		var sign_axis := Vector3(0.0, 0.0, 1.0) if game.territory.road_orientation(nearest_road.x, nearest_road.y) == "horizontal" else Vector3(1.0, 0.0, 0.0)
 		for side in [-1, 1]:
-			var sign_position := site + Vector3(float(side) * 5.8, 0, -3.4)
+			var sign_position: Vector3 = road_point + Vector3(0, 0, float(side) * 1.0) if sign_axis.z != 0 else road_point + Vector3(float(side) * 1.0, 0, 0)
+			work_sign_positions.append(sign_position)
 			Art.cylinder(signs, sign_position + Vector3(0, 0.65, 0), 0.1, 1.3, Color("e9a839"), 0.0, 8)
 			var plate := Art.box(signs, sign_position + Vector3(0, 1.48, 0), Vector3(1.4, 1.0, 0.16), Color("f0bd45"))
 			plate.rotation.z = 0.08 * side
@@ -720,34 +747,16 @@ func sync_construction_site() -> void:
 			sign_text.position = sign_position + Vector3(0, 1.5, 0.1)
 			sign_text.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			signs.add_child(sign_text)
-			for corner in [-1, 1]:
-				Art.cylinder(signs, site + Vector3(side * 4.0, 0.32, corner * 4.0), 0.25, 0.64, Color("ed9a32"), 0.0, 7)
-		var bar_back := Art.box(construction_root, site + Vector3(0, 10.2, 0), Vector3(5.0, 0.24, 0.34), Color("41494b"))
-		bar_back.name = "ProgressBack"
-		construction_bar_fill = Art.box(construction_root, site + Vector3(-2.5, 10.22, -0.2), Vector3(4.8, 0.16, 0.22), Color("59b879"))
-		construction_bar_fill.name = "ProgressFill"
-		var progress_label := Label3D.new()
-		progress_label.name = "ProgressText"
-		progress_label.font_size = 64
-		progress_label.pixel_size = 0.009
-		progress_label.position = site + Vector3(0, 11.2, 0)
-		progress_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		progress_label.no_depth_test = true
-		construction_root.add_child(progress_label)
-		construction_objects = {"digger": digger, "truck": truck, "progress_label": progress_label}
+		construction_objects = {"digger": digger, "truck": truck, "sign_positions": work_sign_positions}
 	var active_digger: Node3D = construction_objects.get("digger")
 	var active_truck: Node3D = construction_objects.get("truck")
 	if active_digger != null and is_instance_valid(active_digger):
 		active_digger.position = Vector3(float(raw_digger[0]), float(raw_digger[1]), float(raw_digger[2]))
 	if active_truck != null and is_instance_valid(active_truck):
 		active_truck.position = Vector3(float(raw_truck[0]), float(raw_truck[1]), float(raw_truck[2]))
-	var fill_ratio := clampf(game.construction_progress(), 0.0, 1.0)
-	if construction_bar_fill != null:
-		construction_bar_fill.scale.x = maxf(0.01, fill_ratio)
-		construction_bar_fill.position = site + Vector3(-2.5 + 2.4 * fill_ratio, 10.22, -0.2)
-	var percentage := roundi(fill_ratio * 100.0)
-	var progress_label: Label3D = construction_objects.progress_label
-	progress_label.text = ("РАБОТЫ · %d%%" % percentage) if game.language == "ru" else ("WORKS · %d%%" % percentage)
+	var beacon: Node = active_digger.visual_root.find_child("BeaconLamp", true, false) if active_digger != null else null
+	if beacon != null:
+		beacon.visible = fposmod(elapsed, 0.7) < 0.35
 
 func make_marker(marker_name: String, point: Vector3) -> void:
 	var existing := world.get_node_or_null(marker_name)
@@ -917,6 +926,11 @@ func redraw_territory() -> void:
 		return
 	territory_signature = signature
 	clear_children(territory_visuals)
+	if game.has_city_hall():
+		for guide_name in ["CityHallSiteGuide", "CityHallSiteLabel"]:
+			var guide := world.get_node_or_null(guide_name)
+			if guide != null:
+				guide.queue_free()
 	var tile_visuals := Node3D.new()
 	tile_visuals.name = "GridCells"
 	territory_visuals.add_child(tile_visuals)
@@ -950,6 +964,9 @@ func redraw_territory() -> void:
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
 			if state == "forest":
+				var hall_site: bool = col in range(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.x + 2) and row in range(TerritoryGrid.CITY_HALL_SITE.y, TerritoryGrid.CITY_HALL_SITE.y + 2)
+				if game.empty_city_mode and not game.has_city_hall() and hall_site:
+					continue
 				# Forest cells deliberately use several deterministic variants so
 				# the expansion reads as a natural edge rather than a repeated wall
 				# of identical firs.  The coordinate seed keeps the look stable after
@@ -1227,8 +1244,13 @@ func map_input(event: InputEvent) -> void:
 		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
 		if game.territory.in_bounds(col, row):
 			var selected_cell := Vector2i(col, row)
-			var in_expansion := col in range(game.territory.expansion_cols.x, game.territory.expansion_cols.y + 1) and row in range(game.territory.expansion_rows.x, game.territory.expansion_rows.y + 1)
-			if in_expansion:
+			var cell_state: String = game.territory.state_at(col, row)
+			var hall_footprint := col in range(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.x + 2) and row in range(TerritoryGrid.CITY_HALL_SITE.y, TerritoryGrid.CITY_HALL_SITE.y + 2)
+			if territory_tool == TerritoryGrid.CITY_HALL_TYPE and not game.has_city_hall() and hall_footprint and cell_state == "forest":
+				open_land_cell(selected_cell)
+				return
+			var selectable: bool = cell_state == "forest" if territory_tool == "clear" else cell_state == "free"
+			if selectable:
 				select_territory_cell(selected_cell)
 		return
 	if placing_stop:
@@ -1252,7 +1274,7 @@ func map_input(event: InputEvent) -> void:
 		var tapped_state: String = game.territory.state_at(picked_col, picked_row)
 		if tapped_state == "road":
 			return
-		if tapped_state in ["forest", "free"] and picked_col in range(game.territory.expansion_cols.x, game.territory.expansion_cols.y + 1) and picked_row in range(game.territory.expansion_rows.x, game.territory.expansion_rows.y + 1):
+		if tapped_state in ["forest", "free"]:
 			open_land_cell(tapped_cell)
 			return
 	for kind in ["leak", "signal"]:
@@ -1442,7 +1464,7 @@ func select_tab(key: String) -> void:
 func open_catalog(target_plot: int = -1) -> void:
 	active_tab = "build_tab"
 	catalog_target_plot = target_plot if target_plot >= 0 and target_plot < game.buildings.size() and game.buildings[target_plot] == "empty" else -1
-	catalog_category = "residential"
+	catalog_category = "infrastructure" if game.empty_city_mode and not game.has_city_hall() else "residential"
 	catalog_grid_target = Vector2i(-1, -1)
 	selection_kind = "catalog"
 	selected = catalog_target_plot
@@ -1548,6 +1570,8 @@ func catalog_size(type_id: String) -> String:
 	return t("catalog_footprint_large")
 
 func catalog_requirement(type_id: String) -> String:
+	if type_id == "city_hall":
+		return t("catalog_requirement_city_hall")
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
 		return t("catalog_requirement_legacy")
 	if type_id == "clear":
@@ -1559,6 +1583,10 @@ func catalog_requirement(type_id: String) -> String:
 	return t("catalog_requirement_house")
 
 func catalog_item_unlocked(type_id: String) -> bool:
+	if type_id == TerritoryGrid.CITY_HALL_TYPE:
+		return game.empty_city_mode and not game.has_city_hall()
+	if game.empty_city_mode and not game.has_city_hall() and type_id not in ["city_hall", "clear"]:
+		return false
 	return game.city_level() >= Catalog.unlock_level(type_id)
 
 func catalog_entry_button(parent: Control, type_id: String) -> Button:
@@ -1574,7 +1602,7 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	item.add_theme_color_override("font_color", INK)
 	item.add_theme_color_override("font_hover_color", INK)
 	item.add_theme_color_override("font_pressed_color", INK)
-	item.tooltip_text = t(type_id)
+	item.tooltip_text = tr_text("Сначала постройте городской центр", "Build City Hall first") if not catalog_item_unlocked(type_id) and game.empty_city_mode and not game.has_city_hall() else t(type_id)
 	item.pressed.connect(func():
 		if audio != null:
 			audio.play_ui("select"))
@@ -1796,13 +1824,13 @@ func build_land_cell_sheet() -> void:
 		clear_button.disabled = game.budget < 5 or not game.construction_job.is_empty()
 	else:
 		label(18, sheet_column, tr_text("Выберите, как использовать свободное место.", "Choose how to use this free space."))
-		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"
 		button(sheet_column, tr_text("Открыть каталог строительства", "Open building catalog"), func():
 			catalog_grid_target = territory_cell
 			active_tab = "build_tab"
-			catalog_category = "residential"
+			catalog_category = "infrastructure" if game.empty_city_mode and not game.has_city_hall() else "residential"
 			selection_kind = "catalog"
 			refresh(), true).name = "BuildOnLandCell"
+		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"
 		button(sheet_column, tr_text("Построить службу", "Build a service"), func():
 			catalog_grid_target = territory_cell
 			active_tab = "build_tab"
@@ -1837,7 +1865,7 @@ func select_catalog_item(type_id: String) -> void:
 	else:
 		catalog_target_plot = -1
 		selected = -1
-		territory_cell = catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1)
+		territory_cell = TerritoryGrid.CITY_HALL_SITE if type_id == TerritoryGrid.CITY_HALL_TYPE else (catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1))
 		selection_kind = "territory"
 		if territory_cell.x < 0 and type_id not in ["fire_station", "police_station", "hospital", "depot"]:
 			set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
@@ -1958,24 +1986,16 @@ func build_construction_job_sheet() -> void:
 	action_height = 230
 	var task: Dictionary = game.construction_job
 	var task_kind := str(task.get("kind", ""))
-	var verb := t("construction_demolish") if task_kind.begins_with("demolish") else (tr_text("Восстановление", "Restoration") if task_kind.begins_with("restore") else (t("construction_upgrade") if task_kind.begins_with("upgrade") else t("construction_build")))
+	var verb := tr_text("Техника уезжает", "Work crew is leaving") if task_kind == "departing" else (t("construction_demolish") if task_kind.begins_with("demolish") else (tr_text("Восстановление", "Restoration") if task_kind.begins_with("restore") else (t("construction_upgrade") if task_kind.begins_with("upgrade") else t("construction_build"))))
 	header(verb)
 	var item_id := str(task.get("type_id", ""))
 	if item_id != "":
 		label(21, sheet_column, t(item_id))
-	var bar := ProgressBar.new()
-	bar.name = "ConstructionProgress"
-	bar.max_value = 1.0
-	bar.value = game.construction_progress()
-	bar.custom_minimum_size.y = 20
-	bar.show_percentage = false
-	bar.add_theme_stylebox_override("fill", style(Color("e6a333"), 8))
-	sheet_column.add_child(bar)
-	label(18, sheet_column, t("construction_duration"))
+	label(18, sheet_column, tr_text("Экскаватор и грузовик выполняют короткую работу. Состояние сохранится, если выйти из игры.", "The work vehicle and truck are on a short job. Progress is saved when you leave the game."))
 	button(sheet_column, t("close"), close_sheet).name = "CloseConstructionPanel"
 
 func handle_construction_finish(task: Dictionary) -> void:
-	var kind := str(task.get("kind", ""))
+	var kind := str(task.get("completed_kind", task.get("kind", "")))
 	if kind in ["build_legacy", "upgrade_legacy"]:
 		select_plot(int(task.get("index", -1)))
 	elif kind == "build_grid":
@@ -1996,9 +2016,9 @@ func handle_construction_finish(task: Dictionary) -> void:
 		refresh()
 	elif kind == "demolish_legacy":
 		open_catalog()
-	elif kind == "road" or kind == "clear" or kind == "demolish_road":
+	elif kind == "road" or kind == "clear" or kind == "demolish_road" or kind == "departing":
 		if kind == "clear":
-			open_land_catalog(Vector2i(int(task.get("col", -1)), int(task.get("row", -1))))
+			open_land_cell(Vector2i(int(task.get("col", -1)), int(task.get("row", -1))))
 		else:
 			open_catalog()
 			catalog_category = "infrastructure"
@@ -2008,6 +2028,13 @@ func territory_reason() -> String:
 	if territory_cell.x < 0:
 		return "select"
 	var selected_type := service_type if territory_tool == "service" else territory_tool
+	if territory_tool not in ["clear", "road"] and not game.has_city_hall():
+		if selected_type != TerritoryGrid.CITY_HALL_TYPE:
+			return "city_hall_first"
+		if territory_cell != TerritoryGrid.CITY_HALL_SITE:
+			return "city_hall_site"
+	if territory_tool == "road" and not game.has_city_hall():
+		return "city_hall_first"
 	var placement_kind := "landscaping" if Catalog.is_landscaping(selected_type) else ("service" if Catalog.is_service(selected_type) else "house")
 	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool if territory_tool in ["clear", "road"] else placement_kind)
 	if reason != "":
@@ -2028,6 +2055,8 @@ func placement_hint(reason: String) -> String:
 	match reason:
 		"select": return tr_text("Начните у края существующей дороги.", "Start at an existing road edge.")
 		"outside": return tr_text("Весь участок должен быть в области освоения.", "The whole footprint must fit the expansion area.")
+		"city_hall_first": return tr_text("Сначала постройте городской центр на отмеченном месте.", "Build City Hall on the marked site first.")
+		"city_hall_site": return tr_text("Городской центр строится только на отмеченном центральном участке.", "City Hall can only be built on the highlighted central site.")
 		"not_forest": return tr_text("Здесь уже нет леса. Выберите зелёную клетку.", "No forest here. Select a green cell.")
 		"clear_first": return tr_text("Сначала расчистите весь отмеченный участок.", "Clear the entire highlighted footprint first.")
 		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
@@ -2637,6 +2666,11 @@ func _process(delta: float) -> void:
 	var construction_truck: Node3D = construction_objects.get("truck")
 	if construction_truck != null and is_instance_valid(construction_truck):
 		scenery.traffic_controller.blocking_positions.append({"id": "construction_dump_truck", "position": construction_truck.position})
+	var construction_work_vehicle: Node3D = construction_objects.get("digger")
+	if construction_work_vehicle != null and is_instance_valid(construction_work_vehicle):
+		scenery.traffic_controller.blocking_positions.append({"id": "construction_work_vehicle", "position": construction_work_vehicle.position})
+	for sign_index in range(construction_objects.get("sign_positions", []).size()):
+		scenery.traffic_controller.blocking_positions.append({"id": "construction_sign_%d" % sign_index, "position": construction_objects.sign_positions[sign_index]})
 	var fire_motion: Dictionary = {}
 	for assignment: Dictionary in game.fire_assignments():
 		var fire_id: String = str(assignment.instance_id)

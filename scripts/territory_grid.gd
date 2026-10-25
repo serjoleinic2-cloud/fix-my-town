@@ -17,6 +17,7 @@ var buildings: Array = []
 var revealed: Array = []
 var expansion_cols: Vector2i = EXPANSION_COLS
 var expansion_rows: Vector2i = EXPANSION_ROWS
+var strict_building_frontier: bool = false
 
 func _init() -> void:
 	reset()
@@ -24,6 +25,7 @@ func _init() -> void:
 func reset() -> void:
 	expansion_cols = EXPANSION_COLS
 	expansion_rows = EXPANSION_ROWS
+	strict_building_frontier = false
 	cells.clear()
 	revealed.clear()
 	for row in range(HEIGHT):
@@ -53,6 +55,22 @@ func initialize_natural_terrain(start_col: int = 12, start_row: int = 20, visibl
 			cells[row][col] = "forest"
 	reset_visibility()
 	reveal_area(start_col, start_row, visible_radius)
+
+func install_starting_city_hall() -> bool:
+	strict_building_frontier = true
+	if buildings.any(func(entry: Dictionary) -> bool: return entry.type_id == CITY_HALL_TYPE):
+		return true
+	var footprint := Catalog.footprint_cells(CITY_HALL_TYPE)
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			var col := CITY_HALL_SITE.x + dx
+			var row := CITY_HALL_SITE.y + dy
+			if not in_bounds(col, row) or state_at(col, row) not in ["forest", "free"]:
+				return false
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			cells[CITY_HALL_SITE.y + dy][CITY_HALL_SITE.x + dx] = "free"
+	return place_building(CITY_HALL_SITE.x, CITY_HALL_SITE.y, CITY_HALL_TYPE)
 
 func set_expansion_level(level: int) -> void:
 	# Reveal new land as a frontier around the town centre and connected roads;
@@ -224,7 +242,9 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 		var automatic_path := auto_access_path(entry_for_access)
 		if not has_constructed_network():
 			automatic_path = building_contour(entry_for_access)
-		elif not has_access and automatic_path.is_empty():
+		elif strict_building_frontier and not has_access:
+			return false
+		elif not strict_building_frontier and not has_access and automatic_path.is_empty():
 			return false
 		for path_cell: Vector2i in automatic_path:
 			if state_at(path_cell.x, path_cell.y) in ["free", "forest"]:
@@ -401,17 +421,39 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 			if not is_revealed(col + dx, row + dy):
 				return "outside"
 	if tool == "clear":
-		return "" if state_at(col, row) == "forest" else "not_forest"
+		if state_at(col, row) != "forest":
+			return "not_forest"
+		return "" if not strict_building_frontier or near_connected_road_frontier(col, row, 3) else "no_road"
 	for dy in range(footprint.y):
 		for dx in range(footprint.x):
 			if state_at(col + dx, row + dy) != "free":
 				return "clear_first"
 	if tool in ["landscaping", "lawn", "flower_bed", "street_tree", "bush"]:
-		return ""
+		return "" if not strict_building_frontier or footprint_touches_connected_road(col, row, footprint) else "no_road"
 	var entry := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
 	if not has_constructed_network():
 		return "" if not building_contour(entry).is_empty() else "no_road"
+	if strict_building_frontier:
+		return "" if footprint_touches_connected_road(col, row, footprint) else "no_road"
 	return "" if not auto_access_path(entry).is_empty() else "no_road"
+
+func near_connected_road_frontier(col: int, row: int, radius: int) -> bool:
+	for dy in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var road_col := col + dx
+			var road_row := row + dy
+			if in_bounds(road_col, road_row) and state_at(road_col, road_row) == "road" and connected_road(road_col, road_row):
+				return true
+	return false
+
+func footprint_touches_connected_road(col: int, row: int, footprint: Vector2i) -> bool:
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var road_cell := Vector2i(col + dx, row + dy) + offset
+				if in_bounds(road_cell.x, road_cell.y) and state_at(road_cell.x, road_cell.y) == "road" and connected_road(road_cell.x, road_cell.y):
+					return true
+	return false
 
 func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
 	if state_at(col, row) != "road":

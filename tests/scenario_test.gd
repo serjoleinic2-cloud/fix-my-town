@@ -111,17 +111,25 @@ func run() -> void:
 	root.add_child(scene)
 	await process_frame
 	check(scene.game.empty_city_mode and scene.game.budget == 0 and scene.game.income() == 0, "A clean app start opens a zero-budget empty city")
-	var no_legacy_cells := true
+	var foundation_is_compact := true
 	var roads_in_clean_map := 0
+	var occupied_hall_cells := 0
 	for row in range(TerritoryGrid.HEIGHT):
 		for col in range(TerritoryGrid.WIDTH):
-			if scene.game.territory.state_at(col, row) != "forest":
-				no_legacy_cells = false
-			if scene.game.territory.state_at(col, row) == "road":
+			var state: String = scene.game.territory.state_at(col, row)
+			if state == "road":
 				roads_in_clean_map += 1
+				if row not in range(18, 22) or col not in range(11, 15) or (col in [12, 13] and row in [19, 20]):
+					foundation_is_compact = false
+			elif state == "occupied":
+				occupied_hall_cells += 1
+				if col not in [12, 13] or row not in [19, 20]:
+					foundation_is_compact = false
+			elif state != "forest":
+				foundation_is_compact = false
 	check(scene.plots.get_child_count() == 0 and scene.car == null and scene.fire_car == null and scene.leak_effect == null, "The clean map does not create legacy plots, service vehicles, or incident effects")
 	check(scene.world.get_node_or_null("LeakMarker") == null and scene.world.get_node_or_null("SignalMarker") == null and scene.fire_markers.is_empty(), "The clean map does not create incident markers")
-	check(scene.game.district_house_count() == 0 and scene.game.all_buildings().is_empty() and scene.game.territory.buildings.is_empty() and no_legacy_cells and roads_in_clean_map == 0 and scene.game.city_layout_version == 3, "An old saved district migrates to natural terrain without retaining its 24 plots")
+	check(scene.game.district_house_count() == 0 and scene.game.has_city_hall() and scene.game.territory.buildings.size() == 1 and foundation_is_compact and roads_in_clean_map == 12 and occupied_hall_cells == 4 and scene.game.city_layout_version == 4, "A clean start contains only the permanent City Hall foundation and its local road ring")
 	check(scene.scenery.traffic_controller.vehicles.is_empty() and scene.scenery.traffic_controller.intersections.is_empty() and scene.scenery.get_child_count() == 1, "No traffic vehicles, road signals, or legacy scenery are instantiated on clean start")
 	var subsidy_card := scene.subsidy_dialog.find_child("SubsidyOfferCard", true, false) as Control
 	var subsidy_buttons: Array = scene.subsidy_dialog.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Получить"))

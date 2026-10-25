@@ -81,11 +81,11 @@ func _init(legacy_test_fixture: bool = false) -> void:
 	# normal app construction and New Game use the empty default.
 
 func start_empty_city() -> void:
-	# A clean sandbox for testing the first placement decisions. Remove every
-	# legacy plot, road, building, vehicle job, and incident.
+	# Start from a permanent civic center and grow the city outward from its
+	# connected street ring.
 	budget = 0
 	empty_city_mode = true
-	city_layout_version = 3
+	city_layout_version = 4
 	campaign_stage = 1
 	campaign_elapsed_seconds = 0.0
 	campaign_complete_pending = false
@@ -106,8 +106,12 @@ func start_empty_city() -> void:
 		buildings.append("empty")
 		levels.append(1)
 	territory = TerritoryGrid.new()
-	# The player sees only a small starting pocket; the rest remains in white fog.
+	# The player sees a small starting pocket around the prebuilt city hall;
+	# surrounding land remains in white fog until the town expands.
 	territory.initialize_natural_terrain(12, 20, 3)
+	if not territory.install_starting_city_hall():
+		push_error("Could not place the starting City Hall foundation")
+	territory.set_expansion_level(1)
 	incident_seed = 48291
 	incident_rng.seed = incident_seed
 	income_clock = 0.0
@@ -134,7 +138,6 @@ func start_empty_city() -> void:
 	fire_triggered = false
 	transit = Transit.new()
 	district_tasks = [
-		{"id": "city_hall", "title": "Построить городской центр", "done": false},
 		{"id": "first_home", "title": "Построить первый дом", "done": false},
 		{"id": "first_service", "title": "Построить первую службу", "done": false}
 	]
@@ -1710,7 +1713,7 @@ func load_game() -> bool:
 			return false
 	if data.has("empty_city_mode") and typeof(data.empty_city_mode) != TYPE_BOOL:
 		return false
-	if data.has("city_layout_version") and (not (data.city_layout_version is int or data.city_layout_version is float) or not is_finite(float(data.city_layout_version)) or int(data.city_layout_version) != float(data.city_layout_version) or int(data.city_layout_version) < 0 or int(data.city_layout_version) > 3):
+	if data.has("city_layout_version") and (not (data.city_layout_version is int or data.city_layout_version is float) or not is_finite(float(data.city_layout_version)) or int(data.city_layout_version) != float(data.city_layout_version) or int(data.city_layout_version) < 0 or int(data.city_layout_version) > 4):
 		return false
 	var loaded_subsidy_debt := int(data.get("subsidy_debt", 0))
 	var loaded_subsidy_threshold := int(data.get("subsidy_threshold", 0))
@@ -1993,6 +1996,7 @@ func load_game() -> bool:
 	territory = loaded_territory
 	budget = clampi(int(data.budget), 0, 1000000)
 	empty_city_mode = bool(data.get("empty_city_mode", false))
+	territory.strict_building_frontier = empty_city_mode
 	city_layout_version = int(data.get("city_layout_version", 0))
 	campaign_stage = clampi(int(data.get("campaign_stage", 1)), 1, 10)
 	campaign_elapsed_seconds = maxf(0.0, float(data.get("campaign_elapsed_seconds", 0.0)))
@@ -2043,7 +2047,19 @@ func load_game() -> bool:
 	repair_left = clampf(float(data.repair_left), 0.0, 12.0)
 	income_clock = clampf(float(data.income_clock), 0.0, 12.0)
 	service_neglect_clock = clampf(float(data.get("service_neglect_clock", 0.0)), 0.0, 60.0)
+	var foundation_migrated: bool = empty_city_mode and city_layout_version < 4
+	if foundation_migrated:
+		if not has_city_hall() and territory.buildings.is_empty():
+			territory.install_starting_city_hall()
+		territory.strict_building_frontier = true
+		city_layout_version = 4
+		district_tasks = [
+			{"id": "first_home", "title": "Построить первый дом", "done": false},
+			{"id": "first_service", "title": "Построить первую службу", "done": false}
+		]
 	check_complete()
+	if foundation_migrated:
+		save_game()
 	return true
 
 func valid_point(point: Variant) -> bool:

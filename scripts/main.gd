@@ -3269,7 +3269,7 @@ func build_grid_house_sheet() -> void:
 			var improve := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % next_price, func():
 				selection_kind = "grid_upgrade"
 				refresh(), true)
-			var upgrade_unlocked := not game.empty_city_mode or game.campaign_stage > entry.level
+			var upgrade_unlocked: bool = not game.empty_city_mode or game.campaign_stage > entry.level
 			improve.disabled = entry.level >= 3 or game.budget < next_price or not game.construction_job.is_empty() or not upgrade_unlocked
 			if not upgrade_unlocked:
 				label(15, sheet_column, tr_text("Улучшение откроется на этапе %d", "Upgrade unlocks at stage %d") % (entry.level + 1))

@@ -10,7 +10,7 @@ func check(condition: bool, message: String) -> void:
 func _initialize() -> void:
 	call_deferred("run")
 func run() -> void:
-	var game := Simulation.new()
+	var game := Simulation.new(true)
 	game.save_path = "user://building_levels_test.json"
 	game.budget = 5000
 	game.leak_fixed = true
@@ -43,7 +43,7 @@ func run() -> void:
 	var park_income: int = game.building_income(14)
 	check(game.upgrade(14) and game.upgrade(14) and game.building_income(14) < park_income, "Park raises maintenance with level")
 	game.save_game()
-	var loaded := Simulation.new()
+	var loaded := Simulation.new(true)
 	loaded.save_path = game.save_path
 	check(loaded.load_game() and loaded.levels == game.levels and loaded.metrics() == game.metrics(), "All levels and characteristics survive save/load")
 	predicted = loaded.project_change(16, true)
@@ -57,7 +57,7 @@ func run() -> void:
 	loaded.budget = 0
 	check(not loaded.upgrade(16) and loaded.building_level(16) == 1, "Unaffordable improvement is safe")
 	# Удаление последней полезной точки обнуляет спрос, не закрывает достижение.
-	var route := Simulation.new()
+	var route := Simulation.new(true)
 	route.save_path = "user://building_route_test.json"
 	route.buildings.fill("empty")
 	route.levels.fill(1)
@@ -98,9 +98,15 @@ func run() -> void:
 		scene.game.save_path = "user://test_startup.json"
 		viewport.add_child(scene)
 		scene.set_process(false)
-		scene.game = Simulation.new()
+		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://levels_ui_test.json"
 		scene.game.budget = 5000
+		scene.game.empty_city_mode = false
+		scene.scenery.visible = true
+		if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+			scene.subsidy_dialog.hide()
+			scene.subsidy_dialog.queue_free()
+			scene.subsidy_dialog = null
 		for language in ["ru", "en"]:
 			scene.game.language = language
 			for kind in ["house", "cafe", "park"]:
@@ -132,12 +138,18 @@ func run() -> void:
 				scene.cancel_upgrade()
 				check(object.visual_root.visible and object.visual_root.get_child(0) == visual and scene.game.budget == money, "Cancel restores original unchanged visual")
 				scene.confirm_upgrade(16, kind, 1)
-				check(object.level == 2 and object.visual_root.get_child(0).visual_level == 2 and object.interaction_area == area and object.mounts == sockets, "Upgrade changes only visual, preserves interactions and mounts")
+				var upgrade_task: Dictionary = scene.game.construction_job.duplicate(true)
+				check(object.level == 1 and scene.game.construction_job.kind == "upgrade_legacy", "Confirming upgrade starts saved construction work")
+				scene.game.tick(6.1)
+				scene.handle_construction_finish(upgrade_task)
+				scene.refresh()
+				object = scene.plots.get_node("plot_16")
+				check(object.level == 2 and object.visual_root.get_child(0).visual_level == 2 and object.interaction_area == area and object.mounts == sockets, "Completed upgrade changes model and preserves interactions and mounts")
 				money = scene.game.budget
 				scene.confirm_upgrade(16, kind, 1)
 				check(scene.game.budget == money and scene.game.building_level(16) == 2, "Stale confirmation cannot charge twice")
 				scene.game.save_game()
-				var restored := Simulation.new()
+				var restored := Simulation.new(true)
 				restored.save_path = scene.game.save_path
 				check(restored.load_game(), "UI upgrade save loads")
 				scene.game = restored
@@ -154,11 +166,20 @@ func run() -> void:
 				await process_frame
 				scene.get_node("DemolitionConfirmation").confirmed.emit()
 				await process_frame
+				var demolition_task: Dictionary = scene.game.construction_job.duplicate(true)
+				check(demolition_task.get("kind", "") == "demolish_legacy" and scene.game.buildings[16] == kind, "Confirmed demolition creates a saved worksite before removing the house")
+				scene.game.tick(6.1)
+				scene.handle_construction_finish(demolition_task)
+				scene.refresh()
 				check(scene.game.buildings[16] == "empty" and scene.plots.get_node("plot_16").type_id == "empty", "Confirm demolition redraws vacant lot")
 		scene.audio.shutdown()
 		await create_timer(0.1).timeout
 		viewport.queue_free()
-		await process_frame
+		# Scene redraws queue old VisualRoot children for deletion; let the
+		# queued nodes and the SubViewport fully leave the ObjectDB before the
+		# headless process exits (the check script treats leak warnings as errors).
+		for _frame in range(3):
+			await process_frame
 	if failures == 0:
 		print("BUILDING LEVEL CHECKS: PASS")
 	quit(0 if failures == 0 else 1)

@@ -13,6 +13,17 @@ func run() -> void:
 	DirAccess.remove_absolute(scene.game.save_path)
 	root.add_child(scene)
 	scene.set_process(false)
+	# The completion toast fixture uses the legacy 24-slot starter district.
+	scene.game = preload("res://scripts/simulation.gd").new(true)
+	scene.game.save_path = "user://completion_test.json"
+	scene.game.city_layout_version = 3
+	scene.game.empty_city_mode = false
+	scene.scenery.visible = true
+	if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):
+		scene.subsidy_dialog.hide()
+		scene.subsidy_dialog.queue_free()
+		scene.subsidy_dialog = null
+	scene.refresh()
 	scene.close_sheet()
 	check(scene.mission.visible and scene.mission_icon.texture.resource_path.ends_with("ui_drop.svg"), "Leak task has water icon")
 	scene.game.leak_fixed = true
@@ -43,7 +54,7 @@ func run() -> void:
 	root.add_child(restored)
 	restored.set_process(false)
 	check(restored.game.completed and not restored.mission.visible and restored.completion_left == 0, "Loading completed save leaves map free")
-	check(not restored.world.get_node("LeakMarker").visible and not restored.leak_effect.visible, "Repaired leak marker never returns on load")
+	check(restored.world.get_node_or_null("LeakMarker") == null and restored.leak_effect == null, "Repaired leak marker and effect are not instantiated on load")
 	restored.audio.shutdown()
 	restored.queue_free()
 	await create_timer(0.2).timeout

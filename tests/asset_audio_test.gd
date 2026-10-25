@@ -18,11 +18,12 @@ func run() -> void:
 	root.add_child(scene)
 	await process_frame
 	scene.set_process(false)
-	scene.game = Simulation.new()
+	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://asset_test.json"
 	scene.audio.settings_path = "user://audio_test.json"
 	scene.refresh()
 	check(scene.game.dispatch("leak"), "Dispatch before replacement")
+	scene.refresh()
 	scene.game.tick(1)
 	scene.car.position = scene.map_position(scene.game.vehicle)
 	var before_budget: int = scene.game.budget
@@ -49,7 +50,7 @@ func run() -> void:
 	check(scene.car.visual_root.get_child(0) == alternate_visual, "UI refresh must not reset model")
 	check(scene.game.budget == before_budget and scene.game.vehicle == before_vehicle and scene.game.route == before_route, "Replacement must not change gameplay")
 	scene.game.save_game()
-	var loaded = Simulation.new()
+	var loaded = Simulation.new(true)
 	loaded.save_path = scene.game.save_path
 	check(loaded.load_game(), "Load after GLB replacement")
 	check(loaded.job == "leak" and loaded.target_type_id() == "water_leak", "Permanent job target")
@@ -58,8 +59,44 @@ func run() -> void:
 		loaded.tick(0.1)
 	check(loaded.leak_fixed, "Task completes after replacement and load")
 	var audio = scene.audio
+	var legacy_audio_game = scene.game
+	var clean_audio_game = Simulation.new(false)
+	clean_audio_game.save_path = "user://audio_clean_city.json"
+	clean_audio_game.start_empty_city()
+	clean_audio_game.save_game()
+	audio.set_loop("water", "water", "Effects", true, Vector3(-9, 0.5, 6))
+	audio.sync(clean_audio_game, 33, 0.1)
+	check(not audio.loops.has("water"), "A clean new city has no legacy water loop")
+	audio.warning_clock = 24.0
+	var clean_warning_voices_before: int = audio.voices.size()
+	audio.sync(clean_audio_game, 33, 0.1)
+	check(audio.voices.size() == clean_warning_voices_before, "An empty city does not emit false incident warnings")
+	var loaded_clean_audio_game = Simulation.new(false)
+	loaded_clean_audio_game.save_path = clean_audio_game.save_path
+	check(loaded_clean_audio_game.load_game(), "Clean city save loads for audio regression")
+	audio.set_loop("water", "water", "Effects", true, Vector3(-9, 0.5, 6))
+	audio.reset_state()
+	check(not audio.loops.has("water"), "New Game immediately stops a previous water loop")
+	audio.sync(loaded_clean_audio_game, 33, 0.1)
+	check(not audio.loops.has("water"), "Water loop does not return after restarting a clean city")
+	audio.sync(legacy_audio_game, 33, 0.1)
+	check(audio.loops.has("water"), "An active legacy leak starts its water loop")
+	audio.warning_clock = 24.0
+	var warning_voices_before: int = audio.voices.size()
+	audio.sync(legacy_audio_game, 33, 0.1)
+	check(audio.voices.size() > warning_voices_before, "Active leak can produce a periodic warning")
+	legacy_audio_game.leak_fixed = true
+	audio.sync(legacy_audio_game, 33, 0.1)
+	check(not audio.loops.has("water"), "Repairing the leak immediately stops water")
+	legacy_audio_game.leak_fixed = false
+	audio.sync(legacy_audio_game, 33, 0.1)
+	scene.game = legacy_audio_game
+	scene.refresh()
+	var city: AudioStreamWAV = audio.stream("city", true)
+	check(city.get_length() >= 60 and city.stereo, "Ambience is a long stereo field-recording loop")
 	audio.set_paused(false)
 	audio.sync(scene.game, 33, 0.1)
+	check(audio.loops.has("city") and not audio.loops.has("birds"), "Real city recording replaces the repetitive synthetic birds layer")
 	check(audio.loops.has("water") and audio.loops.has("engine"), "Leak and moving engine loops")
 	check(audio.loops["engine"].get_parent() == scene.world, "Spatial audio belongs to gameplay world")
 	scene.game.route_index = scene.game.route.size()
@@ -80,9 +117,14 @@ func run() -> void:
 	for i in range(30):
 		audio.play_ui("click")
 	check(audio.voices.size() + audio.loops.size() <= audio.MAX_VOICES, "Voice budget")
+	audio.play_ui("select")
+	check(audio.voices[-1].bus == "Interface" and audio.voices[-1].stream == audio.stream("select"), "House tap remains audible when effects occupy the voice budget")
+	check(audio.stream("place").get_length() < 1.1, "Construction feedback is a brief original musical accent")
+	check(audio.stream("tesla").get_length() < 0.3, "Tesla-like selection feedback is a short cue")
 	for type_id: String in Catalog.TYPES:
 		check(ResourceLoader.exists(Catalog.scene_path(type_id)), "Catalog resource exists: " + type_id)
 	DirAccess.remove_absolute(scene.game.save_path)
+	DirAccess.remove_absolute(clean_audio_game.save_path)
 	DirAccess.remove_absolute(audio.settings_path)
 	scene.audio.shutdown()
 	await create_timer(0.2).timeout

@@ -37,12 +37,13 @@ func run() -> void:
 		for frame in range(3):
 			await process_frame
 		var initial_catalog: Control = scene.sheet
-		check(initial_catalog.size.y <= 480, "Catalog with a single house stays compact and does not cover most of the map")
-		check(initial_catalog.find_child("ModelPreview_house", true, false) != null, "Building catalog uses a live VisualRoot model preview instead of a placeholder image")
-		var category_selector: OptionButton = initial_catalog.find_child("CatalogCategorySelector", true, false)
-		var category_style := category_selector.get_theme_stylebox("normal") as StyleBoxFlat
-		check(category_style != null and category_style.bg_color.g > category_style.bg_color.r * 0.95 and category_style.bg_color.g > category_style.bg_color.b, "Building category dropdown uses a light green background")
-		check(initial_catalog.find_child("CatalogItemsScroll", true, false) != null, "Building cards are hosted by a scrollable list")
+		check(is_equal_approx(initial_catalog.size.y, scene.screen.size.y), "Construction categories open as a dedicated full-screen menu")
+		var category_button: Button = initial_catalog.find_child("CatalogCategory_residential", true, false)
+		var category_style := category_button.get_theme_stylebox("normal") as StyleBoxFlat
+		check(category_style != null and category_style.get_corner_radius(0) <= 5, "Building categories use flat, direct-touch buttons")
+		scene.set_catalog_category("residential")
+		check(scene.sheet.find_child("CatalogItemsScroll", true, false) != null, "Object cards are hosted by a full-screen scrollable list")
+		check(scene.sheet.find_child("ModelPreview_house", true, false) != null, "Building catalog uses a live VisualRoot model preview instead of a placeholder image")
 		scene.set_catalog_category("services")
 		var police_card: Button = scene.sheet.find_child("CatalogItem_police_station", true, false)
 		check(police_card != null and police_card.disabled, "Police station remains visible but locked at city level one")
@@ -67,8 +68,12 @@ func run() -> void:
 			"A tapped free tile opens the landscaping catalog targeted to that tile")
 		scene.sheet.find_child("CatalogItem_lawn", true, false).pressed.emit()
 		await process_frame
+		check(scene.selection_kind == "catalog_detail" and scene.sheet.find_child("PrepareCatalogPlacement", true, false) != null,
+			"Selecting a landscaping object opens its detail/preview screen")
+		scene.sheet.find_child("PrepareCatalogPlacement", true, false).pressed.emit()
+		await process_frame
 		check(scene.selection_kind == "territory" and scene.territory_cell == land_cell and scene.territory_tool == "lawn",
-			"Choosing lawn keeps the original tap location as the placement preview")
+			"Confirming lawn keeps the original tap location as the placement preview")
 		var one_cell_size: Vector2 = scene.territory_building_visual_size({"width": 1, "height": 1})
 		check(one_cell_size.is_equal_approx(Vector2(4.6, 4.6)), "Landscaping ground visual stays inside its one-cell footprint")
 		scene.close_sheet()
@@ -78,7 +83,10 @@ func run() -> void:
 		await process_frame
 		scene.sheet.find_child("CatalogItem_fire_station", true, false).pressed.emit()
 		await process_frame
-		check(scene.selection_kind == "territory" and scene.territory_tool == "fire_station", "Selecting a catalog card enters placement mode")
+		check(scene.selection_kind == "catalog_detail" and scene.selected_catalog_type == "fire_station", "Selecting a catalog card opens a service detail screen")
+		scene.sheet.find_child("PrepareCatalogPlacement", true, false).pressed.emit()
+		await process_frame
+		check(scene.selection_kind == "territory" and scene.territory_tool == "fire_station", "Confirming a service enters placement mode")
 		scene.cancel_catalog_placement()
 		check(scene.selection_kind == "catalog" and scene.game.budget == budget_before_cancel and scene.game.construction_job.is_empty(), "Cancel returns to catalog without reserving money or starting work")
 		scene.game.clear_grid_cell(9, 19)
@@ -207,6 +215,17 @@ func run() -> void:
 		check(scene.action_height < 430 and scene.sheet.get_global_rect().end.y <= scene.navbar.position.y + 1, "Café card fits its content without a fixed empty footer")
 		scene.toggle_quality()
 		check(scene.quality_mode and scene.quality_legend.visible, "Condition mode also covers expansion homes")
+		scene.game.empty_city_mode = true
+		scene.game.campaign_complete_pending = true
+		scene.game.campaign_completed_stage = 1
+		scene.game.campaign_star_rating = 3
+		scene.game.campaign_elapsed_seconds = 245.0
+		scene.refresh()
+		check(scene.campaign_dialog != null and scene.campaign_dialog.find_child("CampaignStars", true, false).text == "★★★", "Campaign completion opens a full-screen star celebration")
+		check(scene.campaign_dialog.find_child("CampaignArtwork", true, false).texture.resource_path.ends_with("city_level_celebration.jpg"), "Level celebration uses the generated city artwork")
+		scene.campaign_dialog.find_child("ContinueCampaign", true, false).pressed.emit()
+		await process_frame
+		check(scene.game.campaign_stage == 2 and not scene.game.campaign_complete_pending, "Celebration continues into the next city-development stage")
 		scene.audio.shutdown()
 		viewport.queue_free()
 		await process_frame

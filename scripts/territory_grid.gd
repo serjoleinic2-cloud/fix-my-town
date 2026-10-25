@@ -1,5 +1,7 @@
 extends RefCounted
 
+const Catalog = preload("res://scripts/asset_catalog.gd")
+
 const WIDTH: int = 96
 const HEIGHT: int = 96
 const CELL_SIZE: float = 4.8
@@ -9,7 +11,7 @@ const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
 const CITY_HALL_TYPE := "city_hall"
 const CITY_HALL_SITE := Vector2i(12, 19)
-const BUILDINGS = ["city_hall", "house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "lawn", "flower_bed", "street_tree", "bush"]
+const BUILDINGS = ["city_hall", "house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
@@ -205,7 +207,7 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 				return false
 		if Vector2i(col, row) != CITY_HALL_SITE:
 			return false
-	var footprint := Vector2i.ONE if type_id in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
+	var footprint: Vector2i = Catalog.footprint_cells(type_id)
 	if not in_bounds(col, row) or not in_bounds(col + footprint.x - 1, row + footprint.y - 1):
 		return false
 	var has_access := false
@@ -391,7 +393,7 @@ func auto_access_path(entry: Dictionary) -> Array[Vector2i]:
 	return []
 
 func placement_reason(col: int, row: int, tool: String) -> String:
-	var footprint := Vector2i.ONE if tool in ["clear", "road", "landscaping"] or tool in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
+	var footprint := Vector2i.ONE if tool in ["clear", "road", "landscaping"] else Catalog.footprint_cells(tool)
 	if not in_bounds(col, row) or col + footprint.x > WIDTH or row + footprint.y > HEIGHT:
 		return "outside"
 	for dy in range(footprint.y):

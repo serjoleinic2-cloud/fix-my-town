@@ -2,6 +2,7 @@ extends SceneTree
 
 const Simulation = preload("res://scripts/simulation.gd")
 const TerritoryGrid = preload("res://scripts/territory_grid.gd")
+const Catalog = preload("res://scripts/asset_catalog.gd")
 
 var failures := 0
 
@@ -33,6 +34,28 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	var campaign_contract := Simulation.new(false)
+	campaign_contract.start_empty_city()
+	check(campaign_contract.campaign_stage == 1 and not campaign_contract.campaign_stage_goal_met(), "A fresh city begins at campaign stage one with no completed objectives")
+	check(campaign_contract.campaign_stars_for_time(600.0) == 3 and campaign_contract.campaign_stars_for_time(601.0) == 2 and campaign_contract.campaign_stars_for_time(1801.0) == 1, "Stage time converts to the intended three/two/one-star rating")
+	check(Catalog.footprint_cells("elite_residence") == Vector2i(4, 4) and Catalog.footprint_cells("business_tower") == Vector2i(4, 4), "Elite buildings reserve a 4x4-cell site")
+	campaign_contract.territory.buildings.append({"type_id": "elite_residence", "instance_id": "test_elite", "col": 5, "row": 5, "width": 4, "height": 4})
+	campaign_contract.territory.buildings.append({"type_id": "business_tower", "instance_id": "test_tower", "col": 12, "row": 5, "width": 4, "height": 4})
+	check(campaign_contract.fire_service_duration("test_elite") == 8.0 and campaign_contract.fire_service_duration("test_tower") == 12.0, "Fire response takes longer for elite residences and towers")
+	campaign_contract.territory.buildings.clear()
+	campaign_contract.campaign_stage = 4
+	campaign_contract.campaign_elapsed_seconds = 245.0
+	campaign_contract.campaign_complete_pending = true
+	campaign_contract.campaign_completed_stage = 3
+	campaign_contract.campaign_star_rating = 2
+	campaign_contract.renewal_credits = 1
+	campaign_contract.save_path = "user://campaign_state_test.json"
+	campaign_contract.save_game()
+	var campaign_reload := Simulation.new(false)
+	campaign_reload.save_path = campaign_contract.save_path
+	check(campaign_reload.load_game() and campaign_reload.campaign_stage == 4 and campaign_reload.campaign_elapsed_seconds == 245.0 and campaign_reload.campaign_complete_pending and campaign_reload.campaign_star_rating == 2 and campaign_reload.renewal_credits == 1, "Campaign stage, clock, result and renewal credit survive saving")
+	DirAccess.remove_absolute(campaign_contract.save_path)
+	DirAccess.remove_absolute(campaign_contract.save_path + ".tmp")
 	var game := Simulation.new(false)
 	game.save_path = "user://city_hall_scenario_test.json"
 	game.start_empty_city()
@@ -76,7 +99,9 @@ func run() -> void:
 	catalog_ui.catalog_category = "infrastructure"
 	catalog_ui.catalog_grid_target = TerritoryGrid.CITY_HALL_SITE
 	catalog_ui.select_catalog_item("city_hall")
-	check(catalog_ui.territory_tool == "city_hall" and catalog_ui.territory_cell == TerritoryGrid.CITY_HALL_SITE, "Selecting City Hall targets its highlighted central footprint")
+	check(catalog_ui.selection_kind == "catalog_detail" and catalog_ui.selected_catalog_type == "city_hall", "Selecting City Hall opens its object detail screen")
+	catalog_ui.begin_catalog_placement("city_hall")
+	check(catalog_ui.territory_tool == "city_hall" and catalog_ui.territory_cell == TerritoryGrid.CITY_HALL_SITE, "Confirming City Hall targets its highlighted central footprint")
 	catalog_ui.free()
 	check(game.start_grid_construction(12, 19, "city_hall"), "Start the mandatory City Hall build")
 	game.tick(6.05, false)
@@ -102,8 +127,11 @@ func run() -> void:
 	var choices := [["residential", "house"], ["commercial", "cafe"], ["commercial", "park"], ["services", "fire_station"], ["services", "depot"]]
 	for choice: Array in choices:
 		ui_again.catalog_category = str(choice[0])
+		ui_again.catalog_screen_mode = "items"
 		ui_again.catalog_grid_target = Vector2i(9, 19)
 		ui_again.select_catalog_item(str(choice[1]))
+		check(ui_again.selection_kind == "catalog_detail" and ui_again.selected_catalog_type == str(choice[1]), "Catalog item opens details for %s" % str(choice[1]))
+		ui_again.begin_catalog_placement(str(choice[1]))
 		check(ui_again.territory_tool == str(choice[1]) and ui_again.selection_kind == "territory", "Catalog selection starts grid placement for %s" % str(choice[1]))
 	ui_again.free()
 	build_type(game, 9, 19, "house")

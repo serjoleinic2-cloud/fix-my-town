@@ -20,6 +20,10 @@ func _ready() -> void:
 		depot()
 	elif visual_type == "city_hall":
 		city_hall()
+	elif visual_type == "elite_residence":
+		elite_residence()
+	elif visual_type == "business_tower":
+		business_tower()
 	elif visual_type == "fire_station":
 		fire_station()
 	elif visual_type == "police_station":
@@ -338,6 +342,37 @@ func city_hall() -> void:
 	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	add_child(sign)
 	signs.append(sign)
+
+func elite_residence() -> void:
+	# A 4x4-cell renewal parcel: residence, private parking, planted edge and pool.
+	Art.box(self, Vector3(0, 0.12, 0), Vector3(18.6, 0.18, 18.6), Color("8e9f78"))
+	Art.box(self, Vector3(-5.0, 0.19, -4.8), Vector3(7.6, 0.12, 8.2), Color("666f72"))
+	for x in [-7.3, -5.0, -2.7]:
+		Art.box(self, Vector3(x, 0.29, -4.8), Vector3(0.08, 0.025, 7.2), Color("e5dfc9"))
+	Art.box(self, Vector3(4.7, 0.2, -5.4), Vector3(4.6, 0.22, 6.2), Color("72b5c4"))
+	Art.box(self, Vector3(0, 2.1, 1.4), Vector3(10.2, 3.8, 9.6), Color("f2eee2"))
+	Art.box(self, Vector3(0, 4.2, 1.4), Vector3(10.7, 0.28, 10.1), Color("39586a"))
+	Art.box(self, Vector3(0, 1.5, 6.28), Vector3(7.4, 2.4, 0.16), Color("79aebe"))
+	Art.box(self, Vector3(-4.0, 0.72, 6.0), Vector3(2.8, 0.18, 3.8), Color("d9cda9"))
+	for x in [-7.8, 7.8]:
+		for z in [-7.8, 7.8]:
+			Art.tree(self, Vector3(x, 0.1, z), 0.48, false, absi(roundi(x * 10 + z)))
+	Art.box(self, Vector3(0, 4.7, -0.4), Vector3(2.6, 0.18, 3.4), Color("c8b583"))
+
+func business_tower() -> void:
+	# Tall glass office tower with a retail podium and landscaped forecourt.
+	Art.box(self, Vector3(0, 0.12, 0), Vector3(18.6, 0.18, 18.6), Color("a6a88f"))
+	Art.box(self, Vector3(0, 0.55, 0), Vector3(13.4, 0.8, 13.4), Color("d5d0c0"))
+	for floor_index in range(12):
+		var y := 1.25 + floor_index * 1.16
+		var taper := 1.0 - float(floor_index) * 0.018
+		Art.box(self, Vector3(0, y, 0), Vector3(10.2 * taper, 1.08, 10.2 * taper), Color("527f91") if floor_index % 3 else Color("8eb7bd"))
+		for side in [-1.0, 1.0]:
+			Art.box(self, Vector3(side * 5.15 * taper, y, 0), Vector3(0.12, 0.85, 9.8 * taper), Color("c9e3df"))
+	Art.box(self, Vector3(0, 15.4, 0), Vector3(5.8, 1.2, 5.8), Color("37566c"))
+	for x in [-7.0, 7.0]:
+		for z in [-7.0, 7.0]:
+			Art.tree(self, Vector3(x, 0.1, z), 0.42, false, absi(roundi(x * 13 + z)))
 
 var signal_bulbs: MultiMesh
 

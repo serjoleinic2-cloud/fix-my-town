@@ -3,6 +3,8 @@ extends RefCounted
 # Постоянные игровые типы и единственная точка выбора визуальных сцен.
 const TYPES = {
 	"city_hall": {"icon": "res://assets/icons/city_hall.svg", "scene": "res://scenes/visuals/city_hall.tscn", "cost": 180, "footprint": Vector2(9, 9)},
+	"elite_residence": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/elite_residence.tscn", "cost": 1200, "income": 36, "residents": 30, "footprint": Vector2(19.2, 19.2)},
+	"business_tower": {"icon": "res://assets/icons/hospital.svg", "scene": "res://scenes/visuals/business_tower.tscn", "cost": 2400, "income": 90, "residents": 80, "footprint": Vector2(19.2, 19.2)},
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
 	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
@@ -48,6 +50,7 @@ const ALTERNATIVES = {
 }
 const UNLOCK_LEVELS = {
 	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1,
+	"elite_residence": 4, "business_tower": 5,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
 }
@@ -64,6 +67,8 @@ static func is_landscaping(type_id: String) -> bool:
 	return type_id in LANDSCAPING_TYPES
 
 static func footprint_cells(type_id: String) -> Vector2i:
+	if type_id in ["elite_residence", "business_tower"]:
+		return Vector2i(4, 4)
 	return Vector2i.ONE if is_landscaping(type_id) else Vector2i(2, 2)
 
 static func icon_path(type_id: String) -> String:

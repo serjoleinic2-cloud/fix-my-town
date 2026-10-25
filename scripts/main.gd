@@ -31,6 +31,7 @@ var fire_notice: PanelContainer
 var fire_notice_label: Label
 var fire_notice_left: float = 0.0
 var subsidy_dialog: Control
+var campaign_dialog: Control
 var jam_notice_cooldown: float = 0.0
 var signal_object: Node3D
 var leak_effect: Node3D
@@ -105,6 +106,8 @@ var safe_right: float = 16.0
 var territory_tool: String = "clear"
 var service_type: String = "fire_station"
 var catalog_category: String = "residential"
+var catalog_screen_mode: String = "categories"
+var selected_catalog_type: String = ""
 var catalog_target_plot: int = -1
 var catalog_grid_target := Vector2i(-1, -1)
 var road_selected_cell := Vector2i(-1, -1)
@@ -128,8 +131,8 @@ const QUALITY_COLORS = [Color("df6356"), Color("e9994f"), Color("d8bd57"), Color
 const QUALITY_NAMES = [["Критическое", "Неблагополучное", "Удовлетворительное", "Благополучное", "Отличное"], ["Critical", "Struggling", "Satisfactory", "Good", "Excellent"]]
 const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "landscaping"]
 const CATALOG_ITEMS := {
-	"residential": ["house"],
-	"commercial": ["cafe", "park"],
+	"residential": ["house", "elite_residence"],
+	"commercial": ["cafe", "park", "business_tower"],
 	"infrastructure": ["city_hall", "clear"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
@@ -149,6 +152,7 @@ const TEXT = {
 	"empty": ["Участок %d • доступ к дороге\nБонус зависит от соседних домов и объектов.", "Plot %d • road access\nBonus depends on nearby homes and amenities."],
 	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Дом рабочих", "Workers depot"],
 	"city_hall": ["Городской центр", "City Hall"],
+	"elite_residence": ["Элитная резиденция", "Elite residence"], "business_tower": ["Деловая башня", "Business tower"],
 	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
 	"occupied": ["%s • участок %d", "%s • plot %d"],
@@ -183,7 +187,7 @@ const TEXT = {
  "route_delayed": ["Сломанный светофор задерживает машину", "The broken signal delays the vehicle"],
  "route_clear": ["Перекрёсток исправен: путь свободен", "Signal repaired: the route is clear"],
 	 "repair_duration": ["Работы на месте: 4 сек.", "On-site work: 4 sec"],
-	 "fire_title": ["Пожар в жилом доме", "House fire"],
+		"fire_title": ["Пожар в здании", "Building fire"],
 	 "fire_call": ["Вызвать пожарных", "Call firefighters"],
 	 "fire_engine_available": ["Пожарная машина доступна", "Fire engine available"],
 	 "fire_engine_unavailable": ["Нет свободной машины или дорожного пути", "No available engine or connected road route"],
@@ -229,6 +233,7 @@ const TEXT = {
 	"catalog_requirement_legacy": ["Свободный участок старого квартала", "A vacant lot in the existing district"],
 	"catalog_footprint_small": ["1 клетка", "1 cell"],
 	"catalog_footprint_large": ["2×2 клетки", "2×2 cells"],
+	"catalog_footprint_renewal": ["4×4 клетки · снос двух домов", "4×4 cells · replace two homes"],
 	"catalog_footprint_legacy": ["1 участок · 9×9 м", "1 lot · 9×9 m"],
 	"category_residential": ["Жилые", "Residential"],
 	"category_commercial": ["Коммерция", "Commercial"],
@@ -250,6 +255,13 @@ const TEXT = {
 
 func t(key: String) -> String:
 	return TEXT[key][0 if game.language == "ru" else 1]
+
+func flat_button(parent: Control, caption: String, action: Callable, prominent: bool = false) -> Button:
+	var item := button(parent, caption, action, prominent)
+	item.add_theme_stylebox_override("normal", style(Color("e8eee8") if not prominent else Color("3e8b70"), 5, Color("b8c5bb")))
+	item.add_theme_stylebox_override("hover", style(Color("d9e7dd") if not prominent else Color("34785f"), 5, Color("8aa997")))
+	item.add_theme_stylebox_override("pressed", style(Color("cbdccf") if not prominent else Color("28644f"), 5, Color("6b8c78")))
+	return item
 
 func _ready() -> void:
 	# Read only the layout version before restoring. Previous showcase saves are
@@ -558,11 +570,30 @@ func update_layout() -> void:
 	navbar.add_theme_stylebox_override("panel", nav_style)
 	mission.position = Vector2(safe_left, navbar.position.y - 108)
 	mission.size = Vector2(size_value.x - safe_left - safe_right, 88)
+	if game.empty_city_mode:
+		mission.position.y -= 22
+		mission.size.y = 110
 	fire_notice.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
 	fire_notice.size = Vector2(size_value.x - safe_left - safe_right, 72)
 	var service_mode: bool = selection_kind in ["signal", "leak", "fire"]
+	var fullscreen_menu: bool = selection_kind in ["catalog", "catalog_detail", "catalog_legacy_placement", "land_cell", "grid_house", "grid_upgrade", "grid_road", "district_status", "construction_job"]
 	navbar.visible = not service_mode
-	if service_mode:
+	hud.visible = not fullscreen_menu
+	tools.visible = not fullscreen_menu
+	if fullscreen_menu:
+		sheet.position = Vector2.ZERO
+		sheet.size = size_value
+		var full_style := style(Color("f7f7f2"), 0)
+		full_style.content_margin_left = safe_left + 18
+		full_style.content_margin_right = safe_right + 18
+		full_style.content_margin_top = safe_top + 18
+		full_style.content_margin_bottom = safe_bottom + 18
+		sheet.add_theme_stylebox_override("panel", full_style)
+		sheet_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sheet_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		navbar.hide()
+		fire_notice.hide()
+	elif service_mode:
 		sheet.position = Vector2(0, size_value.y - safe_bottom - action_height)
 		sheet.size = Vector2(size_value.x, action_height + safe_bottom)
 		var service_style := style(PAPER, 22)
@@ -1465,6 +1496,8 @@ func open_catalog(target_plot: int = -1) -> void:
 	active_tab = "build_tab"
 	catalog_target_plot = target_plot if target_plot >= 0 and target_plot < game.buildings.size() and game.buildings[target_plot] == "empty" else -1
 	catalog_category = "infrastructure" if game.empty_city_mode and not game.has_city_hall() else "residential"
+	catalog_screen_mode = "categories"
+	selected_catalog_type = ""
 	catalog_grid_target = Vector2i(-1, -1)
 	selection_kind = "catalog"
 	selected = catalog_target_plot
@@ -1478,7 +1511,20 @@ func open_catalog(target_plot: int = -1) -> void:
 func set_catalog_category(category: String) -> void:
 	if category in CATALOG_CATEGORIES:
 		catalog_category = category
+		catalog_screen_mode = "items"
 		refresh()
+
+func return_to_catalog_categories() -> void:
+	catalog_screen_mode = "categories"
+	selected_catalog_type = ""
+	selection_kind = "catalog"
+	refresh()
+
+func return_to_catalog_items() -> void:
+	catalog_screen_mode = "items"
+	selected_catalog_type = ""
+	selection_kind = "catalog"
+	refresh()
 
 func close_sheet() -> void:
 	placing_stop = false
@@ -1500,6 +1546,7 @@ func open_land_catalog(cell: Vector2i) -> void:
 	catalog_target_plot = -1
 	catalog_grid_target = cell
 	catalog_category = "landscaping"
+	catalog_screen_mode = "items"
 	territory_cell = cell
 	selection_kind = "catalog"
 	selected = -1
@@ -1534,12 +1581,15 @@ func log_territory_probe() -> void:
 func select_territory_cell(cell: Vector2i) -> void:
 	var placement_type := service_type if territory_tool == "service" else territory_tool
 	if placement_type not in ["clear", "road", ""] and not Catalog.is_landscaping(placement_type):
-		# Buildings and services use a 2x2 footprint. A tap on any cell of a
-		# cleared square snaps to the valid top-left cell instead of rejecting
-		# the placement because the tapped cell was the lower-right corner.
-		for candidate: Vector2i in [cell, cell + Vector2i(-1, 0), cell + Vector2i(0, -1), cell + Vector2i(-1, -1)]:
-			if game.territory.placement_reason(candidate.x, candidate.y, "service" if Catalog.is_service(placement_type) else "house") == "":
-				cell = candidate
+		# Snap any tapped cell inside the selected footprint to its valid top-left.
+		var footprint := Catalog.footprint_cells(placement_type)
+		for dy in range(footprint.y):
+			for dx in range(footprint.x):
+				var candidate := cell - Vector2i(dx, dy)
+				if game.territory.placement_reason(candidate.x, candidate.y, placement_type) == "":
+					cell = candidate
+					break
+			if game.territory.placement_reason(cell.x, cell.y, placement_type) == "":
 				break
 	territory_cell = cell
 	refresh()
@@ -1565,6 +1615,8 @@ func catalog_icon(type_id: String) -> String:
 func catalog_size(type_id: String) -> String:
 	if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id):
 		return t("catalog_footprint_small")
+	if type_id in ["elite_residence", "business_tower"]:
+		return t("catalog_footprint_renewal")
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
 		return t("catalog_footprint_legacy")
 	return t("catalog_footprint_large")
@@ -1580,6 +1632,8 @@ func catalog_requirement(type_id: String) -> String:
 		return t("catalog_requirement_road")
 	if Catalog.is_landscaping(type_id):
 		return t("catalog_requirement_landscape")
+	if type_id in ["elite_residence", "business_tower"]:
+		return tr_text("Нужны 2 жетона обновления: снесите два обычных дома. Затем расчистите площадку 4×4.", "Requires 2 renewal credits: demolish two ordinary homes, then clear a 4×4 site.")
 	return t("catalog_requirement_house")
 
 func catalog_item_unlocked(type_id: String) -> bool:
@@ -1587,7 +1641,7 @@ func catalog_item_unlocked(type_id: String) -> bool:
 		return game.empty_city_mode and not game.has_city_hall()
 	if game.empty_city_mode and not game.has_city_hall() and type_id not in ["city_hall", "clear"]:
 		return false
-	return game.city_level() >= Catalog.unlock_level(type_id)
+	return maxi(game.city_level(), game.campaign_stage) >= Catalog.unlock_level(type_id)
 
 func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	var item := Button.new()
@@ -1595,10 +1649,10 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	item.custom_minimum_size.y = 96
 	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item.disabled = not catalog_item_unlocked(type_id)
-	item.add_theme_stylebox_override("normal", style(Color("eaf4f8"), 12, Color("9cc7d8")))
-	item.add_theme_stylebox_override("hover", style(Color("d8eff9"), 12, Color("2e9bd1")))
-	item.add_theme_stylebox_override("pressed", style(Color("bfe5f3"), 12, Color("1c78ae")))
-	item.add_theme_stylebox_override("disabled", style(Color("e9e8e3"), 12, Color("d4d3cd")))
+	item.add_theme_stylebox_override("normal", style(Color("eaf4f0"), 5, Color("b4c9bf")))
+	item.add_theme_stylebox_override("hover", style(Color("d8ece3"), 5, Color("8eb7a1")))
+	item.add_theme_stylebox_override("pressed", style(Color("c3e0d1"), 5, Color("6e9d83")))
+	item.add_theme_stylebox_override("disabled", style(Color("e9e8e3"), 5, Color("d4d3cd")))
 	item.add_theme_color_override("font_color", INK)
 	item.add_theme_color_override("font_hover_color", INK)
 	item.add_theme_color_override("font_pressed_color", INK)
@@ -1685,7 +1739,7 @@ func catalog_model_preview(type_id: String) -> Control:
 	preview_world.add_child(fill_light)
 	var camera_preview := Camera3D.new()
 	camera_preview.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera_preview.size = 13.2
+	camera_preview.size = 20.0 if type_id in ["elite_residence", "business_tower"] else 13.2
 	camera_preview.position = Vector3(12, 11, 14)
 	camera_preview.look_at_from_position(camera_preview.position, Vector3(0, 2.0, 0), Vector3.UP)
 	camera_preview.current = true
@@ -1698,35 +1752,26 @@ func catalog_model_preview(type_id: String) -> Control:
 	return preview_box
 
 func build_catalog_sheet() -> void:
-	var list_count := catalog_items_for(catalog_category).size()
-	var list_height := minf(210, maxf(82, float(list_count) * 96.0))
-	action_height = minf(560, maxf(270, 185 + list_height))
+	action_height = 0
 	header(t("catalog_title"))
-	var level_line := label(18, sheet_column, t("catalog_level") % game.city_level(), true)
-	level_line.name = "CityLevel"
+	label(18, sheet_column, tr_text("Этап %d · %s", "Stage %d · %s") % [game.campaign_stage, game.campaign_stage_title()])
+	if catalog_screen_mode == "categories":
+		label(17, sheet_column, tr_text("Выберите направление строительства", "Choose a construction category"))
+		for category: String in CATALOG_CATEGORIES:
+			var count := catalog_items_for(category).size()
+			var category_button := flat_button(sheet_column, t("category_" + category) + "   ·   %d" % count, set_catalog_category.bind(category), true)
+			category_button.name = "CatalogCategory_" + category
+			category_button.custom_minimum_size.y = 64
+		button(sheet_column, t("cancel"), close_sheet)
+		return
+	var category_row := hbox(sheet_column)
+	button(category_row, tr_text("← Категории", "← Categories"), return_to_catalog_categories)
+	var category_heading := label(21, category_row, t("category_" + catalog_category), true)
+	category_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if catalog_grid_target.x >= 0:
-		label(16, sheet_column, tr_text("Клетка %d,%d выбрана на карте", "Cell %d,%d selected on the map") % [catalog_grid_target.x + 1, catalog_grid_target.y + 1])
-	var category_selector := OptionButton.new()
-	category_selector.name = "CatalogCategorySelector"
-	category_selector.custom_minimum_size.y = 48
-	category_selector.add_theme_font_size_override("font_size", 18)
-	category_selector.add_theme_stylebox_override("normal", style(Color("e3f1d8"), 12, Color("a9c98e")))
-	category_selector.add_theme_stylebox_override("hover", style(Color("d4ebc5"), 12, Color("8ebd78")))
-	category_selector.add_theme_stylebox_override("pressed", style(Color("c6e3b4"), 12, Color("78aa67")))
-	for category_index in range(CATALOG_CATEGORIES.size()):
-		var category: String = CATALOG_CATEGORIES[category_index]
-		category_selector.add_item(t("category_" + category), category_index)
-	category_selector.select(CATALOG_CATEGORIES.find(catalog_category))
-	var category_popup := category_selector.get_popup()
-	category_popup.add_theme_stylebox_override("panel", style(Color("e3f1d8"), 12, Color("a9c98e")))
-	category_popup.add_theme_color_override("font_color", INK)
-	category_popup.add_theme_color_override("font_hover_color", INK)
-	category_popup.add_theme_color_override("font_pressed_color", INK)
-	category_selector.item_selected.connect(func(index: int): set_catalog_category(CATALOG_CATEGORIES[index]))
-	sheet_column.add_child(category_selector)
+		label(15, sheet_column, tr_text("Место выберете на карте после подготовки объекта.", "Choose a map location after confirming the object."))
 	var scroll := ScrollContainer.new()
 	scroll.name = "CatalogItemsScroll"
-	scroll.custom_minimum_size.y = list_height
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -1741,9 +1786,48 @@ func build_catalog_sheet() -> void:
 	scroll.add_child(list)
 	for type_id in catalog_items_for(catalog_category):
 		catalog_entry_button(list, type_id)
-	if catalog_target_plot >= 0:
-		label(16, sheet_column, tr_text("Свободный участок №%d выбран на карте", "Vacant lot %d is selected on the map") % (catalog_target_plot + 1))
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelCatalog"
+
+func build_catalog_detail_sheet() -> void:
+	action_height = 0
+	var type_id := selected_catalog_type
+	if type_id == "" or (not Catalog.TYPES.has(type_id) and type_id != "clear"):
+		return_to_catalog_items()
+		return
+	var title_row := hbox(sheet_column)
+	button(title_row, tr_text("← Назад", "← Back"), return_to_catalog_items)
+	var title := label(24, title_row, t(type_id), true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var preview_row := hbox(card(sheet_column, Color("e9f0ed")))
+	var model: Control
+	if Catalog.TYPES.has(type_id):
+		model = catalog_model_preview(type_id)
+	else:
+		var icon_preview := TextureRect.new()
+		icon_preview.texture = load(catalog_icon(type_id))
+		icon_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		model = icon_preview
+	model.custom_minimum_size = Vector2(minf(300, screen.size.x - 96), minf(300, screen.size.x - 96))
+	model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	model.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview_row.add_child(model)
+	var details_column := VBoxContainer.new()
+	details_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	preview_row.add_child(details_column)
+	label(19, details_column, tr_text("Размер: %s", "Footprint: %s") % catalog_size(type_id), true)
+	if Catalog.TYPES.has(type_id):
+		label(17, details_column, tr_text("Доход за цикл: %d", "Income per cycle: %d") % int(Catalog.TYPES[type_id].get("income", 0)))
+	if type_id in ["elite_residence", "business_tower"]:
+		label(17, details_column, tr_text("Нужно снести два обычных дома. Доступно жетонов обновления: %d", "Demolish two ordinary homes. Renewal credits available: %d") % game.renewal_credits).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label(17, details_column, tr_text("В доме — парковка, мини-сад и частная инфраструктура. Работы по авариям в крупных зданиях идут дольше.", "Includes parking, a mini-garden and private amenities. Incidents at larger buildings take longer to resolve.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label(16, sheet_column, t("catalog_requires") + ": " + catalog_requirement(type_id)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label(22, sheet_column, t("catalog_price") % catalog_cost(type_id), true)
+	var build_button := button(sheet_column, tr_text("Выбрать место строительства", "Choose construction location"), begin_catalog_placement.bind(type_id), true)
+	build_button.custom_minimum_size.y = 64
+	build_button.name = "PrepareCatalogPlacement"
+	build_button.disabled = not catalog_item_unlocked(type_id) or game.budget < catalog_cost(type_id) or (type_id in ["elite_residence", "business_tower"] and game.renewal_credits < 2)
+	button(sheet_column, t("cancel"), return_to_catalog_items)
 
 func _input(event: InputEvent) -> void:
 	# Карточки каталога являются кнопками и забирают GUI-события себе. Здесь
@@ -1857,6 +1941,11 @@ func build_road_piece_catalog() -> void:
 func select_catalog_item(type_id: String) -> void:
 	if not catalog_items_for(catalog_category).has(type_id) or not catalog_item_unlocked(type_id):
 		return
+	selected_catalog_type = type_id
+	selection_kind = "catalog_detail"
+	refresh()
+
+func begin_catalog_placement(type_id: String) -> void:
 	territory_tool = type_id
 	preview_kind = type_id
 	selected = catalog_target_plot
@@ -2035,7 +2124,7 @@ func territory_reason() -> String:
 			return "city_hall_site"
 	if territory_tool == "road" and not game.has_city_hall():
 		return "city_hall_first"
-	var placement_kind := "landscaping" if Catalog.is_landscaping(selected_type) else ("service" if Catalog.is_service(selected_type) else "house")
+	var placement_kind := "landscaping" if Catalog.is_landscaping(selected_type) else selected_type
 	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool if territory_tool in ["clear", "road"] else placement_kind)
 	if reason != "":
 		return reason
@@ -2046,8 +2135,10 @@ func territory_reason() -> String:
 				links.append(offset)
 		if links.size() >= 2 and road_topology(links) != road_piece_type:
 			return tr_text("Выбранный элемент не совпадает с подключёнными сторонами дороги.", "This road piece does not match the connected sides.")
-	if territory_tool not in ["clear", "road"] and game.city_level() < Catalog.unlock_level(selected_type):
+	if territory_tool not in ["clear", "road"] and maxi(game.city_level(), game.campaign_stage) < Catalog.unlock_level(selected_type):
 		return "locked"
+	if selected_type in ["elite_residence", "business_tower"] and game.renewal_credits < 2:
+		return "renewal_credits"
 	var cost := catalog_cost(selected_type)
 	return "" if game.budget >= cost else "budget"
 
@@ -2062,6 +2153,7 @@ func placement_hint(reason: String) -> String:
 		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
 		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
 		"locked": return tr_text("Это здание ещё не открыто.", "This building is still locked.")
+		"renewal_credits": return tr_text("Для элитной застройки нужно снести два обычных дома.", "Demolish two ordinary homes to unlock this elite site.")
 	if territory_tool == "clear":
 		return tr_text("Расчистка стоит 5. Для дома очистите все клетки его контура 2×2.", "Clear for 5. Clear all four cells in the 2×2 home footprint.")
 	if territory_tool == "road":
@@ -2134,10 +2226,21 @@ func refresh() -> void:
 	var signal_active := game.legacy_problem_available("signal")
 	var mission_symbol := "star" if game.completed else ("drop" if leak_active else ("hammer" if signal_active else "pin"))
 	mission_icon.texture = load("res://assets/icons/ui_" + mission_symbol + ".svg")
-	var completed_steps := int(not leak_active) + int(not signal_active) + int(game.buildings.has("cafe") or game.buildings.has("park"))
-	objective.text = t("mission_done") if game.completed else (t("mission_water") if leak_active else (t("mission_signal") if signal_active else t("mission_build")))
-	objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
-	progress_bar.value = completed_steps
+	if game.empty_city_mode:
+		objective.text = tr_text("Этап %d · %s\n%s", "Stage %d · %s\n%s") % [game.campaign_stage, game.campaign_stage_title(), campaign_goal_text(game.campaign_stage)]
+		objective.add_theme_font_size_override("font_size", 16)
+		objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		objective.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		objective.get_parent().get_node("MissionCounter").text = format_duration(game.campaign_elapsed_seconds)
+		progress_bar.max_value = 1.0
+		progress_bar.value = game.campaign_stage_progress()
+		mission_icon.texture = load("res://assets/icons/ui_star.svg")
+	else:
+		var completed_steps := int(not leak_active) + int(not signal_active) + int(game.buildings.has("cafe") or game.buildings.has("park"))
+		objective.text = t("mission_done") if game.completed else (t("mission_water") if leak_active else (t("mission_signal") if signal_active else t("mission_build")))
+		objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
+		progress_bar.max_value = 3
+		progress_bar.value = completed_steps
 	redraw_plots()
 	maybe_offer_subsidy()
 	update_fire_visuals()
@@ -2155,6 +2258,87 @@ func refresh() -> void:
 	update_preview()
 	sync_construction_site()
 	update_layout()
+	update_campaign_completion()
+
+func campaign_goal_text(stage: int) -> String:
+	match stage:
+		1: return tr_text("постройте мэрию, дом и пожарную службу", "build City Hall, a home and a fire service")
+		2: return tr_text("3 дома, кафе или парк и улучшите один дом", "3 homes, a café or park, and upgrade one home")
+		3: return tr_text("5 домов, 2 службы и дом 3-го уровня", "5 homes, 2 services and a level-3 home")
+		4: return tr_text("создайте элитную резиденцию из двух домов", "replace two homes with an elite residence")
+		5: return tr_text("постройте первую деловую башню", "build the first business tower")
+		6: return tr_text("постройте 2 башни и 2 резиденции", "build 2 towers and 2 residences")
+		7: return tr_text("3 башни и настроение не ниже 65", "3 towers and happiness of at least 65")
+		8: return tr_text("4 башни и настроение не ниже 72", "4 towers and happiness of at least 72")
+		9: return tr_text("6 башен и настроение не ниже 78", "6 towers and happiness of at least 78")
+		_: return tr_text("8 башен и настроение не ниже 85", "8 towers and happiness of at least 85")
+
+func format_duration(seconds: float) -> String:
+	var whole := maxi(0, floori(seconds))
+	return "%02d:%02d" % [int(whole / 60), whole % 60]
+
+func update_campaign_completion() -> void:
+	if not game.empty_city_mode or not game.campaign_complete_pending:
+		if campaign_dialog != null and is_instance_valid(campaign_dialog):
+			campaign_dialog.queue_free()
+		campaign_dialog = null
+		return
+	if campaign_dialog != null and is_instance_valid(campaign_dialog):
+		return
+	var overlay := Control.new()
+	overlay.name = "CampaignCompletionOverlay"
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	screen.add_child(overlay)
+	campaign_dialog = overlay
+	var background := TextureRect.new()
+	background.name = "CampaignArtwork"
+	background.texture = load("res://assets/backgrounds/city_level_celebration.jpg")
+	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(background)
+	var shade := ColorRect.new()
+	shade.color = Color(0.04, 0.11, 0.14, 0.48)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(shade)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.offset_left = safe_left + 18
+	center.offset_right = -(safe_right + 18)
+	center.offset_top = safe_top + 20
+	center.offset_bottom = -(safe_bottom + 20)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(minf(500, screen.size.x - safe_left - safe_right - 36), 0)
+	panel.add_theme_stylebox_override("panel", style(Color("fbf9f4"), 16, Color("e5c879")))
+	center.add_child(panel)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 12)
+	panel.add_child(content)
+	var stage := game.campaign_completed_stage
+	var heading := label(28, content, tr_text("Район развивается!", "District upgraded!"), true)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var subheading := label(20, content, tr_text("Этап %d · %s", "Stage %d · %s") % [stage, game.campaign_stage_title(stage)], true)
+	subheading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var stars := label(38, content, "★".repeat(game.campaign_star_rating) + "☆".repeat(3 - game.campaign_star_rating), true)
+	stars.name = "CampaignStars"
+	stars.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stars.add_theme_color_override("font_color", Color("d49b29"))
+	var time := label(20, content, tr_text("Время прохождения: %s", "Completion time: %s") % format_duration(game.campaign_elapsed_seconds))
+	time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var unlocked := label(17, content, tr_text("Новые здания и более высокий этап застройки открыты.", "New buildings and a higher development stage are unlocked."))
+	unlocked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	unlocked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var next_caption := tr_text("Продолжить развитие", "Continue developing") if stage < 10 else tr_text("Продолжить свободную игру", "Continue sandbox")
+	var next := flat_button(content, next_caption, func():
+		game.continue_campaign()
+		campaign_dialog.queue_free()
+		campaign_dialog = null
+		refresh(), true)
+	next.name = "ContinueCampaign"
+	next.custom_minimum_size.y = 64
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 func header(title_value: String, icon_key: String = "") -> void:
 	var row := hbox(sheet_column)
@@ -2188,6 +2372,8 @@ func build_sheet() -> void:
 		build_district_sheet()
 	elif selection_kind == "catalog":
 		build_catalog_sheet()
+	elif selection_kind == "catalog_detail":
+		build_catalog_detail_sheet()
 	elif selection_kind == "road_piece_catalog":
 		build_road_piece_catalog()
 	elif selection_kind == "catalog_legacy_placement":
@@ -3065,13 +3251,28 @@ func build_grid_house_sheet() -> void:
 	if entry.type_id != "house":
 		action_height = 270
 		header(t(entry.type_id) + (" · %d/3" % entry.level if Catalog.LEVELS.has(entry.type_id) else ""))
+		var premium_damage := game.house_damage(entry.instance_id)
+		if premium_damage > 0:
+			label(18, sheet_column, t("fire_damaged") % premium_damage).add_theme_color_override("font_color", Color("c96b52"))
+			if game.fires.is_empty():
+				var restoration_cost := 120 if game.is_ruined(entry.instance_id) else 40 + premium_damage
+				if game.is_ruined(entry.instance_id):
+					restoration_cost = maxi(120, int(Catalog.cost(entry.type_id) / 2))
+				var restore_premium := button(sheet_column, (tr_text("Восстановить здание", "Restore building") if game.is_ruined(entry.instance_id) else tr_text("Устранить повреждения", "Repair damage")) + " · %d" % restoration_cost, func():
+					if game.repair_fire_damage(entry.instance_id):
+						audio.play_ui("success")
+					refresh(), true)
+				restore_premium.disabled = game.budget < restoration_cost or not game.construction_job.is_empty()
 		if Catalog.LEVELS.has(entry.type_id):
 			label(20, sheet_column, building_effect(entry.type_id, entry.level)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			var next_price: int = Catalog.level_data(entry.type_id, entry.level).upgrade_cost
 			var improve := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % next_price, func():
 				selection_kind = "grid_upgrade"
 				refresh(), true)
-			improve.disabled = entry.level >= 3 or game.budget < next_price or not game.construction_job.is_empty()
+			var upgrade_unlocked := not game.empty_city_mode or game.campaign_stage > entry.level
+			improve.disabled = entry.level >= 3 or game.budget < next_price or not game.construction_job.is_empty() or not upgrade_unlocked
+			if not upgrade_unlocked:
+				label(15, sheet_column, tr_text("Улучшение откроется на этапе %d", "Upgrade unlocks at stage %d") % (entry.level + 1))
 		else:
 			label(20, sheet_column, tr_text("Занимает участок и сохраняет своё состояние.", "Occupies the lot and keeps its own state."))
 		button(sheet_column, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
@@ -3108,9 +3309,12 @@ func build_grid_house_sheet() -> void:
 		selection_kind = "grid_upgrade"
 		refresh(), true)
 	improve.name = "UpgradeButton"
-	improve.disabled = grid_ruined or entry.level >= 3 or not game.construction_job.is_empty()
+	var next_house_stage_unlocked := not game.empty_city_mode or game.campaign_stage > entry.level
+	improve.disabled = grid_ruined or entry.level >= 3 or not game.construction_job.is_empty() or not next_house_stage_unlocked
 	if grid_ruined:
 		label(18, sheet_column, tr_text("Руины нельзя улучшать. Сначала восстановите дом.", "Ruins cannot be upgraded. Rebuild the home first.")).add_theme_color_override("font_color", Color("b35b49"))
+	elif not next_house_stage_unlocked:
+		label(16, sheet_column, tr_text("Новый архитектурный этап откроется на уровне %d.", "The next architectural stage unlocks at level %d.") % (entry.level + 1))
 	button(sheet_column if narrow_screen else row, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
 	var inspected: bool = bool(entry.get("inspected", false))
 	if not inspected:
@@ -3570,7 +3774,10 @@ func request_demolition(index: int) -> void:
 	dialog.popup_centered(Vector2i(480, 570))
 
 func update_mission_visibility() -> void:
-	mission.visible = not game.empty_city_mode and not sheet.visible and (not game.completed or completion_left > 0)
+	if game.empty_city_mode:
+		mission.visible = not sheet.visible and not game.campaign_complete_pending
+	else:
+		mission.visible = not sheet.visible and (not game.completed or completion_left > 0)
 
 func maybe_offer_subsidy() -> void:
 	if not game.can_offer_subsidy() or (subsidy_dialog != null and is_instance_valid(subsidy_dialog)):

@@ -60,13 +60,18 @@ func run() -> void:
 	game.save_path = "user://city_hall_scenario_test.json"
 	game.start_empty_city()
 	game.budget = 1200
-	check(game.territory.buildings.is_empty() and game.all_buildings().is_empty(), "New City has no built objects")
-	check(not game.has_city_hall() and game.construction_job.is_empty() and game.fire_assignments().is_empty(), "Clean start creates no City Hall model or work vehicles")
-	check(game.territory.placement_reason(12, 19, "clear") == "" and game.territory.placement_reason(9, 20, "clear") == "", "Multiple revealed natural cells can be cleared")
-	check(game.territory.placement_reason(16, 20, "clear") == "outside", "Fogged cells cannot be selected for clearing")
-	check(not game.start_grid_construction(12, 19, "house"), "No other building can replace the mandatory City Hall")
-	check(not game.start_grid_road(12, 18), "Road construction waits for City Hall")
-	check(game.start_grid_clear(12, 19), "Start clearing the marked City Hall plot")
+	check(game.has_city_hall() and game.territory.buildings.size() == 1 and game.construction_job.is_empty() and game.fire_assignments().is_empty(), "New City starts with a permanent City Hall and no work vehicles")
+	check(game.territory.placement_reason(9, 20, "clear") == "" and game.territory.placement_reason(15, 20, "clear") == "", "Nearby frontier cells can be prepared")
+	check(game.territory.placement_reason(17, 20, "clear") == "outside", "Fogged cells cannot be selected for clearing")
+	check(not game.start_grid_construction(12, 19, "house"), "The starting City Hall cannot be replaced")
+	for row in [19, 20]:
+		for col in [8, 9]:
+			game.territory.cells[row][col] = "free"
+	check(game.territory.placement_reason(8, 19, "house") == "no_road", "A cleared but disconnected lot cannot be built on")
+	for row in [19, 20]:
+		for col in [8, 9]:
+			game.territory.cells[row][col] = "forest"
+	check(game.start_grid_clear(10, 19), "Start clearing a nearby expansion cell")
 	var start_position: Array = game.construction_job.excavator_position.duplicate()
 	game.tick(0.35, false)
 	var moving_position: Array = game.construction_job.excavator_position
@@ -77,15 +82,15 @@ func run() -> void:
 	check(resume.load_game() and resume.construction_job.kind == "clear", "Unfinished clearing and vehicle route restore after reload")
 	game = resume
 	finish_work(game)
-	check(game.territory.state_at(12, 19) == "free", "Clearing changes only the selected natural cell to buildable ground")
+	check(game.territory.state_at(10, 19) == "free", "Clearing changes only the selected natural cell to buildable ground")
 	check(game.construction_job.is_empty(), "First clearing removes machines and road-work signs after they leave")
-	for cell in [Vector2i(13, 19), Vector2i(12, 20), Vector2i(13, 20), Vector2i(9, 20), Vector2i(15, 20), Vector2i(12, 17), Vector2i(12, 23)]:
+	for cell in [Vector2i(9, 19), Vector2i(9, 20), Vector2i(10, 20), Vector2i(15, 20), Vector2i(12, 17), Vector2i(12, 23)]:
 		clear_cell(game, cell.x, cell.y)
 	game.save_game()
 	var cleared_reload := Simulation.new(false)
 	cleared_reload.save_path = game.save_path
 	check(cleared_reload.load_game(), "Saved natural clearing data loads")
-	for cell in [Vector2i(12, 19), Vector2i(13, 19), Vector2i(12, 20), Vector2i(13, 20), Vector2i(9, 20), Vector2i(15, 20), Vector2i(12, 17), Vector2i(12, 23)]:
+	for cell in [Vector2i(9, 19), Vector2i(10, 19), Vector2i(9, 20), Vector2i(10, 20), Vector2i(15, 20), Vector2i(12, 17), Vector2i(12, 23)]:
 		check(cleared_reload.territory.state_at(cell.x, cell.y) == "free", "Cleared cell %d,%d stays buildable after reload" % [cell.x, cell.y])
 	game = cleared_reload
 	var main_script: Script = load("res://scripts/main.gd")
@@ -95,23 +100,14 @@ func run() -> void:
 	check(catalog_ui.catalog_items_for("commercial").has("cafe") and catalog_ui.catalog_items_for("commercial").has("park"), "Catalog exposes café and park")
 	var service_items: Array = catalog_ui.catalog_items_for("services")
 	check(service_items.has("fire_station") and service_items.has("police_station") and service_items.has("hospital") and service_items.has("depot"), "Catalog exposes all service buildings")
-	check(catalog_ui.catalog_items_for("infrastructure").has("city_hall"), "Infrastructure catalog exposes City Hall")
-	catalog_ui.catalog_category = "infrastructure"
-	catalog_ui.catalog_grid_target = TerritoryGrid.CITY_HALL_SITE
-	catalog_ui.select_catalog_item("city_hall")
-	check(catalog_ui.selection_kind == "catalog_detail" and catalog_ui.selected_catalog_type == "city_hall", "Selecting City Hall opens its object detail screen")
-	catalog_ui.begin_catalog_placement("city_hall")
-	check(catalog_ui.territory_tool == "city_hall" and catalog_ui.territory_cell == TerritoryGrid.CITY_HALL_SITE, "Confirming City Hall targets its highlighted central footprint")
+	check(not catalog_ui.catalog_items_for("infrastructure").has("city_hall"), "The permanent City Hall is not offered as a construction item")
 	catalog_ui.free()
-	check(game.start_grid_construction(12, 19, "city_hall"), "Start the mandatory City Hall build")
-	game.tick(6.05, false)
-	check(game.has_city_hall(), "City Hall becomes the first built object")
 	var hub_roads := 0
 	for row in range(18, 22):
 		for col in range(11, 15):
 			if not (col in [12, 13] and row in [19, 20]) and game.territory.state_at(col, row) == "road":
 				hub_roads += 1
-	check(hub_roads >= 8 and game.territory.connected_road(12, 18), "City Hall automatically forms its first connected road loop")
+	check(hub_roads == 12 and game.territory.connected_road(12, 18), "City Hall starts with a complete connected road loop")
 	check(not game.can_demolish_grid_building("pine_district_city_hall_12_19"), "The city growth centre cannot be demolished")
 	game.save_game()
 	var hub_reload := Simulation.new(false)

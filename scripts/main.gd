@@ -2316,7 +2316,7 @@ func update_campaign_completion() -> void:
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 12)
 	panel.add_child(content)
-	var stage := game.campaign_completed_stage
+	var stage: int = int(game.campaign_completed_stage)
 	var heading := label(28, content, tr_text("Район развивается!", "District upgraded!"), true)
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var subheading := label(20, content, tr_text("Этап %d · %s", "Stage %d · %s") % [stage, game.campaign_stage_title(stage)], true)

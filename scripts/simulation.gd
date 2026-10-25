@@ -2061,7 +2061,7 @@ func is_house_id_in(identifier: String, legacy: Array, grid: RefCounted) -> bool
 			return false
 		var index := int(index_text)
 		return index >= 0 and index < legacy.size() and legacy[index] == "house"
-	var entry := grid.building_by_id(identifier)
+	var entry: Dictionary = grid.building_by_id(identifier)
 	return not entry.is_empty() and is_residential_type(str(entry.type_id))
 
 

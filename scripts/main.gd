@@ -41,6 +41,7 @@ var screen: Control
 var hud: MarginContainer
 var navbar: PanelContainer
 var sheet: PanelContainer
+var sheet_scroll: ScrollContainer
 var sheet_column: VBoxContainer
 var mission: PanelContainer
 var completion_left: float = 0
@@ -515,8 +516,16 @@ func build_ui() -> void:
 	sheet.minimum_size_changed.connect(func():
 		if not updating_layout:
 			call_deferred("update_layout"))
+	sheet_scroll = ScrollContainer.new()
+	sheet_scroll.name = "BuildingCardScroll"
+	sheet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sheet_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	sheet_scroll.scroll_deadzone = 10
+	sheet_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sheet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sheet_column = VBoxContainer.new()
 	sheet_column.add_theme_constant_override("separation", 10)
+	sheet_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sheet.add_child(sheet_column)
 	navbar = card(screen)
 	var navigation := hbox(navbar, 8)
@@ -599,7 +608,8 @@ func update_layout() -> void:
 		full_style.content_margin_bottom = safe_bottom + 18
 		sheet.add_theme_stylebox_override("panel", full_style)
 		sheet_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sheet_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		sheet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		sheet_column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if sheet_column.get_parent() == sheet_scroll else Control.SIZE_EXPAND_FILL
 		navbar.hide()
 		fire_notice.hide()
 	elif service_mode:
@@ -2394,6 +2404,7 @@ func header(title_value: String, icon_key: String = "") -> void:
 func build_sheet() -> void:
 	clear_children(sheet_column)
 	clear_children(mode_switcher)
+	configure_building_card_scroll(selection_kind in ["grid_house", "grid_upgrade"])
 	mode_switcher.hide()
 	sheet.add_theme_stylebox_override("panel", style(PAPER, 22))
 	sheet.visible = selection_kind != ""
@@ -2554,6 +2565,24 @@ func build_sheet() -> void:
 		header(t(game.buildings[selected]))
 		details = label(23, sheet_column, t("occupied") % [t(game.buildings[selected]), selected + 1])
 		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+func configure_building_card_scroll(enabled: bool) -> void:
+	if enabled:
+		if sheet_column.get_parent() == sheet:
+			sheet.remove_child(sheet_column)
+		if sheet_scroll.get_parent() != sheet:
+			sheet.add_child(sheet_scroll)
+		if sheet_column.get_parent() != sheet_scroll:
+			sheet_scroll.add_child(sheet_column)
+		sheet.move_child(sheet_scroll, 0)
+		return
+	if sheet_column.get_parent() == sheet_scroll:
+		sheet_scroll.remove_child(sheet_column)
+	if sheet_scroll.get_parent() == sheet:
+		sheet.remove_child(sheet_scroll)
+	if sheet_column.get_parent() != sheet:
+		sheet.add_child(sheet_column)
+	sheet.move_child(sheet_column, 0)
 
 func choose_preview(kind: String) -> void:
 	preview_kind = kind
@@ -3373,7 +3402,10 @@ func build_grid_house_sheet() -> void:
 				label(15, sheet_column, tr_text("Сначала улучшите логистический центр", "Upgrade the logistics center first"))
 		else:
 			label(20, sheet_column, tr_text("Занимает участок и сохраняет своё состояние.", "Occupies the lot and keeps its own state."))
-		button(sheet_column, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
+		if game.can_demolish_grid_building(entry.instance_id):
+			button(sheet_column, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
+		elif entry.type_id == "city_hall":
+			label(18, sheet_column, tr_text("Постоянный городской центр района.", "Permanent civic center of the district."))
 		return
 	action_height = 430
 	header(t("house") + " · %d/3" % entry.level)
@@ -3452,7 +3484,7 @@ func build_grid_upgrade_sheet() -> void:
 
 func open_grid_more() -> void:
 	var entry := selected_grid_record()
-	if entry.is_empty():
+	if entry.is_empty() or not game.can_demolish_grid_building(grid_selected_id):
 		return
 	var dialog := ConfirmationDialog.new()
 	dialog.name = "GridDemolitionConfirmation"

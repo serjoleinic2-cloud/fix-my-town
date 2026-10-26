@@ -169,6 +169,17 @@ func run() -> void:
 		click(viewport, header_close.get_global_transform_with_canvas() * (header_close.size / 2))
 		await process_frame
 		check(scene.selection_kind == "" and not scene.sheet.visible, "Tapping the visible close button dismisses the card")
+		scene.game = Simulation.new(false)
+		scene.game.save_path = "user://test_responsive.json"
+		scene.game.start_empty_city()
+		scene.refresh()
+		scene.select_grid_house("pine_district_city_hall_12_19")
+		for i in range(3):
+			await process_frame
+		var civic_close_buttons: Array = scene.sheet.find_children("*", "Button", true, false).filter(func(item): return item.text == "×")
+		check(scene.sheet_scroll.get_parent() == scene.sheet and scene.sheet_scroll.get_global_rect().end.y <= scene.screen.size.y + 1, "City Hall card uses an in-screen, vertically scrollable panel")
+		check(not civic_close_buttons.is_empty() and civic_close_buttons[0].get_global_rect().end.y <= scene.sheet_scroll.get_global_rect().end.y + 1, "City Hall card close button stays inside its visible panel")
+		check(scene.sheet_column.find_child("MoreButton", true, false) == null, "Permanent City Hall has no unusable demolition action")
 		scene.audio.shutdown()
 		scene.queue_free()
 		await process_frame

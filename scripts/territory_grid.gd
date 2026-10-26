@@ -226,6 +226,8 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 		if Vector2i(col, row) != CITY_HALL_SITE:
 			return false
 	var footprint: Vector2i = Catalog.footprint_cells(type_id)
+	if lot_alignment_reason(col, row, footprint) != "":
+		return false
 	if not in_bounds(col, row) or not in_bounds(col + footprint.x - 1, row + footprint.y - 1):
 		return false
 	var has_access := false
@@ -472,6 +474,8 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 		for dx in range(footprint.x):
 			if not is_revealed(col + dx, row + dy):
 				return "outside"
+	if tool not in ["clear", "road", "landscaping"] and lot_alignment_reason(col, row, footprint) != "":
+		return "misaligned"
 	if tool == "clear":
 		if state_at(col, row) != "forest":
 			return "not_forest"
@@ -488,6 +492,19 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 	if strict_building_frontier:
 		return "" if footprint_touches_connected_road(col, row, footprint) else "no_road"
 	return "" if not auto_access_path(entry).is_empty() else "no_road"
+
+func lot_alignment_reason(col: int, row: int, footprint: Vector2i) -> String:
+	# New-city parcels use a building-width plus one street-cell rhythm from
+	# City Hall. A 2x2 home therefore has one stable 3x3 parcel position; tapping
+	# any cell within that lot can resolve to the same anchor instead of shifting
+	# the model by a tile. Legacy showcase placement remains untouched.
+	if not strict_building_frontier or footprint == Vector2i.ONE:
+		return ""
+	var pitch_x: int = footprint.x + 1
+	var pitch_y: int = footprint.y + 1
+	if posmod(col - CITY_HALL_SITE.x, pitch_x) != 0 or posmod(row - CITY_HALL_SITE.y, pitch_y) != 0:
+		return "misaligned"
+	return ""
 
 func near_connected_road_frontier(col: int, row: int, radius: int) -> bool:
 	for dy in range(-radius, radius + 1):

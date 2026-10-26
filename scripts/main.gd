@@ -1247,6 +1247,46 @@ func _handle_mouse_gesture(event: InputEvent) -> void:
 	elif event is InputEventMagnifyGesture:
 		camera.size = clampf(camera.size / event.factor, 45, 110)
 
+func forest_cell_near_tap(point: Vector2, around: Vector2i) -> Vector2i:
+	var closest_cell := Vector2i(-1, -1)
+	var closest_score := 1.0
+	for row in range(around.y - 2, around.y + 3):
+		for col in range(around.x - 2, around.x + 3):
+			if game.territory.state_at(col, row) != "forest" or not game.territory.is_revealed(col, row):
+				continue
+			var forest_seed: int = absi(row * 53 + col * 17 + row * col)
+			var forest_variant: int = forest_seed % 10
+			var trees: Array[Dictionary] = []
+			var forest_rng := RandomNumberGenerator.new()
+			forest_rng.seed = forest_seed
+			var forest_center: Vector3 = game.territory.cell_world(col, row) + Vector3(forest_rng.randf_range(-1.25, 1.25), 0.1, forest_rng.randf_range(-1.25, 1.25))
+			if forest_variant < 4:
+				trees.append({"offset": Vector3.ZERO, "size": 0.9 + float(forest_seed % 3) * 0.08, "pine": true})
+			elif forest_variant < 7:
+				trees.append({"offset": Vector3.ZERO, "size": 0.75 + float(forest_seed % 4) * 0.08, "pine": false})
+			elif forest_variant < 9:
+				trees.append({"offset": Vector3(-0.75, 0, 0.45), "size": 0.38, "pine": false})
+				trees.append({"offset": Vector3(0.65, 0, -0.5), "size": 0.3, "pine": false})
+			for tree: Dictionary in trees:
+				var tree_size: float = float(tree.size)
+				var tree_position: Vector3 = forest_center + tree.offset
+				var base: Vector2 = camera.unproject_position(tree_position + Vector3(0, 0.6 * tree_size, 0))
+				var top_height: float = 4.0 if bool(tree.pine) else 2.7
+				var top: Vector2 = camera.unproject_position(tree_position + Vector3(0, top_height * tree_size, 0))
+				var trunk: Vector2 = top - base
+				var trunk_length_sq: float = maxf(trunk.length_squared(), 0.001)
+				var along: float = clampf((point - base).dot(trunk) / trunk_length_sq, 0.0, 1.0)
+				var nearest_on_trunk: Vector2 = base + trunk * along
+				var canopy_radius: float = 1.15 if bool(tree.pine) else 0.8
+				var radius_x: Vector2 = camera.unproject_position(tree_position + Vector3(canopy_radius * tree_size, 0.6 * tree_size, 0))
+				var radius_z: Vector2 = camera.unproject_position(tree_position + Vector3(0, 0.6 * tree_size, canopy_radius * tree_size))
+				var screen_radius: float = maxf(base.distance_to(radius_x), base.distance_to(radius_z)) + 10.0
+				var score: float = point.distance_to(nearest_on_trunk) / maxf(screen_radius, 1.0)
+				if score < closest_score:
+					closest_score = score
+					closest_cell = Vector2i(col, row)
+	return closest_cell
+
 func map_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton and not event is InputEventScreenTouch:
 		return
@@ -1297,8 +1337,12 @@ func map_input(event: InputEvent) -> void:
 		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
 		if game.territory.in_bounds(col, row):
 			var selected_cell := Vector2i(col, row)
-			var cell_state: String = game.territory.state_at(col, row)
-			var hall_footprint := col in range(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.x + 2) and row in range(TerritoryGrid.CITY_HALL_SITE.y, TerritoryGrid.CITY_HALL_SITE.y + 2)
+			if territory_tool == "clear":
+				var visible_tree_cell := forest_cell_near_tap(point, selected_cell)
+				if visible_tree_cell.x >= 0:
+					selected_cell = visible_tree_cell
+			var cell_state: String = game.territory.state_at(selected_cell.x, selected_cell.y)
+			var hall_footprint := selected_cell.x in range(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.x + 2) and selected_cell.y in range(TerritoryGrid.CITY_HALL_SITE.y, TerritoryGrid.CITY_HALL_SITE.y + 2)
 			if territory_tool == TerritoryGrid.CITY_HALL_TYPE and not game.has_city_hall() and hall_footprint and cell_state == "forest":
 				open_land_cell(selected_cell)
 				return
@@ -1325,6 +1369,11 @@ func map_input(event: InputEvent) -> void:
 	if game.territory.in_bounds(picked_col, picked_row):
 		var tapped_cell := Vector2i(picked_col, picked_row)
 		var tapped_state: String = game.territory.state_at(picked_col, picked_row)
+		if tapped_state in ["forest", "free"]:
+			var visible_tree_cell := forest_cell_near_tap(point, tapped_cell)
+			if visible_tree_cell.x >= 0:
+				open_land_cell(visible_tree_cell)
+				return
 		if tapped_state == "road":
 			return
 		if tapped_state in ["forest", "free"]:
@@ -1603,19 +1652,24 @@ func log_territory_probe() -> void:
 func select_territory_cell(cell: Vector2i) -> void:
 	var placement_type := service_type if territory_tool == "service" else territory_tool
 	if placement_type not in ["clear", "road", ""] and not Catalog.is_landscaping(placement_type):
-		# Snap any tapped cell inside the selected footprint to its valid top-left.
-		var footprint := Catalog.footprint_cells(placement_type)
-		for dy in range(footprint.y):
-			for dx in range(footprint.x):
-				var candidate := cell - Vector2i(dx, dy)
-				if game.territory.placement_reason(candidate.x, candidate.y, placement_type) == "":
-					cell = candidate
-					break
-			if game.territory.placement_reason(cell.x, cell.y, placement_type) == "":
-				break
+		cell = snap_placement_anchor(cell, placement_type)
 	territory_cell = cell
 	refresh()
 	log_territory_probe()
+
+func snap_placement_anchor(cell: Vector2i, type_id: String) -> Vector2i:
+	var footprint := Catalog.footprint_cells(type_id)
+	var first_aligned := Vector2i(-1, -1)
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			var candidate := cell - Vector2i(dx, dy)
+			if game.territory.lot_alignment_reason(candidate.x, candidate.y, footprint) != "":
+				continue
+			if first_aligned.x < 0:
+				first_aligned = candidate
+			if game.territory.placement_reason(candidate.x, candidate.y, type_id) == "":
+				return candidate
+	return first_aligned if first_aligned.x >= 0 else cell
 
 func catalog_items_for(category: String) -> Array:
 	return CATALOG_ITEMS.get(category, [])
@@ -1997,6 +2051,8 @@ func begin_catalog_placement(type_id: String) -> void:
 		catalog_target_plot = -1
 		selected = -1
 		territory_cell = TerritoryGrid.CITY_HALL_SITE if type_id == TerritoryGrid.CITY_HALL_TYPE else (catalog_grid_target if catalog_grid_target.x >= 0 else Vector2i(-1, -1))
+		if territory_cell.x >= 0 and type_id != TerritoryGrid.CITY_HALL_TYPE and not Catalog.is_landscaping(type_id):
+			territory_cell = snap_placement_anchor(territory_cell, type_id)
 		selection_kind = "territory"
 		if territory_cell.x < 0 and type_id not in ["fire_station", "police_station", "hospital", "depot"]:
 			set_camera_focus(game.territory.cell_world(12, 21) + Vector3(7, 0, 7))
@@ -2190,6 +2246,7 @@ func placement_hint(reason: String) -> String:
 	match reason:
 		"select": return tr_text("Начните у края существующей дороги.", "Start at an existing road edge.")
 		"outside": return tr_text("Весь участок должен быть в области освоения.", "The whole footprint must fit the expansion area.")
+		"misaligned": return tr_text("Участки выровнены по квартальной сетке от мэрии. Выберите подсвеченный лот целиком.", "Lots follow the City Hall block grid. Select a highlighted lot.")
 		"city_hall_first": return tr_text("Сначала постройте городской центр на отмеченном месте.", "Build City Hall on the marked site first.")
 		"city_hall_site": return tr_text("Городской центр строится только на отмеченном центральном участке.", "City Hall can only be built on the highlighted central site.")
 		"not_forest": return tr_text("Здесь уже нет леса. Выберите зелёную клетку.", "No forest here. Select a green cell.")

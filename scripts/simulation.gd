@@ -1122,6 +1122,10 @@ func fire_station_record() -> Dictionary:
 	return {}
 
 func legacy_problem_available(kind: String) -> bool:
+	# Fixed legacy leaks/signals belong to the old 24-plot showcase, not the
+	# expanding grid campaign. Grid incidents must target an actual building.
+	if empty_city_mode:
+		return false
 	if kind == "leak":
 		if leak_fixed:
 			return false

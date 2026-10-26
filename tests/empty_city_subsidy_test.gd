@@ -32,6 +32,7 @@ func run() -> void:
 	check(city.buildings.is_empty() and city.territory.buildings.is_empty(), "New Game starts from an empty state instead of the legacy test layout")
 	city.start_empty_city()
 	check(city.city_layout_version == 4 and city.has_city_hall(), "New game starts with its permanent City Hall")
+	check(not city.legacy_problem_available("leak") and not city.legacy_problem_available("signal"), "A new grid city has no old fixed-point pipe or signal failures")
 	var only_foundation: bool = city.territory.buildings.size() == 1 and city.territory.buildings[0].type_id == "city_hall"
 	var road_count := 0
 	var occupied_count := 0
@@ -45,6 +46,13 @@ func run() -> void:
 	check(city.incidents.is_empty() and city.job == "" and city.fire_assignments().is_empty() and city.police_job.is_empty() and city.construction_job.is_empty(), "Clean city has no incidents or active service/construction assignments")
 	check(city.territory.placement_reason(12, 19, "clear") == "not_forest" and not city.start_grid_construction(12, 19, "house"), "The permanent City Hall cannot be cleared or built over")
 	check(city.territory.placement_reason(17, 20, "clear") == "outside", "Expansion remains hidden beyond the starting pocket")
+	check(city.territory.placement_reason(9, 17, "house") == "misaligned", "A 2x2 home cannot drift one tile off the City Hall block rhythm")
+	for dy in range(2):
+		for dx in range(2):
+			city.territory.cells[19 + dy][9 + dx] = "free"
+	city.budget = 500
+	check(city.build_grid_building(9, 19, "house"), "The first grid house can be built next to the City Hall road on its aligned lot")
+	check(not city.legacy_problem_available("leak") and not city.legacy_problem_available("signal"), "Building a grid house does not place legacy failures on grass")
 	var perimeter_is_road := true
 	for row in range(18, 22):
 		for col in range(11, 15):

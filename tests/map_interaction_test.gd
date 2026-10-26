@@ -101,12 +101,20 @@ func run() -> void:
 	check_polygon_pick(scene, scene.game.territory.building_center(entry), 4.5, 4.5, -1, entry.instance_id)
 	var tap := InputEventMouseButton.new()
 	tap.button_index = MOUSE_BUTTON_LEFT
-	var probe_cell := Vector2i(17, 25)
+	var probe_cell := Vector2i(18, 25)
 	scene.open_territory()
 	scene.set_camera_focus(scene.game.territory.cell_world(probe_cell.x, probe_cell.y) + Vector3(7, 0, 7))
 	tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(probe_cell.x, probe_cell.y))
 	scene.map_input(tap)
 	check(scene.territory_cell == probe_cell, "Forest selection uses the center of the visible cell")
+	var forest_seed: int = absi(probe_cell.y * 53 + probe_cell.x * 17 + probe_cell.y * probe_cell.x)
+	var forest_rng := RandomNumberGenerator.new()
+	forest_rng.seed = forest_seed
+	var forest_visual_center: Vector3 = scene.game.territory.cell_world(probe_cell.x, probe_cell.y) + Vector3(forest_rng.randf_range(-1.25, 1.25), 0.1, forest_rng.randf_range(-1.25, 1.25))
+	scene.set_camera_focus(scene.game.territory.cell_world(probe_cell.x, probe_cell.y) + Vector3(7, 0, 7))
+	tap.position = scene.camera.unproject_position(forest_visual_center + Vector3(0, 2.4, 0))
+	scene.map_input(tap)
+	check(scene.territory_cell == probe_cell, "Tapping a tree canopy still selects its forest cell rather than a neighboring tile")
 	var road_cell := Vector2i(12, 21)
 	scene.set_camera_focus(scene.game.territory.cell_world(road_cell.x, road_cell.y) + Vector3(7, 0, 7))
 	tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(road_cell.x, road_cell.y))
@@ -119,6 +127,13 @@ func run() -> void:
 	scene.close_sheet()
 	scene.map_input(tap)
 	check(scene.selection_kind == "vehicle" and scene.selected_vehicle_type == "repair_van", "A tap on an unobstructed service vehicle opens its status card")
+	var legacy_game = scene.game
+	var aligned_city := Simulation.new(false)
+	aligned_city.start_empty_city()
+	scene.game = aligned_city
+	check(scene.snap_placement_anchor(Vector2i(10, 19), "house") == Vector2i(9, 19), "Tapping the second cell in a 2x2 house lot snaps back to its City Hall-aligned anchor")
+	check(scene.snap_placement_anchor(Vector2i(9, 20), "house") == Vector2i(9, 19), "Tapping the lower half of a 2x2 house lot keeps the same footprint")
+	scene.game = legacy_game
 	var save_path: String = scene.game.save_path
 	scene.audio.shutdown()
 	viewport.queue_free()

@@ -32,7 +32,7 @@ func run() -> void:
 	check(city.buildings.is_empty() and city.territory.buildings.is_empty(), "New Game starts from an empty state instead of the legacy test layout")
 	city.start_empty_city()
 	check(city.city_layout_version == 4 and city.has_city_hall(), "New game starts with its permanent City Hall")
-	var only_foundation := city.territory.buildings.size() == 1 and city.territory.buildings[0].type_id == "city_hall"
+	var only_foundation: bool = city.territory.buildings.size() == 1 and city.territory.buildings[0].type_id == "city_hall"
 	var road_count := 0
 	var occupied_count := 0
 	for row in range(TerritoryGrid.HEIGHT):

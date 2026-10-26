@@ -3359,7 +3359,7 @@ func build_grid_house_sheet() -> void:
 				label(18, sheet_column, tr_text("Склады: %d / %d · в зоне доставки: %d зданий", "Warehouses: %d / %d · %d buildings in delivery range") % [game.logistics_warehouse_count(), game.logistics_warehouse_limit(), game.logistics_covered_buildings(entry.instance_id).size()]).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			elif entry.type_id == "warehouse":
 				var logistics_center := game.logistics_center_entry()
-				var supplied_by_center := not logistics_center.is_empty() and game.territory.road_distance_between_buildings(logistics_center, entry, game.logistics_center_range()) >= 0
+				var supplied_by_center: bool = not logistics_center.is_empty() and game.territory.road_distance_between_buildings(logistics_center, entry, game.logistics_center_range()) >= 0
 				label(18, sheet_column, tr_text("Связь с центром: %s · объектов вокруг: %d", "Connected to center: %s · nearby buildings: %d") % [tr_text("есть", "yes") if supplied_by_center else tr_text("нет", "no"), game.logistics_covered_buildings(entry.instance_id).size()]).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			var next_price: int = Catalog.level_data(entry.type_id, entry.level).upgrade_cost
 			var improve := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % next_price, func():

@@ -45,6 +45,7 @@ var job_vehicle_id: String = ""
 const FIRE_STATION_ID := "pine_district_fire_station"
 const FIRST_FIRE_TARGET := "pine_district_legacy_0"
 const FIRST_FIRE_NEIGHBOR := "pine_district_legacy_4"
+const LOGISTICS_TARGET_TYPES := ["house", "cafe", "park", "elite_residence", "business_tower", "farm", "fishery", "livestock_farm", "supermarket"]
 var fire_triggered: bool = false
 var fires: Dictionary = {}
 var fire_damage: Dictionary = {}
@@ -170,6 +171,126 @@ func campaign_population_count(type_id: String) -> int:
 			total += 1
 	return total
 
+func logistics_center_entry() -> Dictionary:
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == "logistics_center":
+			return entry
+	return {}
+
+func logistics_warehouse_count() -> int:
+	var total := 0
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id == "warehouse":
+			total += 1
+	return total
+
+func logistics_warehouse_limit(center_level: int = -1) -> int:
+	var center := logistics_center_entry()
+	if center.is_empty():
+		return 0
+	var level_value: int = int(center.get("level", 1)) if center_level < 0 else clampi(center_level, 1, 3)
+	return int(Catalog.level_data("logistics_center", level_value).warehouse_limit)
+
+func logistics_center_range(center_level: int = -1) -> int:
+	var center := logistics_center_entry()
+	if center.is_empty():
+		return 0
+	var level_value: int = int(center.get("level", 1)) if center_level < 0 else clampi(center_level, 1, 3)
+	return int(Catalog.level_data("logistics_center", level_value).delivery_range)
+
+func logistics_warehouse_range(warehouse: Dictionary) -> int:
+	return int(Catalog.level_data("warehouse", int(warehouse.get("level", 1))).delivery_range)
+
+func can_build_logistics_center() -> bool:
+	return logistics_center_entry().is_empty() and maxi(city_level(), campaign_stage) >= Catalog.unlock_level("logistics_center")
+
+func can_build_warehouse() -> bool:
+	return maxi(city_level(), campaign_stage) >= Catalog.unlock_level("warehouse") and not logistics_center_entry().is_empty() and logistics_warehouse_count() < logistics_warehouse_limit()
+
+func logistics_building_allowed(type_id: String) -> bool:
+	if type_id == "logistics_center":
+		return can_build_logistics_center()
+	if type_id == "warehouse":
+		return can_build_warehouse()
+	return true
+
+func logistics_site_allowed(type_id: String, col: int, row: int) -> bool:
+	if not logistics_building_allowed(type_id):
+		return false
+	if type_id != "warehouse":
+		return true
+	var center := logistics_center_entry()
+	var candidate := {"col": col, "row": row, "width": 2, "height": 2}
+	return not center.is_empty() and territory.road_distance_between_buildings(center, candidate, logistics_center_range()) >= 0
+
+func logistics_upgrade_allowed(entry: Dictionary) -> bool:
+	if entry.is_empty() or entry.type_id != "warehouse":
+		return true
+	var center := logistics_center_entry()
+	return not center.is_empty() and int(center.get("level", 1)) >= int(entry.get("level", 1)) + 1
+
+func is_logistics_delivery_target(entry: Dictionary) -> bool:
+	return str(entry.get("type_id", "")) in LOGISTICS_TARGET_TYPES and entry.has("col")
+
+func logistics_covered_buildings(source_id: String) -> Array[Dictionary]:
+	var covered: Array[Dictionary] = []
+	var center := logistics_center_entry()
+	var source := territory.building_by_id(source_id)
+	if center.is_empty() or source.is_empty() or source.type_id not in ["logistics_center", "warehouse"]:
+		return covered
+	var center_range := logistics_center_range()
+	if source.type_id == "warehouse" and territory.road_distance_between_buildings(center, source, center_range) < 0:
+		return covered
+	var eligible_warehouses: Array[Dictionary] = []
+	if source.type_id == "logistics_center":
+		for entry: Dictionary in territory.buildings:
+			if entry.type_id == "warehouse" and territory.road_distance_between_buildings(center, entry, center_range) >= 0:
+				eligible_warehouses.append(entry)
+	for entry: Dictionary in territory.buildings:
+		if not is_logistics_delivery_target(entry):
+			continue
+		var reachable := false
+		if source.type_id == "logistics_center":
+			reachable = territory.road_distance_between_buildings(center, entry, center_range) >= 0
+			if not reachable:
+				for warehouse: Dictionary in eligible_warehouses:
+					if territory.road_distance_between_buildings(warehouse, entry, logistics_warehouse_range(warehouse)) >= 0:
+						reachable = true
+						break
+		else:
+			reachable = territory.road_distance_between_buildings(source, entry, logistics_warehouse_range(source)) >= 0
+		if reachable:
+			covered.append(entry)
+	return covered
+
+func logistics_vehicle_routes(source_id: String) -> Array:
+	var routes: Array = []
+	var source := territory.building_by_id(source_id)
+	var center := logistics_center_entry()
+	if source.is_empty() or center.is_empty() or source.type_id not in ["logistics_center", "warehouse"]:
+		return routes
+	var destinations: Array[Dictionary] = []
+	if source.type_id == "logistics_center":
+		for entry: Dictionary in territory.buildings:
+			if entry.type_id == "warehouse" and territory.road_distance_between_buildings(source, entry, logistics_center_range()) >= 0:
+				destinations.append(entry)
+			elif is_logistics_delivery_target(entry) and territory.road_distance_between_buildings(source, entry, logistics_center_range()) >= 0:
+				destinations.append(entry)
+	else:
+		destinations = logistics_covered_buildings(source_id)
+	for destination: Dictionary in destinations:
+		var max_range := logistics_center_range() if source.type_id == "logistics_center" else logistics_warehouse_range(source)
+		var road_route := territory.road_route_between_buildings(source, destination, max_range)
+		if road_route.size() < 2:
+			continue
+		var world_route: Array[Vector3] = []
+		for cell: Vector2i in road_route:
+			world_route.append(territory.cell_world(cell.x, cell.y) + Vector3(0, 0.32, 0))
+		for route_index in range(world_route.size() - 2, -1, -1):
+			world_route.append(world_route[route_index])
+		routes.append(world_route)
+	return routes
+
 func campaign_level_count(type_id: String, minimum_level: int) -> int:
 	var total := 0
 	for entry: Dictionary in all_buildings():
@@ -192,7 +313,7 @@ func campaign_stage_goal_met(stage: int = -1) -> bool:
 		3: return district_house_count() >= 5 and campaign_population_count("fire_station") + campaign_population_count("police_station") + campaign_population_count("hospital") >= 2 and campaign_level_count("house", 3) >= 1
 		4: return campaign_population_count("elite_residence") >= 1
 		5: return campaign_population_count("business_tower") >= 1
-		6: return campaign_population_count("business_tower") >= 2 and campaign_population_count("elite_residence") >= 2
+		6: return campaign_population_count("business_tower") >= 2 and campaign_population_count("elite_residence") >= 2 and not logistics_center_entry().is_empty() and logistics_warehouse_count() >= 1
 		7: return campaign_population_count("business_tower") >= 3 and happiness() >= 65
 		8: return campaign_population_count("business_tower") >= 4 and happiness() >= 72
 		9: return campaign_population_count("business_tower") >= 6 and happiness() >= 78
@@ -205,7 +326,7 @@ func campaign_stage_progress() -> float:
 		3: return minf(1.0, float(int(district_house_count() >= 5) + int(campaign_population_count("fire_station") + campaign_population_count("police_station") + campaign_population_count("hospital") >= 2) + int(campaign_level_count("house", 3) >= 1)) / 3.0)
 		4: return minf(1.0, float(campaign_population_count("elite_residence")))
 		5: return minf(1.0, float(campaign_population_count("business_tower")))
-		6: return minf(1.0, float(mini(2, campaign_population_count("business_tower")) + mini(2, campaign_population_count("elite_residence"))) / 4.0)
+		6: return minf(1.0, float(mini(2, campaign_population_count("business_tower")) + mini(2, campaign_population_count("elite_residence")) + int(not logistics_center_entry().is_empty()) + mini(1, logistics_warehouse_count())) / 6.0)
 		_:
 			var tower_goal := 3 if campaign_stage == 7 else (4 if campaign_stage == 8 else (6 if campaign_stage == 9 else 8))
 			var mood_goal := 65 if campaign_stage == 7 else (72 if campaign_stage == 8 else (78 if campaign_stage == 9 else 85))
@@ -542,6 +663,8 @@ func start_legacy_construction(index: int, type_id: String) -> bool:
 func start_grid_construction(col: int, row: int, type_id: String) -> bool:
 	if not construction_job.is_empty() or budget < Catalog.cost(type_id):
 		return false
+	if not logistics_site_allowed(type_id, col, row):
+		return false
 	if not initial_building_allowed(col, row, type_id):
 		return false
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
@@ -566,7 +689,7 @@ func start_grid_upgrade(identifier: String) -> bool:
 	if not construction_job.is_empty():
 		return false
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or not Catalog.LEVELS.has(entry.type_id) or is_ruined(identifier):
+	if entry.is_empty() or entry.has("legacy_plot") or not Catalog.LEVELS.has(entry.type_id) or is_ruined(identifier) or not logistics_upgrade_allowed(entry):
 		return false
 	var level_value := int(entry.get("level", 1))
 	if empty_city_mode and campaign_stage <= level_value:
@@ -826,7 +949,7 @@ func build_grid_house(col: int, row: int) -> bool:
 func build_grid_building(col: int, row: int, type_id: String, reserved: bool = false) -> bool:
 	if not Catalog.TYPES.has(type_id) or type_id in ["empty", "ruins", "repair_van", "fire_engine", "police_car", "civilian_car", "bus_stop", "city_bus", "traffic_signal", "water_leak"]:
 		return false
-	if not initial_building_allowed(col, row, type_id) or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
+	if not initial_building_allowed(col, row, type_id) or not logistics_site_allowed(type_id, col, row) or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
 		return false
 	if type_id in ["elite_residence", "business_tower"] and renewal_credits < 2:
 		return false
@@ -847,6 +970,8 @@ func build_grid_service(col: int, row: int, type_id: String) -> bool:
 func can_demolish_grid_building(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
 	if entry.is_empty() or entry.has("legacy_plot") or Catalog.is_service(entry.type_id) or entry.type_id == TerritoryGrid.CITY_HALL_TYPE:
+		return false
+	if entry.type_id == "logistics_center" and logistics_warehouse_count() > 0:
 		return false
 	if job != "" and (target_instance_id == identifier or depot_instance_id == identifier):
 		return false
@@ -896,7 +1021,7 @@ func demolish_road(col: int, row: int) -> bool:
 
 func upgrade_grid_house(identifier: String, reserved: bool = false) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or is_ruined(identifier) or not Catalog.LEVELS.has(entry.type_id):
+	if entry.is_empty() or entry.has("legacy_plot") or is_ruined(identifier) or not Catalog.LEVELS.has(entry.type_id) or not logistics_upgrade_allowed(entry):
 		return false
 	var level_value := int(entry.get("level", 1))
 	if empty_city_mode and campaign_stage <= level_value:

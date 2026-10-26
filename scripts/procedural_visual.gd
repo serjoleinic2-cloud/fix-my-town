@@ -18,6 +18,10 @@ func _ready() -> void:
 		cafe()
 	elif visual_type == "depot":
 		depot()
+	elif visual_type == "logistics_center":
+		logistics_center()
+	elif visual_type == "warehouse":
+		warehouse()
 	elif visual_type == "city_hall":
 		city_hall()
 	elif visual_type == "elite_residence":
@@ -72,6 +76,8 @@ func _ready() -> void:
 		bus_stop()
 	elif visual_type in ["civilian_car", "city_bus"]:
 		civilian_vehicle(visual_type == "city_bus", seed_value)
+	elif visual_type == "delivery_truck":
+		delivery_truck()
 	elif visual_type == "water_leak":
 		for i in range(5):
 			var puddle := Art.cylinder(self, Vector3(sin(i * 1.7) * 0.9, 0.07, cos(i * 2.3) * 0.7), 0.8 + i * 0.1, 0.035, Color("63b5d4"))
@@ -187,6 +193,50 @@ func depot() -> void:
 		Art.box(self, Vector3(x, 0.03, 3), Vector3(0.06, 0.025, 2.2), Color("e5dfc9"))
 	Art.box(self, Vector3(2.3, 5, -1.5), Vector3(1.3, 3.3, 1.5), Color("b7896e"))
 	Art.box(self, Vector3(2.3, 6.7, -1.5), Vector3(1.6, 0.2, 1.8), Color("e3d0ae"))
+
+func logistics_center() -> void:
+	# A dispatch campus; higher levels visibly add operating capacity.
+	Art.box(self, Vector3(0, 0.12, 0), Vector3(13.4, 0.22, 13.4), Color("9a9c91"))
+	Art.box(self, Vector3(0, 1.7, -1.15), Vector3(8.6, 3.25, 7.0), Color("d5d4c7"))
+	Art.box(self, Vector3(0, 3.4, -1.15), Vector3(8.95, 0.22, 7.25), Color("405c70"))
+	Art.box(self, Vector3(0, 1.15, 2.42), Vector3(8.0, 2.3, 0.16), Color("e5e2d6"))
+	for x in [-2.6, 0.0, 2.6]:
+		Art.box(self, Vector3(x, 1.15, 2.53), Vector3(1.95, 2.0, 0.12), Color("566b73"))
+		Art.box(self, Vector3(x, 2.22, 2.62), Vector3(2.0, 0.18, 0.1), Color("dea84e"))
+	Art.box(self, Vector3(0, 3.05, 2.72), Vector3(6.6, 0.68, 0.18), Color("3e6d78"))
+	signs.append(Art.sign_text(self, Vector3(0, 3.08, 2.84), "ЛОГИСТИКА", 30))
+	Art.box(self, Vector3(-4.35, 0.42, -1.6), Vector3(0.5, 0.7, 5.6), Color("d7c78e"))
+	Art.box(self, Vector3(4.35, 0.42, -1.6), Vector3(0.5, 0.7, 5.6), Color("d7c78e"))
+	if visual_level >= 2:
+		Art.box(self, Vector3(-5.1, 1.55, -1.15), Vector3(2.25, 2.95, 6.35), Color("b9c6bf"))
+		Art.box(self, Vector3(-5.1, 3.08, -1.15), Vector3(2.45, 0.18, 6.55), Color("587588"))
+		Art.box(self, Vector3(-5.1, 1.18, 2.1), Vector3(1.5, 1.8, 0.1), Color("667f88"))
+	if visual_level >= 3:
+		Art.box(self, Vector3(3.0, 4.35, -2.25), Vector3(2.6, 2.15, 2.5), Color("7ea0a2"))
+		Art.box(self, Vector3(3.0, 5.5, -2.25), Vector3(2.85, 0.2, 2.75), Color("405c70"))
+		for x in [1.95, 3.0, 4.05]:
+			Art.box(self, Vector3(x, 4.35, -0.96), Vector3(0.08, 1.3, 0.05), Color("dce8dd"))
+
+func warehouse() -> void:
+	# Compact 2x2 storage building with readable level upgrades.
+	Art.box(self, Vector3(0, 0.12, 0), Vector3(8.7, 0.24, 8.7), Color("a4a08e"))
+	Art.box(self, Vector3(0, 1.8, -0.2), Vector3(7.8, 3.35, 6.65), Color("c7c9bd"))
+	Art.box(self, Vector3(0, 3.52, -0.2), Vector3(8.05, 0.22, 6.9), Color("587486"))
+	Art.box(self, Vector3(0, 1.05, 3.14), Vector3(6.5, 1.95, 0.13), Color("596a70"))
+	for x in [-2.15, 0.0, 2.15]:
+		Art.box(self, Vector3(x, 1.05, 3.24), Vector3(1.7, 1.72, 0.1), Color("71858a"))
+		Art.box(self, Vector3(x, 2.0, 3.31), Vector3(1.78, 0.13, 0.08), Color("e3ba62"))
+	Art.box(self, Vector3(0, 2.95, 3.38), Vector3(4.5, 0.55, 0.15), Color("465f68"))
+	signs.append(Art.sign_text(self, Vector3(0, 2.97, 3.48), "СКЛАД", 32))
+	for x in [-3.35, 3.35]:
+		Art.box(self, Vector3(x, 0.32, 3.6), Vector3(0.08, 0.04, 0.65), Color("f0ead8"))
+	if visual_level >= 2:
+		Art.box(self, Vector3(-0.9, 4.15, -1.2), Vector3(3.0, 0.8, 2.6), Color("e0e3d9"))
+		for x in [-1.75, -0.9, -0.05]:
+			Art.box(self, Vector3(x, 4.58, -1.2), Vector3(0.42, 0.08, 0.42), Color("9faaa1"))
+	if visual_level >= 3:
+		Art.cylinder(self, Vector3(2.55, 2.0, -2.1), 1.05, 4.1, Color("d6d9cf"), 0.92, 12)
+		Art.cylinder(self, Vector3(2.55, 4.25, -2.1), 1.12, 0.72, Color("718b91"), 0.08, 12)
 
 func fire_station() -> void:
 	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), Color("c96b52"))
@@ -322,6 +372,10 @@ func set_language(language: String) -> void:
 			sign.text = "МЭРИЯ" if language == "ru" else "CITY HALL"
 		elif visual_type == "fire_station":
 			sign.text = "ПОЖАРНЫЕ" if language == "ru" else "FIRE"
+		elif visual_type == "logistics_center":
+			sign.text = "ЛОГИСТИКА" if language == "ru" else "LOGISTICS"
+		elif visual_type == "warehouse":
+			sign.text = "СКЛАД" if language == "ru" else "WAREHOUSE"
 		else:
 			sign.text = "СЛУЖБЫ" if language == "ru" else "SERVICE"
 
@@ -473,6 +527,17 @@ func civilian_vehicle(bus: bool, seed_value: int) -> void:
 	for x in [-0.85 if bus else -0.73, 0.85 if bus else 0.73]:
 		for z in [-1.5 if bus else -0.8, 1.5 if bus else 0.8]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.3, z), 0.3, 0.15, Color("3f4c4d"), 1, 10)
+			wheel.rotation.z = PI / 2
+
+func delivery_truck() -> void:
+	Art.box(self, Vector3(0, 0.62, -0.35), Vector3(1.55, 0.9, 2.25), Color("d9e0d8"))
+	Art.box(self, Vector3(0, 1.02, 1.02), Vector3(1.48, 1.15, 1.05), Color("4a7c86"))
+	Art.box(self, Vector3(0, 1.22, 1.57), Vector3(1.18, 0.62, 0.06), Color("9fc7ca"))
+	Art.box(self, Vector3(0, 0.14, -0.35), Vector3(1.62, 0.1, 2.35), Color("3f555a"))
+	Art.box(self, Vector3(0, 1.12, -0.32), Vector3(1.42, 0.14, 1.9), Color("83a66f"))
+	for x in [-0.78, 0.78]:
+		for z in [-1.0, 1.15]:
+			var wheel := Art.cylinder(self, Vector3(x, 0.34, z), 0.34, 0.18, Color("374345"), 1, 10)
 			wheel.rotation.z = PI / 2
 
 func bus_stop() -> void:

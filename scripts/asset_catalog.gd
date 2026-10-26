@@ -9,6 +9,9 @@ const TYPES = {
 	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 220, "footprint": Vector2(9, 9)},
+	"logistics_center": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/logistics_center.tscn", "cost": 900, "footprint": Vector2(14.4, 14.4)},
+	"warehouse": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/warehouse.tscn", "cost": 380, "footprint": Vector2(9, 9)},
+	"delivery_truck": {"scene": "res://scenes/visuals/delivery_truck.tscn", "footprint": Vector2(2.4, 4.4)},
 	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "cost": 260, "footprint": Vector2(9, 9)},
 	"police_station": {"scene": "res://scenes/visuals/police_station.tscn", "cost": 240, "footprint": Vector2(9, 9)},
 	"hospital": {"scene": "res://scenes/visuals/hospital.tscn", "cost": 300, "footprint": Vector2(9, 9)},
@@ -42,7 +45,15 @@ const LEVELS = {
 	"park": [
 		{"scene": "res://scenes/visuals/park.tscn", "income": -2, "mood": 5, "environment": 10, "upgrade_cost": 80},
 		{"scene": "res://scenes/visuals/park_level_2.tscn", "income": -3, "mood": 7, "environment": 14, "upgrade_cost": 140},
-		{"scene": "res://scenes/visuals/park_level_3.tscn", "income": -4, "mood": 9, "environment": 18, "upgrade_cost": 0}]
+		{"scene": "res://scenes/visuals/park_level_3.tscn", "income": -4, "mood": 9, "environment": 18, "upgrade_cost": 0}],
+	"logistics_center": [
+		{"scene": "res://scenes/visuals/logistics_center.tscn", "income": 0, "warehouse_limit": 1, "delivery_range": 18, "upgrade_cost": 1200},
+		{"scene": "res://scenes/visuals/logistics_center_level_2.tscn", "income": 0, "warehouse_limit": 2, "delivery_range": 26, "upgrade_cost": 2200},
+		{"scene": "res://scenes/visuals/logistics_center_level_3.tscn", "income": 0, "warehouse_limit": 3, "delivery_range": 34, "upgrade_cost": 0}],
+	"warehouse": [
+		{"scene": "res://scenes/visuals/warehouse.tscn", "income": 0, "storage_capacity": 600, "delivery_range": 10, "upgrade_cost": 420},
+		{"scene": "res://scenes/visuals/warehouse_level_2.tscn", "income": 0, "storage_capacity": 1400, "delivery_range": 15, "upgrade_cost": 800},
+		{"scene": "res://scenes/visuals/warehouse_level_3.tscn", "income": 0, "storage_capacity": 2800, "delivery_range": 20, "upgrade_cost": 0}]
 }
 const ALTERNATIVES = {
 	"house": "res://scenes/visuals/house_alternate.tscn",
@@ -50,6 +61,7 @@ const ALTERNATIVES = {
 }
 const UNLOCK_LEVELS = {
 	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1,
+	"logistics_center": 6, "warehouse": 6,
 	"elite_residence": 4, "business_tower": 5,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
@@ -67,6 +79,8 @@ static func is_landscaping(type_id: String) -> bool:
 	return type_id in LANDSCAPING_TYPES
 
 static func footprint_cells(type_id: String) -> Vector2i:
+	if type_id == "logistics_center":
+		return Vector2i(3, 3)
 	if type_id in ["elite_residence", "business_tower"]:
 		return Vector2i(4, 4)
 	return Vector2i.ONE if is_landscaping(type_id) else Vector2i(2, 2)

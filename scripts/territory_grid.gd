@@ -11,7 +11,7 @@ const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
 const CITY_HALL_TYPE := "city_hall"
 const CITY_HALL_SITE := Vector2i(12, 19)
-const BUILDINGS = ["city_hall", "house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
+const BUILDINGS = ["city_hall", "house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
@@ -307,6 +307,58 @@ func building_at(col: int, row: int) -> Dictionary:
 			return entry
 	return {}
 
+func building_road_frontage(entry: Dictionary) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	if not entry.has("col") or not entry.has("row") or not entry.has("width") or not entry.has("height"):
+		return result
+	for dy in range(int(entry.height)):
+		for dx in range(int(entry.width)):
+			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var cell := Vector2i(int(entry.col) + dx, int(entry.row) + dy) + offset
+				if state_at(cell.x, cell.y) == "road" and connected_road(cell.x, cell.y) and cell not in result:
+					result.append(cell)
+	return result
+
+func road_route_between_buildings(source: Dictionary, destination: Dictionary, max_distance: int = -1) -> Array[Vector2i]:
+	var starts := building_road_frontage(source)
+	var goals := building_road_frontage(destination)
+	if starts.is_empty() or goals.is_empty():
+		return []
+	var goal_set: Dictionary = {}
+	var previous: Dictionary = {}
+	var distances: Dictionary = {}
+	var queue: Array[Vector2i] = []
+	for goal: Vector2i in goals:
+		goal_set[goal] = true
+	for start: Vector2i in starts:
+		previous[start] = Vector2i(-1, -1)
+		distances[start] = 0
+		queue.append(start)
+		break
+	var cursor := 0
+	while cursor < queue.size():
+		var current: Vector2i = queue[cursor]
+		cursor += 1
+		var current_distance: int = int(distances[current])
+		if goal_set.has(current):
+			var route: Array[Vector2i] = [current]
+			while previous[route[0]].x >= 0:
+				route.push_front(previous[route[0]])
+			return route
+		if max_distance >= 0 and current_distance >= max_distance:
+			continue
+		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var next := current + offset
+			if state_at(next.x, next.y) == "road" and not previous.has(next):
+				previous[next] = current
+				distances[next] = current_distance + 1
+				queue.append(next)
+	return []
+
+func road_distance_between_buildings(source: Dictionary, destination: Dictionary, max_distance: int = -1) -> int:
+	var route := road_route_between_buildings(source, destination, max_distance)
+	return route.size() - 1 if not route.is_empty() else -1
+
 func road_path(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
 	if state_at(start.x, start.y) != "road" or state_at(goal.x, goal.y) != "road":
 		return []
@@ -519,7 +571,7 @@ func restore(value: Variant) -> bool:
 	for building in new_buildings:
 		if not building is Dictionary or building.get("type_id") not in BUILDINGS or str(building.get("instance_id", "")) == "" or int(building.get("col", -1)) < 0 or int(building.get("row", -1)) < 0:
 			return false
-		var expected_footprint := Vector2i.ONE if building.type_id in ["lawn", "flower_bed", "street_tree", "bush"] else Vector2i(2, 2)
+		var expected_footprint: Vector2i = Catalog.footprint_cells(str(building.type_id))
 		if int(building.get("width", 0)) != expected_footprint.x or int(building.get("height", 0)) != expected_footprint.y or int(building.col) + expected_footprint.x > WIDTH or int(building.row) + expected_footprint.y > HEIGHT:
 			return false
 		var identifier: String = building.instance_id

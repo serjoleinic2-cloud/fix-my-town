@@ -93,6 +93,9 @@ var quality_legend: PanelContainer
 var state_button: Button
 var transit_button: Button
 var transit_visuals: Node3D
+var logistics_visuals: Node3D
+var logistics_vehicles: Array[Dictionary] = []
+var logistics_visual_signature: String = ""
 var stop_candidate_visuals: Node3D
 var transit_signature: String = ""
 var transit_stats: Label
@@ -133,7 +136,7 @@ const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "ser
 const CATALOG_ITEMS := {
 	"residential": ["house", "elite_residence"],
 	"commercial": ["cafe", "park", "business_tower"],
-	"infrastructure": ["clear"],
+	"infrastructure": ["clear", "logistics_center", "warehouse"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
@@ -152,6 +155,8 @@ const TEXT = {
 	"empty": ["Участок %d • доступ к дороге\nБонус зависит от соседних домов и объектов.", "Plot %d • road access\nBonus depends on nearby homes and amenities."],
 	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Дом рабочих", "Workers depot"],
 	"city_hall": ["Городской центр", "City Hall"],
+	"logistics_center": ["Логистический центр", "Logistics center"],
+	"warehouse": ["Склад", "Warehouse"],
 	"elite_residence": ["Элитная резиденция", "Elite residence"], "business_tower": ["Деловая башня", "Business tower"],
 	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
@@ -226,6 +231,8 @@ const TEXT = {
 	"catalog_requires": ["Требования: %s", "Requirements: %s"],
 	"catalog_price": ["Цена: %d", "Cost: %d"],
 	"catalog_requirement_house": ["Расчищенные клетки 2×2 и связь с дорогой города", "Cleared 2×2 cells connected to a city road"],
+	"catalog_requirement_logistics_center": ["Этап 6 · один центр на город; к нему подключаются склады", "Stage 6 · one center per city; warehouses connect to it"],
+	"catalog_requirement_warehouse": ["Сначала постройте логистический центр; число и уровень складов зависят от его уровня", "Build a logistics center first; warehouse count and level depend on its level"],
 	"catalog_requirement_city_hall": ["Отмеченный центральный участок 2×2; сначала расчистите его", "Highlighted central 2×2 site; clear it first"],
 	"catalog_requirement_landscape": ["Одна свободная расчищенная клетка", "One cleared free cell"],
 	"catalog_requirement_clear": ["Выберите лесную клетку", "Select a forest cell"],
@@ -703,6 +710,9 @@ func build_world() -> void:
 		fire_car.set_language(game.language)
 	transit_visuals = Node3D.new()
 	world.add_child(transit_visuals)
+	logistics_visuals = Node3D.new()
+	logistics_visuals.name = "LogisticsVehicles"
+	world.add_child(logistics_visuals)
 	stop_candidate_visuals = Node3D.new()
 	stop_candidate_visuals.name = "StopCandidates"
 	world.add_child(stop_candidate_visuals)
@@ -1617,6 +1627,8 @@ func catalog_icon(type_id: String) -> String:
 func catalog_size(type_id: String) -> String:
 	if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id):
 		return t("catalog_footprint_small")
+	if type_id == "logistics_center":
+		return tr_text("3×3 клетки", "3×3 cells")
 	if type_id in ["elite_residence", "business_tower"]:
 		return t("catalog_footprint_renewal")
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
@@ -1630,6 +1642,10 @@ func catalog_requirement(type_id: String) -> String:
 		return t("catalog_requirement_legacy")
 	if type_id == "clear":
 		return t("catalog_requirement_clear")
+	if type_id == "logistics_center":
+		return t("catalog_requirement_logistics_center")
+	if type_id == "warehouse":
+		return t("catalog_requirement_warehouse")
 	if type_id == "road":
 		return t("catalog_requirement_road")
 	if Catalog.is_landscaping(type_id):
@@ -1642,6 +1658,8 @@ func catalog_item_unlocked(type_id: String) -> bool:
 	if type_id == TerritoryGrid.CITY_HALL_TYPE:
 		return game.empty_city_mode and not game.has_city_hall()
 	if game.empty_city_mode and not game.has_city_hall() and type_id not in ["city_hall", "clear"]:
+		return false
+	if type_id in ["logistics_center", "warehouse"] and not game.logistics_building_allowed(type_id):
 		return false
 	return maxi(game.city_level(), game.campaign_stage) >= Catalog.unlock_level(type_id)
 
@@ -1658,7 +1676,10 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	item.add_theme_color_override("font_color", INK)
 	item.add_theme_color_override("font_hover_color", INK)
 	item.add_theme_color_override("font_pressed_color", INK)
-	item.tooltip_text = tr_text("Сначала постройте городской центр", "Build City Hall first") if not catalog_item_unlocked(type_id) and game.empty_city_mode and not game.has_city_hall() else t(type_id)
+	if not catalog_item_unlocked(type_id) and type_id == "warehouse" and game.logistics_center_entry().is_empty():
+		item.tooltip_text = tr_text("Сначала постройте логистический центр", "Build a logistics center first")
+	else:
+		item.tooltip_text = tr_text("Сначала постройте городской центр", "Build City Hall first") if not catalog_item_unlocked(type_id) and game.empty_city_mode and not game.has_city_hall() else t(type_id)
 	item.pressed.connect(func():
 		if audio != null:
 			audio.play_ui("select"))
@@ -1706,7 +1727,12 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	cost_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if not catalog_item_unlocked(type_id):
-		var lock_label := label(14, item, t("catalog_locked") % Catalog.unlock_level(type_id), true)
+		var lock_text := t("catalog_locked") % Catalog.unlock_level(type_id)
+		if type_id == "warehouse" and game.logistics_center_entry().is_empty():
+			lock_text = tr_text("Нужен логистический центр", "Logistics center required")
+		elif type_id == "warehouse" and game.logistics_warehouse_count() >= game.logistics_warehouse_limit():
+			lock_text = tr_text("Лимит складов", "Warehouse limit")
+		var lock_label := label(14, item, lock_text, true)
 		lock_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 		lock_label.add_theme_color_override("font_color", Color("986f48"))
 		lock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1741,7 +1767,7 @@ func catalog_model_preview(type_id: String) -> Control:
 	preview_world.add_child(fill_light)
 	var camera_preview := Camera3D.new()
 	camera_preview.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera_preview.size = 20.0 if type_id in ["elite_residence", "business_tower"] else 13.2
+	camera_preview.size = 20.0 if type_id in ["elite_residence", "business_tower"] else (17.0 if type_id == "logistics_center" else 13.2)
 	camera_preview.position = Vector3(12, 11, 14)
 	camera_preview.look_at_from_position(camera_preview.position, Vector3(0, 2.0, 0), Vector3.UP)
 	camera_preview.current = true
@@ -1823,6 +1849,8 @@ func build_catalog_detail_sheet() -> void:
 	if type_id in ["elite_residence", "business_tower"]:
 		label(17, details_column, tr_text("Нужно снести два обычных дома. Доступно жетонов обновления: %d", "Demolish two ordinary homes. Renewal credits available: %d") % game.renewal_credits).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label(17, details_column, tr_text("В доме — парковка, мини-сад и частная инфраструктура. Работы по авариям в крупных зданиях идут дольше.", "Includes parking, a mini-garden and private amenities. Incidents at larger buildings take longer to resolve.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if type_id in ["logistics_center", "warehouse"]:
+		label(17, details_column, building_effect(type_id, 1)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label(16, sheet_column, t("catalog_requires") + ": " + catalog_requirement(type_id)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label(22, sheet_column, t("catalog_price") % catalog_cost(type_id), true)
 	var build_button := button(sheet_column, tr_text("Выбрать место строительства", "Choose construction location"), begin_catalog_placement.bind(type_id), true)
@@ -1948,6 +1976,8 @@ func select_catalog_item(type_id: String) -> void:
 	refresh()
 
 func begin_catalog_placement(type_id: String) -> void:
+	if not catalog_item_unlocked(type_id):
+		return
 	territory_tool = type_id
 	preview_kind = type_id
 	selected = catalog_target_plot
@@ -2126,6 +2156,8 @@ func territory_reason() -> String:
 			return "city_hall_site"
 	if territory_tool == "road" and not game.has_city_hall():
 		return "city_hall_first"
+	if selected_type in ["logistics_center", "warehouse"] and not game.logistics_site_allowed(selected_type, territory_cell.x, territory_cell.y):
+		return "logistics_requirement"
 	var placement_kind := "landscaping" if Catalog.is_landscaping(selected_type) else selected_type
 	var reason: String = game.territory.placement_reason(territory_cell.x, territory_cell.y, territory_tool if territory_tool in ["clear", "road"] else placement_kind)
 	if reason != "":
@@ -2156,6 +2188,7 @@ func placement_hint(reason: String) -> String:
 		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
 		"locked": return tr_text("Это здание ещё не открыто.", "This building is still locked.")
 		"renewal_credits": return tr_text("Для элитной застройки нужно снести два обычных дома.", "Demolish two ordinary homes to unlock this elite site.")
+		"logistics_requirement": return tr_text("Склад открывается после логистического центра; проверьте его уровень и лимит складов.", "A warehouse requires a logistics center and an available warehouse slot.")
 	if territory_tool == "clear":
 		return tr_text("Расчистка стоит 5. Для дома очистите все клетки его контура 2×2.", "Clear for 5. Clear all four cells in the 2×2 home footprint.")
 	if territory_tool == "road":
@@ -2244,6 +2277,7 @@ func refresh() -> void:
 		progress_bar.max_value = 3
 		progress_bar.value = completed_steps
 	redraw_plots()
+	redraw_logistics_vehicles()
 	maybe_offer_subsidy()
 	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
@@ -2269,7 +2303,7 @@ func campaign_goal_text(stage: int) -> String:
 		3: return tr_text("5 домов, 2 службы и дом 3-го уровня", "5 homes, 2 services and a level-3 home")
 		4: return tr_text("создайте элитную резиденцию из двух домов", "replace two homes with an elite residence")
 		5: return tr_text("постройте первую деловую башню", "build the first business tower")
-		6: return tr_text("постройте 2 башни и 2 резиденции", "build 2 towers and 2 residences")
+		6: return tr_text("постройте 2 башни, 2 резиденции, логистический центр и склад", "build 2 towers, 2 residences, a logistics center and a warehouse")
 		7: return tr_text("3 башни и настроение не ниже 65", "3 towers and happiness of at least 65")
 		8: return tr_text("4 башни и настроение не ниже 72", "4 towers and happiness of at least 72")
 		9: return tr_text("6 башен и настроение не ниже 78", "6 towers and happiness of at least 78")
@@ -2599,6 +2633,9 @@ func update_preview() -> void:
 			preview.interaction_area.collision_layer = 0
 			preview.set_language(game.language)
 		else:
+			if entry.type_id in ["logistics_center", "warehouse"]:
+				for delivered: Dictionary in game.logistics_covered_buildings(entry.instance_id):
+					outline(delivered.position, Color("83c99a"))
 			var route: Array = game.service_route(grid_selected_id)
 			for index in range(1, route.size()):
 				var first := map_position(route[index - 1]) + Vector3(0, 0.3, 0)
@@ -2651,6 +2688,8 @@ func update_preview() -> void:
 func draw_buildable_hints(type_id: String) -> void:
 	if type_id == "" or highlights == null:
 		return
+	if type_id in ["logistics_center", "warehouse"] and not game.logistics_building_allowed(type_id):
+		return
 	var footprint := Vector2i.ONE if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id) else Catalog.footprint_cells(type_id)
 	if game.budget < catalog_cost(type_id):
 		return
@@ -2662,6 +2701,8 @@ func draw_buildable_hints(type_id: String) -> void:
 	for row in range(TerritoryGrid.HEIGHT):
 		for col in range(TerritoryGrid.WIDTH):
 			if game.empty_city_mode and not game.territory.is_revealed(col, row):
+				continue
+			if type_id in ["logistics_center", "warehouse"] and not game.logistics_site_allowed(type_id, col, row):
 				continue
 			var kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
 			if game.territory.placement_reason(col, row, kind) != "":
@@ -2896,6 +2937,7 @@ func _process(delta: float) -> void:
 	scenery.traffic_controller.service_position = car.position if car != null else Vector3(1000, 0, 1000)
 	scenery.traffic_controller.service_active = game.job != "" and game.job != "fire" and car != null
 	scenery.traffic_controller.blocking_positions.clear()
+	tick_logistics_vehicles(delta)
 	sync_construction_site()
 	var construction_truck: Node3D = construction_objects.get("truck")
 	if construction_truck != null and is_instance_valid(construction_truck):
@@ -3313,14 +3355,22 @@ func build_grid_house_sheet() -> void:
 				restore_premium.disabled = game.budget < restoration_cost or not game.construction_job.is_empty()
 		if Catalog.LEVELS.has(entry.type_id):
 			label(20, sheet_column, building_effect(entry.type_id, entry.level)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			if entry.type_id == "logistics_center":
+				label(18, sheet_column, tr_text("Склады: %d / %d · в зоне доставки: %d зданий", "Warehouses: %d / %d · %d buildings in delivery range") % [game.logistics_warehouse_count(), game.logistics_warehouse_limit(), game.logistics_covered_buildings(entry.instance_id).size()]).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			elif entry.type_id == "warehouse":
+				var logistics_center := game.logistics_center_entry()
+				var supplied_by_center := not logistics_center.is_empty() and game.territory.road_distance_between_buildings(logistics_center, entry, game.logistics_center_range()) >= 0
+				label(18, sheet_column, tr_text("Связь с центром: %s · объектов вокруг: %d", "Connected to center: %s · nearby buildings: %d") % [tr_text("есть", "yes") if supplied_by_center else tr_text("нет", "no"), game.logistics_covered_buildings(entry.instance_id).size()]).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			var next_price: int = Catalog.level_data(entry.type_id, entry.level).upgrade_cost
 			var improve := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % next_price, func():
 				selection_kind = "grid_upgrade"
 				refresh(), true)
 			var upgrade_unlocked: bool = not game.empty_city_mode or game.campaign_stage > entry.level
-			improve.disabled = entry.level >= 3 or game.budget < next_price or not game.construction_job.is_empty() or not upgrade_unlocked
+			improve.disabled = entry.level >= 3 or game.budget < next_price or not game.construction_job.is_empty() or not upgrade_unlocked or not game.logistics_upgrade_allowed(entry)
 			if not upgrade_unlocked:
 				label(15, sheet_column, tr_text("Улучшение откроется на этапе %d", "Upgrade unlocks at stage %d") % (entry.level + 1))
+			elif entry.type_id == "warehouse" and not game.logistics_upgrade_allowed(entry):
+				label(15, sheet_column, tr_text("Сначала улучшите логистический центр", "Upgrade the logistics center first"))
 		else:
 			label(20, sheet_column, tr_text("Занимает участок и сохраняет своё состояние.", "Occupies the lot and keeps its own state."))
 		button(sheet_column, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
@@ -3395,7 +3445,7 @@ func build_grid_upgrade_sheet() -> void:
 			selection_kind = "grid_house"
 		refresh(), true)
 	confirm.name = "ConfirmGridUpgrade"
-	confirm.disabled = entry.level >= 3 or game.budget < price or not game.construction_job.is_empty()
+	confirm.disabled = entry.level >= 3 or game.budget < price or not game.construction_job.is_empty() or not game.logistics_upgrade_allowed(entry)
 	button(sheet_column, t("cancel"), func():
 		selection_kind = "grid_house"
 		refresh()).name = "CancelGridUpgrade"
@@ -3719,8 +3769,102 @@ func redraw_transit() -> void:
 			var edge := Art.box(transit_visuals, (first + second) / 2, Vector3(0.34, 0.08, first.distance_to(second)), Color("3daee8"))
 			edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
 
+func redraw_logistics_vehicles() -> void:
+	if logistics_visuals == null:
+		return
+	var signature := territory_signature
+	if signature == logistics_visual_signature:
+		return
+	logistics_visual_signature = signature
+	clear_children(logistics_visuals)
+	logistics_vehicles.clear()
+	var center := game.logistics_center_entry()
+	if center.is_empty():
+		return
+	var center_routes := game.logistics_vehicle_routes(str(center.instance_id))
+	var fleet_size: int = maxi(1, int(center.get("level", 1)))
+	var center_groups: Array = []
+	center_groups.resize(fleet_size)
+	for index in range(fleet_size):
+		center_groups[index] = []
+	for route_index in range(center_routes.size()):
+		center_groups[route_index % fleet_size].append(center_routes[route_index])
+	for index in range(fleet_size):
+		if not center_groups[index].is_empty():
+			create_logistics_vehicle(str(center.instance_id), index, center_groups[index])
+	for warehouse: Dictionary in game.territory.buildings:
+		if warehouse.type_id != "warehouse":
+			continue
+		var local_routes := game.logistics_vehicle_routes(str(warehouse.instance_id))
+		if not local_routes.is_empty():
+			create_logistics_vehicle(str(warehouse.instance_id), 0, local_routes)
+
+func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> void:
+	var first_route: Array = routes[0]
+	if first_route.size() < 2:
+		return
+	var identifier := "delivery_%s_%d" % [source_id, index]
+	var truck := create_object(logistics_visuals, "delivery_truck", identifier, first_route[0])
+	truck.interaction_area.collision_layer = 0
+	truck.set_language(game.language)
+	logistics_vehicles.append({"object": truck, "routes": routes, "route_index": 0, "progress": 0.0, "speed": 5.8})
+
+func tick_logistics_vehicles(delta: float) -> void:
+	for vehicle: Dictionary in logistics_vehicles:
+		var truck: Node3D = vehicle.get("object")
+		if truck == null or not is_instance_valid(truck):
+			continue
+		var routes: Array = vehicle.routes
+		if routes.is_empty():
+			continue
+		var route_index: int = int(vehicle.route_index)
+		var route: Array = routes[route_index]
+		if route.size() < 2:
+			continue
+		var lengths: Array[float] = []
+		var total_length := 0.0
+		for segment in range(1, route.size()):
+			var segment_length: float = route[segment - 1].distance_to(route[segment])
+			lengths.append(segment_length)
+			total_length += segment_length
+		if total_length <= 0.01:
+			continue
+		var progress: float = float(vehicle.progress) + delta * float(vehicle.speed)
+		while progress >= total_length:
+			progress -= total_length
+			route_index = (route_index + 1) % routes.size()
+			route = routes[route_index]
+			if route.size() < 2:
+				break
+			lengths.clear()
+			total_length = 0.0
+			for segment in range(1, route.size()):
+				var segment_length: float = route[segment - 1].distance_to(route[segment])
+				lengths.append(segment_length)
+				total_length += segment_length
+		if total_length <= 0.01:
+			continue
+		vehicle.route_index = route_index
+		vehicle.progress = progress
+		var remaining := progress
+		for segment in range(lengths.size()):
+			var segment_length: float = lengths[segment]
+			if remaining > segment_length:
+				remaining -= segment_length
+				continue
+			var first: Vector3 = route[segment]
+			var second: Vector3 = route[segment + 1]
+			var direction := second - first
+			truck.position = first.lerp(second, clampf(remaining / maxf(segment_length, 0.001), 0.0, 1.0))
+			truck.rotation.y = atan2(direction.x, direction.z)
+			break
+
 func building_effect(kind: String, level_value: int) -> String:
 	var data := Catalog.level_data(kind, level_value)
+	if kind == "logistics_center":
+		return tr_text("Прямой радиус %d дорожных клеток · разрешает %d склада", "Direct range %d road cells · permits %d warehouses") % [data.delivery_range, data.warehouse_limit]
+	if kind == "warehouse":
+		return tr_text("Запас %d единиц · местный радиус %d дорожных клеток", "Stores %d units · local range %d road cells") % [data.storage_capacity, data.delivery_range]
 	if kind == "house":
 		return tr_text("До %d жителей · доход %d/12 сек. при воде", "Up to %d residents · income %d/12 sec with water") % [data.residents, data.income]
 	if kind == "cafe":

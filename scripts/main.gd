@@ -2430,6 +2430,10 @@ func update_campaign_completion() -> void:
 	stars.add_theme_color_override("font_color", Color("d49b29"))
 	var time := label(20, content, tr_text("Время прохождения: %s", "Completion time: %s") % format_duration(game.campaign_elapsed_seconds))
 	time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var reward := label(22, content, tr_text("Награда за этап: +%d монет", "Stage reward: +%d coins") % game.campaign_stage_reward(stage), true)
+	reward.name = "CampaignReward"
+	reward.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	reward.add_theme_color_override("font_color", Color("337b52"))
 	var unlocked := label(17, content, tr_text("Новые здания и более высокий этап застройки открыты.", "New buildings and a higher development stage are unlocked."))
 	unlocked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	unlocked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

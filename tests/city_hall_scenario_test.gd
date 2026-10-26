@@ -38,6 +38,23 @@ func run() -> void:
 	campaign_contract.start_empty_city()
 	check(campaign_contract.campaign_stage == 1 and not campaign_contract.campaign_stage_goal_met(), "A fresh city begins at campaign stage one with no completed objectives")
 	check(campaign_contract.campaign_stars_for_time(600.0) == 3 and campaign_contract.campaign_stars_for_time(601.0) == 2 and campaign_contract.campaign_stars_for_time(1801.0) == 1, "Stage time converts to the intended three/two/one-star rating")
+	check(campaign_contract.campaign_stage_reward(1) == 400 and campaign_contract.campaign_stage_reward(2) == 600 and campaign_contract.campaign_stage_reward(3) == 1400, "Early stage rewards cover the planned house, service, and growth costs")
+	var reward_probe := Simulation.new(false)
+	reward_probe.save_path = "user://campaign_reward_test.json"
+	reward_probe.start_empty_city()
+	reward_probe.campaign_complete_pending = true
+	reward_probe.campaign_completed_stage = 1
+	reward_probe.continue_campaign()
+	check(reward_probe.budget == 400 and reward_probe.campaign_reward_granted_stage == 1, "Completing the first stage grants its development budget once")
+	reward_probe.campaign_complete_pending = true
+	reward_probe.campaign_completed_stage = 1
+	reward_probe.continue_campaign()
+	check(reward_probe.budget == 400, "Reloading or reopening a completed stage cannot grant its reward twice")
+	var reward_reload := Simulation.new(false)
+	reward_reload.save_path = reward_probe.save_path
+	check(reward_reload.load_game() and reward_reload.budget == 400 and reward_reload.campaign_reward_granted_stage == 1, "The paid stage and its reward survive save/load")
+	DirAccess.remove_absolute(reward_probe.save_path)
+	DirAccess.remove_absolute(reward_probe.save_path + ".tmp")
 	check(Catalog.footprint_cells("elite_residence") == Vector2i(4, 4) and Catalog.footprint_cells("business_tower") == Vector2i(4, 4), "Elite buildings reserve a 4x4-cell site")
 	campaign_contract.territory.buildings.append({"type_id": "elite_residence", "instance_id": "test_elite", "col": 5, "row": 5, "width": 4, "height": 4})
 	campaign_contract.territory.buildings.append({"type_id": "business_tower", "instance_id": "test_tower", "col": 12, "row": 5, "width": 4, "height": 4})

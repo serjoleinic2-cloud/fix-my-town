@@ -19,6 +19,7 @@ var campaign_elapsed_seconds: float = 0.0
 var campaign_complete_pending: bool = false
 var campaign_completed_stage: int = 0
 var campaign_star_rating: int = 0
+var campaign_reward_granted_stage: int = 0
 var campaign_finished: bool = false
 var renewal_credits: int = 0
 var subsidy_debt: int = 0
@@ -92,6 +93,7 @@ func start_empty_city() -> void:
 	campaign_complete_pending = false
 	campaign_completed_stage = 0
 	campaign_star_rating = 0
+	campaign_reward_granted_stage = 0
 	campaign_finished = false
 	renewal_credits = 0
 	subsidy_debt = 0
@@ -337,17 +339,41 @@ func campaign_stage_progress() -> float:
 func campaign_stars_for_time(seconds: float) -> int:
 	return 3 if seconds <= 600.0 else (2 if seconds <= 1800.0 else 1)
 
+func campaign_stage_reward(stage: int = -1) -> int:
+	var value := campaign_stage if stage < 0 else stage
+	if value < 1 or value > 10:
+		return 0
+	match value:
+		1: return 400
+		2: return 600
+		3: return 1400
+		4: return 1200
+		5: return 1500
+		6: return 1800
+		_: return 1200 + maxi(0, value - 7) * 200
+
+func grant_campaign_stage_reward(stage: int) -> int:
+	if stage <= 0 or stage > 10 or campaign_reward_granted_stage >= stage:
+		return 0
+	var reward := campaign_stage_reward(stage)
+	budget = mini(1000000, budget + reward)
+	campaign_reward_granted_stage = stage
+	return reward
+
 func evaluate_campaign_stage() -> void:
 	if not empty_city_mode or campaign_complete_pending or campaign_finished or not campaign_stage_goal_met():
 		return
 	campaign_complete_pending = true
 	campaign_completed_stage = campaign_stage
 	campaign_star_rating = campaign_stars_for_time(campaign_elapsed_seconds)
+	grant_campaign_stage_reward(campaign_completed_stage)
 	save_game()
 
 func continue_campaign() -> void:
 	if not campaign_complete_pending:
 		return
+	# Backfill rewards for a saved completion created before stage payouts existed.
+	grant_campaign_stage_reward(campaign_completed_stage)
 	if campaign_completed_stage >= 10:
 		campaign_finished = true
 	else:
@@ -1801,7 +1827,7 @@ func save_game() -> void:
 		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
 	var data := {"version": 9, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
 		"campaign_stage": campaign_stage, "campaign_elapsed_seconds": campaign_elapsed_seconds, "campaign_complete_pending": campaign_complete_pending,
-		"campaign_completed_stage": campaign_completed_stage, "campaign_star_rating": campaign_star_rating, "campaign_finished": campaign_finished, "renewal_credits": renewal_credits,
+		"campaign_completed_stage": campaign_completed_stage, "campaign_star_rating": campaign_star_rating, "campaign_reward_granted_stage": campaign_reward_granted_stage, "campaign_finished": campaign_finished, "renewal_credits": renewal_credits,
 		"subsidy_debt": subsidy_debt, "subsidy_threshold": subsidy_threshold, "subsidy_installment": subsidy_installment, "subsidy_income_accumulated": subsidy_income_accumulated,
 		"city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
@@ -1826,7 +1852,7 @@ func load_game() -> bool:
 	var data = JSON.parse_string(file.get_as_text())
 	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
 		return false
-	for key in ["campaign_stage", "campaign_completed_stage", "campaign_star_rating", "renewal_credits"]:
+	for key in ["campaign_stage", "campaign_completed_stage", "campaign_star_rating", "renewal_credits", "campaign_reward_granted_stage"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
 			return false
 	if data.has("campaign_elapsed_seconds") and (not (data.campaign_elapsed_seconds is int or data.campaign_elapsed_seconds is float) or not is_finite(float(data.campaign_elapsed_seconds)) or float(data.campaign_elapsed_seconds) < 0 or float(data.campaign_elapsed_seconds) > 1000000000):
@@ -2132,6 +2158,7 @@ func load_game() -> bool:
 	campaign_complete_pending = bool(data.get("campaign_complete_pending", false))
 	campaign_completed_stage = clampi(int(data.get("campaign_completed_stage", 0)), 0, 10)
 	campaign_star_rating = clampi(int(data.get("campaign_star_rating", 0)), 0, 3)
+	campaign_reward_granted_stage = clampi(int(data.get("campaign_reward_granted_stage", 0)), 0, 10)
 	campaign_finished = bool(data.get("campaign_finished", false))
 	renewal_credits = clampi(int(data.get("renewal_credits", 0)), 0, 1000000)
 	subsidy_debt = loaded_subsidy_debt
@@ -2187,6 +2214,8 @@ func load_game() -> bool:
 			{"id": "first_service", "title": "Построить первую службу", "done": false}
 		]
 	check_complete()
+	if campaign_complete_pending and grant_campaign_stage_reward(campaign_completed_stage) > 0:
+		save_game()
 	if foundation_migrated:
 		save_game()
 	return true

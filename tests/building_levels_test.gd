@@ -139,9 +139,11 @@ func run() -> void:
 				check(object.visual_root.visible and object.visual_root.get_child(0) == visual and scene.game.budget == money, "Cancel restores original unchanged visual")
 				scene.confirm_upgrade(16, kind, 1)
 				var upgrade_task: Dictionary = scene.game.construction_job.duplicate(true)
-				check(object.level == 1 and scene.game.construction_job.kind == "upgrade_legacy", "Confirming upgrade starts saved construction work")
+				check(object.level == 1 and scene.game.construction_job.get("kind", "") == "upgrade_legacy", "Confirming upgrade starts saved construction work (type=%s level=%d budget=%d cost=%d job=%s empty=%s ruined=%s)" % [kind, scene.game.building_level(16), scene.game.budget, scene.game.upgrade_cost(16), str(scene.game.construction_job.get("kind", "")), str(scene.game.empty_city_mode), str(scene.game.is_ruined("pine_district_legacy_16"))])
 				scene.game.tick(6.1)
 				scene.handle_construction_finish(upgrade_task)
+				# A finished job keeps its worksite active while the crew leaves.
+				scene.game.tick(1.3)
 				scene.refresh()
 				object = scene.plots.get_node("plot_16")
 				check(object.level == 2 and object.visual_root.get_child(0).visual_level == 2 and object.interaction_area == area and object.mounts == sockets, "Completed upgrade changes model and preserves interactions and mounts")
@@ -172,6 +174,7 @@ func run() -> void:
 				scene.handle_construction_finish(demolition_task)
 				scene.refresh()
 				check(scene.game.buildings[16] == "empty" and scene.plots.get_node("plot_16").type_id == "empty", "Confirm demolition redraws vacant lot")
+				scene.game.tick(1.3)
 		scene.audio.shutdown()
 		await create_timer(0.1).timeout
 		viewport.queue_free()

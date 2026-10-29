@@ -161,10 +161,12 @@ func connected_road(col: int, row: int) -> bool:
 	var queue: Array[Vector2i] = [Vector2i(col, row)]
 	var visited: Dictionary = {Vector2i(col, row): true}
 	var reaches_city := row <= 18 and ((row % 3 == 0) or (col <= 18 and col % 3 == 0))
+	if reaches_city:
+		return true
 	while not queue.is_empty():
 		var current: Vector2i = queue.pop_front()
 		if current.y == 18 and current.x >= 0 and current.x < WIDTH or is_city_hall_access_cell(current):
-			reaches_city = true
+			return true
 		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var next: Vector2i = current + offset
 			if in_bounds(next.x, next.y) and cells[next.y][next.x] == "road" and not visited.has(next):

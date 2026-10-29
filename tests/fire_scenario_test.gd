@@ -170,6 +170,7 @@ func run() -> void:
 	ruined_load.tick(6.1)
 	check(not ruined_load.is_ruined(Simulation.FIRST_FIRE_TARGET), "Restoration removes the ruin state only after construction")
 	check(ruined_load.building_level(0) == 1, "A rebuilt ruin returns as a one-storey home")
+	ruined_load.tick(1.3) # The restoration crew must leave before another order.
 	check(ruined_load.start_legacy_upgrade(0) and ruined_load.construction_job.get("kind", "") == "upgrade_legacy", "Further improvement is a separate action after restoration")
 	ruined_load.tick(6.1)
 	check(ruined_load.building_level(0) == 2, "The restored home reaches level two only after a second worksite")
@@ -194,6 +195,7 @@ func run() -> void:
 	check(grid_save.repair_fire_damage(grid_id) and grid_save.construction_job.kind == "restore_grid", "Grid ruin opens a visible first-floor restoration")
 	grid_save.tick(6.1)
 	check(grid_save.territory.building_by_id(grid_id).level == 1 and not grid_save.is_ruined(grid_id), "Grid restoration finishes at level one")
+	grid_save.tick(1.3)
 	check(grid_save.start_grid_upgrade(grid_id) and grid_save.territory.building_by_id(grid_id).level == 1, "Level two remains a separate work order")
 	grid_save.tick(6.1)
 	check(grid_save.territory.building_by_id(grid_id).level == 2, "Grid upgrade reaches level two only after its own work")

@@ -31,6 +31,7 @@ var fire_notice: PanelContainer
 var fire_notice_label: Label
 var fire_notice_left: float = 0.0
 var subsidy_dialog: Control
+var rewarded_dialog: Control
 var campaign_dialog: Control
 var jam_notice_cooldown: float = 0.0
 var signal_object: Node3D
@@ -1337,7 +1338,7 @@ func map_input(event: InputEvent) -> void:
 		var row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
 		if game.territory.in_bounds(col, row):
 			var selected_cell := Vector2i(col, row)
-			if territory_tool == "clear":
+			if territory_tool == "clear" and game.territory.state_at(selected_cell.x, selected_cell.y) == "forest":
 				var visible_tree_cell := forest_cell_near_tap(point, selected_cell)
 				if visible_tree_cell.x >= 0:
 					selected_cell = visible_tree_cell
@@ -2215,12 +2216,12 @@ func territory_reason() -> String:
 	if territory_cell.x < 0:
 		return "select"
 	var selected_type := service_type if territory_tool == "service" else territory_tool
-	if territory_tool not in ["clear", "road"] and not game.has_city_hall():
+	if game.empty_city_mode and territory_tool not in ["clear", "road"] and not game.has_city_hall():
 		if selected_type != TerritoryGrid.CITY_HALL_TYPE:
 			return "city_hall_first"
 		if territory_cell != TerritoryGrid.CITY_HALL_SITE:
 			return "city_hall_site"
-	if territory_tool == "road" and not game.has_city_hall():
+	if game.empty_city_mode and territory_tool == "road" and not game.has_city_hall():
 		return "city_hall_first"
 	if selected_type in ["logistics_center", "warehouse"] and not game.logistics_site_allowed(selected_type, territory_cell.x, territory_cell.y):
 		return "logistics_requirement"
@@ -3314,6 +3315,10 @@ func open_audio_settings() -> void:
 func _exit_tree() -> void:
 	if audio != null and is_instance_valid(audio):
 		audio.shutdown()
+	# Compact cards detach this reusable container from the scene tree.
+	# Detached nodes are not freed with the scene's children.
+	if is_instance_valid(sheet_scroll) and sheet_scroll.get_parent() == null:
+		sheet_scroll.free()
 
 func viewport_point(world_point: Vector3) -> Vector2:
 	return viewport_container.get_global_transform_with_canvas() * (camera.unproject_position(world_point) * viewport_container.stretch_shrink)
@@ -3467,6 +3472,9 @@ func build_grid_house_sheet() -> void:
 			button(sheet_column, tr_text("Ещё", "More"), open_grid_more).name = "MoreButton"
 		elif entry.type_id == "city_hall":
 			label(18, sheet_column, tr_text("Постоянный городской центр района.", "Permanent civic center of the district."))
+			if OS.is_debug_build():
+				var reward_amount := game.debug_rewarded_placeholder_amount()
+				button(sheet_column, tr_text("Тест рекламы · +%d монет", "Test ad · +%d coins") % reward_amount, show_rewarded_placeholder)
 		return
 	action_height = 430
 	header(t("house") + " · %d/3" % entry.level)
@@ -4105,7 +4113,50 @@ func maybe_offer_subsidy() -> void:
 	var grant_1000 := button(options, tr_text("Получить 1000 монет", "Receive 1,000 coins"), func(): choose_subsidy(1000))
 	grant_500.custom_minimum_size.y = 72
 	grant_1000.custom_minimum_size.y = 72
+	if OS.is_debug_build():
+		var reward_amount := game.debug_rewarded_placeholder_amount()
+		var reward_button := button(options, tr_text("Тест рекламы · награда %d", "Test ad · reward %d") % reward_amount, show_rewarded_placeholder)
+		reward_button.name = "DebugRewardedPlaceholder"
 	layout_subsidy_offer()
+
+func show_rewarded_placeholder() -> void:
+	if not OS.is_debug_build() or (rewarded_dialog != null and is_instance_valid(rewarded_dialog)):
+		return
+	var overlay := ColorRect.new()
+	overlay.name = "DebugRewardedPlaceholderOverlay"
+	overlay.color = Color(0.09, 0.12, 0.14, 0.58)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.add_child(overlay)
+	rewarded_dialog = overlay
+	var panel := PanelContainer.new()
+	panel.name = "DebugRewardedPlaceholderCard"
+	panel.theme = ui_theme
+	panel.add_theme_stylebox_override("panel", style(PAPER, 18, Color("e4ded2")))
+	overlay.add_child(panel)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 20)
+	panel.add_child(margin)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	margin.add_child(column)
+	label(23, column, tr_text("Реклама · тестовая заглушка", "Advertisement · test placeholder"), true)
+	var amount := game.debug_rewarded_placeholder_amount()
+	label(20, column, tr_text("Награда до нажатия: %d монет", "Reward before continuing: %d coins") % amount)
+	button(column, tr_text("Пропустить · получить награду", "Skip · receive reward"), func():
+		if game.grant_debug_rewarded_placeholder() > 0:
+			close_rewarded_placeholder()
+			refresh(), true)
+	button(column, tr_text("Закрыть без награды", "Close without reward"), close_rewarded_placeholder)
+	var card_size := Vector2(minf(500, screen.size.x - safe_left - safe_right - 32), 300)
+	panel.size = card_size
+	panel.position = Vector2((screen.size.x - card_size.x) * 0.5, (screen.size.y - card_size.y) * 0.5)
+
+func close_rewarded_placeholder() -> void:
+	if rewarded_dialog != null and is_instance_valid(rewarded_dialog):
+		rewarded_dialog.queue_free()
+	rewarded_dialog = null
 
 func choose_subsidy(amount: int) -> void:
 	if game.take_subsidy(amount):

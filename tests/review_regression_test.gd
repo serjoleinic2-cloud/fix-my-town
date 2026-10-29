@@ -22,20 +22,20 @@ func run() -> void:
 		for state in row:
 			if state == "road":
 				has_roads = true
-	check(empty.district_house_count() == 0 and not has_roads and empty.empty_city_mode, "New city starts as an empty natural grid without inherited buildings or roads")
+	check(empty.district_house_count() == 0 and has_roads and empty.empty_city_mode and empty.has_city_hall() and empty.territory.buildings.size() == 1, "New city starts with only the permanent City Hall and its street ring, without inherited homes")
 	check(empty.income() == 0 and empty.budget == 0 and empty.job == "" and empty.fires.is_empty(), "Fresh city has no budget income, service vehicle job, or incidents")
 	check(empty.incident_penalty() == 0, "Empty city has no legacy service penalty")
 	check(empty.territory.is_revealed(12, 20) and not empty.territory.is_revealed(4, 4), "New city starts with a small visible pocket")
 	empty.tick(180.0, true)
 	check(empty.incidents.is_empty(), "Empty city does not generate incidents on empty terrain")
 	check(empty.can_offer_subsidy() and empty.take_subsidy(500), "The player can select a startup grant before earning income")
-	for row in range(19, 23):
-		for col in range(12, 21):
+	for row in range(19, 24):
+		for col in range(9, 11):
 			empty.territory.clear_cell(col, row)
-	check(empty.build_grid_building(13, 20, "house"), "First cleared house can bootstrap the road network")
-	check(empty.territory.has_constructed_network(), "First house creates an automatic road contour")
-	check(empty.territory.is_revealed(13, 20) and empty.territory.is_revealed(16, 20), "Buildings reveal nearby cells")
-	check(empty.build_grid_building(16, 20, "house"), "Second house can extend the network linearly")
+	check(empty.build_grid_building(9, 19, "house"), "First cleared house connects to the City Hall street ring")
+	check(empty.territory.has_constructed_network(), "The connected road network remains available")
+	check(empty.territory.is_revealed(6, 19), "Buildings reveal nearby cells outward from the centre")
+	check(empty.build_grid_building(9, 22, "house"), "Second house can extend the network linearly")
 	var game := Simulation.new(true)
 	game.save_path = "user://review_regression_test.json"
 	game.budget = 5000
@@ -51,8 +51,7 @@ func run() -> void:
 	check(neglected.house_damage("pine_district_legacy_12") > 0, "Long-unresolved water failure damages affected homes")
 	game.leak_fixed = true
 	game.signal_fixed = true
-	# Transit regression uses an explicitly prepared road network; a new city
-	# itself must remain roadless until the first building is placed.
+	# Transit regression uses an explicitly prepared legacy road network.
 	game.territory.reset()
 	game.territory.initialize_legacy_road_network()
 	game.build(9, "cafe")

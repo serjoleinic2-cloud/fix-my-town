@@ -27,13 +27,19 @@ func run() -> void:
 	game.budget = 20000
 	check(Catalog.footprint_cells("logistics_center") == Vector2i(3, 3) and Catalog.footprint_cells("warehouse") == Vector2i(2, 2), "Logistics center is a 3x3 campus and warehouse fits a standard 2x2 lot")
 	check(game.can_build_logistics_center() and not game.can_build_warehouse(), "Stage six unlocks one logistics center before warehouses")
-	prepare_footprint(game, 8, 17, Vector2i(3, 3))
-	check(game.build_grid_building(8, 17, "logistics_center"), "Connected city can build its logistics center")
-	var center: Dictionary = game.territory.building_by_id("pine_district_logistics_center_8_17")
+	prepare_footprint(game, 8, 19, Vector2i(3, 3))
+	check(game.build_grid_building(8, 19, "logistics_center"), "Connected city can build its aligned logistics center")
+	var center: Dictionary = game.territory.building_by_id("pine_district_logistics_center_8_19")
 	check(not center.is_empty() and game.logistics_warehouse_limit() == 1, "Level-one center authorizes one warehouse")
+	if center.is_empty():
+		quit(1)
+		return
 	prepare_footprint(game, 15, 19, Vector2i(2, 2))
 	check(game.can_build_warehouse() and game.build_grid_building(15, 19, "warehouse"), "A warehouse can be built on a connected 2x2 site")
 	var warehouse: Dictionary = game.territory.building_by_id("pine_district_warehouse_15_19")
+	if warehouse.is_empty():
+		quit(1)
+		return
 	check(not warehouse.is_empty() and game.territory.road_distance_between_buildings(center, warehouse, game.logistics_center_range()) >= 0, "Warehouse is connected to the dispatch center within its road range")
 	check(not game.logistics_vehicle_routes(str(center.instance_id)).is_empty(), "Center dispatch trucks receive a road route to the warehouse")
 	check(not game.can_build_warehouse() and not game.logistics_upgrade_allowed(warehouse), "Center level one blocks extra warehouses and warehouse upgrades")

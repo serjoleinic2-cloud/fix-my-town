@@ -81,12 +81,13 @@ func run() -> void:
 	check(game.territory.placement_reason(9, 20, "clear") == "" and game.territory.placement_reason(15, 20, "clear") == "", "Nearby frontier cells can be prepared")
 	check(game.territory.placement_reason(17, 20, "clear") == "outside", "Fogged cells cannot be selected for clearing")
 	check(not game.start_grid_construction(12, 19, "house"), "The starting City Hall cannot be replaced")
+	game.territory.reveal_area(6, 19, 1)
 	for row in [19, 20]:
-		for col in [8, 9]:
+		for col in [6, 7]:
 			game.territory.cells[row][col] = "free"
-	check(game.territory.placement_reason(8, 19, "house") == "no_road", "A cleared but disconnected lot cannot be built on")
+	check(game.territory.placement_reason(6, 19, "house") == "no_road", "A cleared, aligned but disconnected lot cannot be built on")
 	for row in [19, 20]:
-		for col in [8, 9]:
+		for col in [6, 7]:
 			game.territory.cells[row][col] = "forest"
 	check(game.start_grid_clear(10, 19), "Start clearing a nearby expansion cell")
 	var start_position: Array = game.construction_job.excavator_position.duplicate()

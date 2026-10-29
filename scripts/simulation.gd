@@ -631,7 +631,7 @@ func income() -> int:
 	return total
 
 func can_offer_subsidy() -> bool:
-	return budget <= 0 and income() <= 0 and subsidy_debt <= 0
+	return budget <= 0 and net_income() <= 0 and subsidy_debt <= 0
 
 func take_subsidy(amount: int) -> bool:
 	if not can_offer_subsidy() or amount not in [500, 1000]:
@@ -643,6 +643,19 @@ func take_subsidy(amount: int) -> bool:
 	subsidy_income_accumulated = 0
 	save_game()
 	return true
+
+func debug_rewarded_placeholder_amount() -> int:
+	if not OS.is_debug_build():
+		return 0
+	return mini(500, 100 + (maxi(1, campaign_stage) - 1) * 100)
+
+func grant_debug_rewarded_placeholder() -> int:
+	var reward := debug_rewarded_placeholder_amount()
+	if reward <= 0:
+		return 0
+	budget += reward
+	save_game()
+	return reward
 
 func subsidy_payment_for_income(gross_income: int) -> int:
 	if subsidy_debt <= 0 or subsidy_threshold <= 0 or subsidy_installment <= 0 or gross_income <= 0:
@@ -1659,7 +1672,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 			changed = true
 		else:
 			job_phase = "repair"
-			repair_left -= delta
+			repair_left = maxf(0.0, repair_left - delta)
 			if repair_left <= 0:
 				if job == "signal":
 					signal_fixed = true
@@ -1707,7 +1720,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 				assignment.phase = "repair"
 				changed = true
 			else:
-				assignment.repair_left = float(assignment.repair_left) - delta
+				assignment.repair_left = maxf(0.0, float(assignment.repair_left) - delta)
 				if float(assignment.repair_left) <= 0:
 					fires.erase(identifier)
 					assignment.route = return_route_for_fire(assignment.route, assignment.depot_instance_id)

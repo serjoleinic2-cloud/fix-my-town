@@ -27,7 +27,10 @@ func check_polygon_pick(scene: Node, center: Vector3, half_x: float, half_z: flo
 		var overlay_distance: float = minf(scene.camera.unproject_position(scene.world.get_node("LeakMarker").position).distance_to(point), scene.camera.unproject_position(scene.world.get_node("SignalMarker").position).distance_to(point))
 		if overlay_distance < 36.0 * scene.render_scale / scene.viewport_container.stretch_shrink:
 			continue
-		tap_at(scene, point)
+		# Roof hit-testing is the expensive part; exercise the projected picker
+		# directly for every edge point. Full input routing is covered by the
+		# scenario test and one representative edge tap below.
+		scene.select_projected_building(point)
 		if expected_legacy >= 0:
 			check(scene.selection_kind == "plot" and scene.selected == expected_legacy, "Visible roof edge " + str(offset) + " selects legacy building " + str(expected_legacy) + "; got " + str(scene.selected))
 		else:
@@ -86,6 +89,12 @@ func run() -> void:
 		check_polygon_pick(scene, center, 4.5, 4.5, index, "")
 		checked += 1
 	check(checked >= 18, "The test covers old buildings at each map edge")
+	var first_building: Vector3 = scene.map_position(scene.game.plot_position(0))
+	var routed_tap := InputEventMouseButton.new()
+	routed_tap.button_index = MOUSE_BUTTON_LEFT
+	routed_tap.position = scene.camera.unproject_position(first_building + Vector3(0, 4.7, 0)) * scene.viewport_container.stretch_shrink
+	scene.map_input(routed_tap)
+	check(scene.selected == 0 and scene.selection_kind == "plot", "A routed edge tap opens the selected building panel")
 	for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22)]:
 		check(scene.game.clear_grid_cell(cell.x, cell.y), "Clear test footprint for a mapped expansion home")
 	for cell in [Vector2i(12, 19), Vector2i(12, 20), Vector2i(12, 21), Vector2i(13, 21), Vector2i(14, 21), Vector2i(14, 22)]:
@@ -104,7 +113,7 @@ func run() -> void:
 	var probe_cell := Vector2i(18, 25)
 	scene.open_territory()
 	scene.set_camera_focus(scene.game.territory.cell_world(probe_cell.x, probe_cell.y) + Vector3(7, 0, 7))
-	tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(probe_cell.x, probe_cell.y))
+	tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(probe_cell.x, probe_cell.y)) * scene.viewport_container.stretch_shrink
 	scene.map_input(tap)
 	check(scene.territory_cell == probe_cell, "Forest selection uses the center of the visible cell")
 	var forest_seed: int = absi(probe_cell.y * 53 + probe_cell.x * 17 + probe_cell.y * probe_cell.x)
@@ -112,18 +121,21 @@ func run() -> void:
 	forest_rng.seed = forest_seed
 	var forest_visual_center: Vector3 = scene.game.territory.cell_world(probe_cell.x, probe_cell.y) + Vector3(forest_rng.randf_range(-1.25, 1.25), 0.1, forest_rng.randf_range(-1.25, 1.25))
 	scene.set_camera_focus(scene.game.territory.cell_world(probe_cell.x, probe_cell.y) + Vector3(7, 0, 7))
-	tap.position = scene.camera.unproject_position(forest_visual_center + Vector3(0, 2.4, 0))
+	tap.position = scene.camera.unproject_position(forest_visual_center + Vector3(0, 2.4, 0)) * scene.viewport_container.stretch_shrink
 	scene.map_input(tap)
 	check(scene.territory_cell == probe_cell, "Tapping a tree canopy still selects its forest cell rather than a neighboring tile")
 	var road_cell := Vector2i(12, 21)
 	scene.set_camera_focus(scene.game.territory.cell_world(road_cell.x, road_cell.y) + Vector3(7, 0, 7))
-	tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(road_cell.x, road_cell.y))
+	tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(road_cell.x, road_cell.y)) * scene.viewport_container.stretch_shrink
 	scene.map_input(tap)
-	check(scene.territory_cell == road_cell, "Road selection uses the same visible grid cell as forest placement")
+	check(scene.selection_kind == "territory" and scene.territory_cell == probe_cell, "Roads cannot be selected as forest-clear targets (selection=%s cell=%s state=%s)" % [scene.selection_kind, str(scene.territory_cell), scene.game.territory.state_at(scene.territory_cell.x, scene.territory_cell.y)])
+	scene.close_sheet()
+	check(scene.game.dispatch("leak"), "Create a service dispatch before testing vehicle selection")
+	scene.refresh()
 	scene.car.position = Vector3(35, 0.18, 72)
 	scene.car.visible = true
 	scene.set_camera_focus(scene.car.position)
-	tap.position = scene.camera.unproject_position(scene.car.position + Vector3(0, 0.9, 0))
+	tap.position = scene.camera.unproject_position(scene.car.position + Vector3(0, 0.9, 0)) * scene.viewport_container.stretch_shrink
 	scene.close_sheet()
 	scene.map_input(tap)
 	check(scene.selection_kind == "vehicle" and scene.selected_vehicle_type == "repair_van", "A tap on an unobstructed service vehicle opens its status card")
@@ -136,9 +148,8 @@ func run() -> void:
 	scene.game = legacy_game
 	var save_path: String = scene.game.save_path
 	scene.audio.shutdown()
-	viewport.queue_free()
-	await process_frame
+	viewport.free()
 	DirAccess.remove_absolute(save_path)
-	await create_timer(0.2).timeout
+	await create_timer(0.4).timeout
 	print("MAP INTERACTION CHECKS: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)

@@ -52,7 +52,8 @@ func run() -> void:
 	check(resumed.placement_bonus(9, "cafe") > resumed.placement_bonus(23, "cafe"), "Location must affect bonus")
 	var loaded = Simulation.new(true)
 	loaded.save_path = game.save_path
-	check(loaded.load_game() and loaded.completed and loaded.buildings[3] == "park", "Completed district must persist")
+	var completed_load_ok: bool = loaded.load_game()
+	check(completed_load_ok and loaded.completed and loaded.buildings[3] == "park", "Completed district must persist (loaded=%s completed=%s plot3=%s)" % [str(completed_load_ok), str(loaded.completed), str(loaded.buildings[3] if loaded.buildings.size() > 3 else "missing")])
 	loaded.budget = 0
 	check(not loaded.build(7, "cafe"), "Reject unaffordable construction")
 	var slow = Simulation.new(true)
@@ -86,7 +87,8 @@ func run() -> void:
 	check(phase_resume.leak_fixed and phase_resume.job_phase == "return", "Repair begins return trip")
 	var return_resume = Simulation.new(true)
 	return_resume.save_path = staged.save_path
-	check(return_resume.load_game() and return_resume.job_phase == "return", "Return trip must persist")
+	var return_load_ok: bool = return_resume.load_game()
+	check(return_load_ok and return_resume.job_phase == "return", "Return trip must persist (loaded=%s job=%s phase=%s target=%s)" % [str(return_load_ok), return_resume.job, return_resume.job_phase, return_resume.target_instance_id])
 	finish_job(return_resume)
 	check(return_resume.vehicle == Vector3(3, 0, -6), "Vehicle returns to depot")
 	var corrupt := FileAccess.open(game.save_path, FileAccess.WRITE)
@@ -133,7 +135,7 @@ func run() -> void:
 	check(scene.scenery.traffic_controller.vehicles.is_empty() and scene.scenery.traffic_controller.intersections.is_empty() and scene.scenery.get_child_count() == 1, "No traffic vehicles, road signals, or legacy scenery are instantiated on clean start")
 	var subsidy_card := scene.subsidy_dialog.find_child("SubsidyOfferCard", true, false) as Control
 	var subsidy_buttons: Array = scene.subsidy_dialog.find_children("*", "Button", true, false).filter(func(item): return item.text.begins_with("Получить"))
-	check(subsidy_card != null and subsidy_buttons.size() == 2 and subsidy_card.get_global_rect().end.y <= scene.screen.size.y, "The startup subsidy options fit inside the phone screen")
+	check(subsidy_card != null and subsidy_buttons.size() == 2 and subsidy_card.get_global_rect().end.y <= scene.screen.size.y, "The startup subsidy options fit inside the phone screen (buttons=%d card=%s screen=%s)" % [subsidy_buttons.size(), str(subsidy_card.get_global_rect() if subsidy_card != null else Rect2()), str(scene.screen.size)])
 	# Проверки изолированы от пользовательского сохранения.
 	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://test_ui.json"
@@ -179,15 +181,20 @@ func run() -> void:
 	scene.handle_construction_finish(cafe_task)
 	scene.refresh()
 	check(scene.game.completed, "UI complete scenario with cafe")
+	# Finish the saved departure phase before opening the next work order.
+	scene.game.tick(1.3)
+	check(scene.game.construction_job.is_empty(), "The construction crew leaves before building actions resume")
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
 	scene.game.leak_fixed = false
 	scene.game.signal_fixed = false
 	scene.refresh()
-	click.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(7))) * scene.viewport_container.stretch_shrink
+	# Plot 7 is empty in the legacy fixture and correctly opens land actions;
+	# exercise object picking against a real building instead.
+	click.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(0) + Vector3(0, 4.7, 0))) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
-	check(scene.selected == 7, "Map picking")
+	check(scene.selected == 0 and scene.selection_kind == "plot", "Map picking selects an existing house (selected=%d kind=%s)" % [scene.selected, scene.selection_kind])
 	click.position = scene.camera.unproject_position(scene.world.get_node("LeakMarker").position) * scene.viewport_container.stretch_shrink
 	scene.map_input(click)
 	check(scene.selection_kind == "leak", "Leak on map opens action panel")
@@ -195,6 +202,7 @@ func run() -> void:
 	scene.map_input(click)
 	check(scene.selection_kind == "signal", "Signal on map opens action panel")
 	# Tap projected roof positions (not ground centers) across the full row set.
+	scene.game.budget = 10000
 	for index in range(24):
 		if scene.game.buildings[index] != "house":
 			continue
@@ -202,13 +210,13 @@ func run() -> void:
 		roof_tap.button_index = MOUSE_BUTTON_LEFT
 		roof_tap.position = scene.camera.unproject_position(scene.map_position(scene.game.plot_position(index) + Vector3(0, 4.7, 0))) * scene.viewport_container.stretch_shrink
 		scene.map_input(roof_tap)
-		check(scene.selected == index and scene.selection_kind == "plot", "Tap on each house roof opens its building card: " + str(index))
+		check(scene.selected == index and scene.selection_kind == "plot", "Tap on each house roof opens its building card: expected=%d actual=%d kind=%s" % [index, scene.selected, scene.selection_kind])
 		var upgrade: Button = scene.sheet.find_child("UpgradeButton", true, false)
-		check(upgrade != null and not upgrade.disabled, "Each house exposes its improvement action: " + str(index))
+		check(upgrade != null and not upgrade.disabled, "Each house exposes its improvement action: plot=%d button=%s disabled=%s" % [index, str(upgrade != null), str(upgrade.disabled if upgrade != null else true)])
 		if upgrade != null:
 			upgrade.pressed.emit()
 			await process_frame
-			check(scene.selection_kind == "upgrade", "House upgrade action opens its confirmation preview: " + str(index))
+			check(scene.selection_kind == "upgrade", "House upgrade action opens its confirmation preview: plot=%d selection=%s" % [index, scene.selection_kind])
 			scene.cancel_upgrade()
 	for path in [staged.save_path, game.save_path, slow.save_path, fast.save_path, poor.save_path, scene.game.save_path]:
 		DirAccess.remove_absolute(path)

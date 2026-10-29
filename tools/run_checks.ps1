@@ -1,15 +1,20 @@
 param([string]$GodotPath = 'godot')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$script:FailedGodotChecks = [System.Collections.Generic.List[string]]::new()
 
 function Invoke-GodotCheck {
     param([string[]]$GodotArguments)
+    Write-Host "Проверка: $($GodotArguments -join ' ')"
+    $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
     # Headless-проверки не зависят от устройства вывода звука Windows.
     $output = & $GodotPath --audio-driver Dummy @GodotArguments 2>&1
     $result = $LASTEXITCODE
     $output | ForEach-Object { Write-Host $_ }
+    Write-Host ("Время: {0:N1} с" -f $elapsed.Elapsed.TotalSeconds)
     if ($result -ne 0 -or ($output -match 'SCRIPT ERROR:|ERROR:|WARNING:')) {
-        throw "Проверка Godot завершилась с ошибкой или предупреждением (код $result)."
+        $script:FailedGodotChecks.Add(($GodotArguments -join ' '))
+        Write-Host "Проверка отмечена как неуспешная (код $result); запускаю следующий набор."
     }
 }
 
@@ -31,6 +36,10 @@ Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--scr
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/construction_work_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/citizen_pool_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/empty_city_subsidy_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/rewarded_placeholder_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/city_hall_scenario_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/logistics_network_test.gd')
+if ($script:FailedGodotChecks.Count -gt 0) {
+    throw "Провалены проверки: $($script:FailedGodotChecks -join ' | ')"
+}
 Write-Host 'Все проверки пройдены.'

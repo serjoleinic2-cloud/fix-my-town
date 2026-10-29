@@ -11,6 +11,11 @@ func check(value: bool, message: String) -> void:
 func _initialize() -> void:
 	call_deferred("run")
 
+func finish_work(game: RefCounted) -> void:
+	game.tick(6.1)
+	if game.construction_job.get("kind", "") == "departing":
+		game.tick(1.3)
+
 func run() -> void:
 	for resolution in [Vector2i(360, 800), Vector2i(720, 1600), Vector2i(1080, 2400)]:
 		var viewport := SubViewport.new()
@@ -98,9 +103,8 @@ func run() -> void:
 			scene.game.language = language
 			scene.open_territory()
 			scene.set_territory_tool("house")
-			# The unlocked area grows with city level; pick a footprint that
-			# crosses its current edge instead of relying on a fixed old boundary.
-			scene.territory_cell = Vector2i(scene.game.territory.expansion_cols.y, scene.game.territory.expansion_rows.y)
+			# Expansion metadata is not a map boundary; use an actual world edge.
+			scene.territory_cell = Vector2i(scene.game.territory.WIDTH - 1, scene.game.territory.HEIGHT - 1)
 			scene.refresh()
 			check(scene.territory_reason() == "outside" and scene.sheet.find_child("ConfirmTerritory", true, false).disabled, "An invalid footprint is explained and cannot be purchased")
 			var budget: int = scene.game.budget
@@ -118,7 +122,7 @@ func run() -> void:
 		await process_frame
 		check(scene.selection_kind == "construction_job" and not scene.game.construction_job.is_empty() and scene.game.territory.building_at(10, 19).is_empty(), "Confirmed construction reserves funds and saves a worksite before the lot is occupied")
 		var house_task: Dictionary = scene.game.construction_job.duplicate(true)
-		scene.game.tick(6.1)
+		finish_work(scene.game)
 		scene.handle_construction_finish(house_task)
 		scene.refresh()
 		check(scene.selection_kind == "grid_house", "Finished construction opens the new home's card")
@@ -159,7 +163,7 @@ func run() -> void:
 		await process_frame
 		var grid_upgrade_task: Dictionary = scene.game.construction_job.duplicate(true)
 		check(grid_upgrade_task.get("kind", "") == "upgrade_grid" and scene.selected_grid_record().level == 1, "Confirming upgrade starts a saved worksite without changing the level early")
-		scene.game.tick(6.1)
+		finish_work(scene.game)
 		scene.handle_construction_finish(grid_upgrade_task)
 		scene.refresh()
 		check(scene.selected_grid_record().level == 2, "Completed upgrade changes the expansion level")
@@ -192,7 +196,7 @@ func run() -> void:
 				scene.sheet.find_child("ConfirmTerritory", true, false).pressed.emit()
 				await process_frame
 				var clear_task: Dictionary = scene.game.construction_job.duplicate(true)
-				scene.game.tick(6.1)
+				finish_work(scene.game)
 				scene.handle_construction_finish(clear_task)
 				scene.refresh()
 		scene.open_territory()
@@ -206,7 +210,7 @@ func run() -> void:
 		await process_frame
 		check(service_valid and not scene.game.construction_job.is_empty() and scene.game.construction_job.type_id == "fire_station" and scene.game.territory.state_at(15, 20) == "free", "Service selection starts a worksite without occupying its lot early")
 		var service_task: Dictionary = scene.game.construction_job.duplicate(true)
-		scene.game.tick(6.1)
+		finish_work(scene.game)
 		scene.handle_construction_finish(service_task)
 		scene.refresh()
 		check(scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(15, 20) == "occupied", "Finished player-placed fire station occupies its full footprint")

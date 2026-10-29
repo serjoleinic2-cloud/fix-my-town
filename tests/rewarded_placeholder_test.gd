@@ -21,6 +21,37 @@ func find_button(node: Node, caption: String) -> Button:
 func _initialize() -> void:
 	call_deferred("run")
 
+func check_mobile_layout() -> void:
+	for resolution in [Vector2i(360, 640), Vector2i(540, 960), Vector2i(540, 1200)]:
+		var viewport := SubViewport.new()
+		viewport.size = resolution
+		root.add_child(viewport)
+		var scene = load("res://main.tscn").instantiate()
+		scene.game.save_path = "user://rewarded_layout_test.json"
+		viewport.add_child(scene)
+		scene.set_process(false)
+		scene.game.budget = 500
+		scene.safe_override = Vector4(18, 30, 20, 24)
+		for language in ["ru", "en"]:
+			scene.game.language = language
+			scene.update_layout()
+			scene.show_rewarded_placeholder()
+			for frame in range(5):
+				await process_frame
+			var card: Control = scene.rewarded_dialog.find_child("DebugRewardedPlaceholderCard", true, false)
+			var safe := Rect2(Vector2(scene.safe_left, scene.safe_top), scene.screen.size - Vector2(scene.safe_left + scene.safe_right, scene.safe_top + scene.safe_bottom))
+			check(safe.encloses(card.get_global_rect()), "Reward card fits safe area: %s %s card=%s safe=%s" % [resolution, language, card.get_global_rect(), safe])
+			for action: Button in scene.rewarded_dialog.find_children("*", "Button", true, false):
+				check(safe.encloses(action.get_global_rect()) and action.size.y >= 72, "Reward actions remain visible and tappable: %s %s" % [resolution, language])
+			scene.close_rewarded_placeholder()
+			await process_frame
+		scene.audio.shutdown()
+		await create_timer(0.2).timeout
+		viewport.queue_free()
+		await process_frame
+		await process_frame
+	DirAccess.remove_absolute("user://rewarded_layout_test.json")
+
 func run() -> void:
 	var operating_city := Simulation.new(false)
 	operating_city.start_empty_city()
@@ -82,6 +113,7 @@ func run() -> void:
 	await process_frame
 	DirAccess.remove_absolute(save_path)
 	DirAccess.remove_absolute(save_path + ".tmp")
+	await check_mobile_layout()
 	if failures > 0:
 		quit(1)
 	else:

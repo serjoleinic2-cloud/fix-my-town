@@ -643,6 +643,7 @@ func update_layout() -> void:
 		mode_switcher.size = Vector2(minf(360, size_value.x - safe_left - safe_right - tools_width - 16), 72)
 	updating_layout = false
 	layout_subsidy_offer()
+	layout_rewarded_placeholder()
 
 func map_position(point: Vector3) -> Vector3:
 	return DistrictWorld.world_position(point)
@@ -4129,11 +4130,15 @@ func show_rewarded_placeholder() -> void:
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	screen.add_child(overlay)
 	rewarded_dialog = overlay
+	var center := CenterContainer.new()
+	center.name = "DebugRewardedSafeArea"
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
 	var panel := PanelContainer.new()
 	panel.name = "DebugRewardedPlaceholderCard"
 	panel.theme = ui_theme
 	panel.add_theme_stylebox_override("panel", style(PAPER, 18, Color("e4ded2")))
-	overlay.add_child(panel)
+	center.add_child(panel)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 20)
@@ -4141,17 +4146,31 @@ func show_rewarded_placeholder() -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 12)
 	margin.add_child(column)
-	label(23, column, tr_text("Реклама · тестовая заглушка", "Advertisement · test placeholder"), true)
+	var heading := label(23, column, tr_text("Реклама · тестовая заглушка", "Advertisement · test placeholder"), true)
+	heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var amount := game.debug_rewarded_placeholder_amount()
-	label(20, column, tr_text("Награда до нажатия: %d монет", "Reward before continuing: %d coins") % amount)
-	button(column, tr_text("Пропустить · получить награду", "Skip · receive reward"), func():
+	var reward_label := label(20, column, tr_text("Награда до нажатия: %d монет", "Reward before continuing: %d coins") % amount)
+	reward_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var claim := button(column, tr_text("Пропустить · получить награду", "Skip · receive reward"), func():
 		if game.grant_debug_rewarded_placeholder() > 0:
 			close_rewarded_placeholder()
 			refresh(), true)
-	button(column, tr_text("Закрыть без награды", "Close without reward"), close_rewarded_placeholder)
-	var card_size := Vector2(minf(500, screen.size.x - safe_left - safe_right - 32), 300)
-	panel.size = card_size
-	panel.position = Vector2((screen.size.x - card_size.x) * 0.5, (screen.size.y - card_size.y) * 0.5)
+	var cancel := button(column, tr_text("Закрыть без награды", "Close without reward"), close_rewarded_placeholder)
+	for action: Button in [claim, cancel]:
+		action.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		action.clip_text = true
+	layout_rewarded_placeholder()
+
+func layout_rewarded_placeholder() -> void:
+	if not is_instance_valid(rewarded_dialog):
+		return
+	var center := rewarded_dialog.get_node("DebugRewardedSafeArea") as CenterContainer
+	center.offset_left = safe_left + 16
+	center.offset_right = -safe_right - 16
+	center.offset_top = safe_top + 16
+	center.offset_bottom = -safe_bottom - 16
+	var panel := center.get_node("DebugRewardedPlaceholderCard") as PanelContainer
+	panel.custom_minimum_size.x = minf(500, maxf(1, screen.size.x - safe_left - safe_right - 32))
 
 func close_rewarded_placeholder() -> void:
 	if rewarded_dialog != null and is_instance_valid(rewarded_dialog):

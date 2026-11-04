@@ -72,6 +72,33 @@ func set_ruined(value: bool) -> void:
 	visual_override = desired
 	replace_visual()
 
+func set_shanty(value: bool) -> void:
+	if type_id != "house":
+		return
+	var desired := "shanty" if value else ""
+	if visual_override == desired:
+		return
+	visual_override = desired
+	var collision := interaction_area.get_child(0) as CollisionShape3D
+	var shape := collision.shape as BoxShape3D
+	shape.size = Vector3(4.8, 5, 4.8) if value else Vector3(footprint.x, 5, footprint.y)
+	collision.position.y = 2.5
+	replace_visual()
+
+func set_neglect_percent(value: int) -> void:
+	if type_id != "house" or visual_root.get_child_count() == 0:
+		return
+	var model := visual_root.get_child(0)
+	if model.has_method("set_neglect_stage"):
+		model.set_neglect_stage(clampi(value / 25, 0, 3))
+
+func set_elite_arch_axis(axis: String, lane_offset: int = 0) -> void:
+	if visual_root.get_child_count() == 0:
+		return
+	var model := visual_root.get_child(0)
+	if model.has_method("set_elite_arch_axis"):
+		model.set_elite_arch_axis(axis, lane_offset)
+
 func set_serviced(value: bool) -> void:
 	serviced_value = value
 	# Только визуальное состояние; игровой источник истины находится в Simulation.

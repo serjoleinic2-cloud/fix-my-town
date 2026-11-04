@@ -125,7 +125,8 @@ func run() -> void:
 		finish_work(scene.game)
 		scene.handle_construction_finish(house_task)
 		scene.refresh()
-		check(scene.selection_kind == "grid_house", "Finished construction opens the new home's card")
+		check(scene.selection_kind == "" and not scene.sheet.visible, "Finished construction leaves the map open")
+		scene.select_grid_house(str(scene.game.territory.building_at(10, 19).instance_id))
 		for frame in range(3):
 			await physics_frame
 		var entry: Dictionary = scene.selected_grid_record()
@@ -165,6 +166,7 @@ func run() -> void:
 		check(grid_upgrade_task.get("kind", "") == "upgrade_grid" and scene.selected_grid_record().level == 1, "Confirming upgrade starts a saved worksite without changing the level early")
 		finish_work(scene.game)
 		scene.handle_construction_finish(grid_upgrade_task)
+		scene.select_grid_house(str(entry.instance_id))
 		scene.refresh()
 		check(scene.selected_grid_record().level == 2, "Completed upgrade changes the expansion level")
 		check(scene.preview == null and scene.territory_visuals.get_node(NodePath(entry.instance_id)).visual_root.visible, "After confirmation only the upgraded real model remains")
@@ -213,7 +215,7 @@ func run() -> void:
 		finish_work(scene.game)
 		scene.handle_construction_finish(service_task)
 		scene.refresh()
-		check(scene.selected_grid_record().get("type_id", "") == "fire_station" and scene.game.territory.state_at(15, 20) == "occupied", "Finished player-placed fire station occupies its full footprint")
+		check(scene.game.territory.building_at(14, 19).get("type_id", "") == "fire_station" and scene.game.territory.state_at(15, 20) == "occupied", "Finished player-placed fire station occupies its full footprint")
 		scene.game.buildings[3] = "cafe"
 		scene.select_plot(3)
 		check(scene.action_height < 430 and scene.sheet.get_global_rect().end.y <= scene.navbar.position.y + 1, "Café card fits its content without a fixed empty footer")

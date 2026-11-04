@@ -23,6 +23,9 @@ var wait_times: Dictionary = {}
 var reservations: Dictionary = {}
 var last_states: Dictionary = {}
 var route_rng := RandomNumberGenerator.new()
+var grid: RefCounted
+var grid_roads: Array[Vector2i] = []
+var grid_signature := ""
 
 func initialize_empty() -> void:
 	# Keep routing/traffic APIs available without creating streets, signals or
@@ -80,6 +83,8 @@ static func phase(axis: String, time: float) -> String:
 	return "red"
 
 func is_broken(intersection: Dictionary) -> bool:
+	if grid != null:
+		return false
 	return not signal_fixed and is_equal_approx(intersection.x, -14.4) and is_zero_approx(intersection.z)
 
 func update_lights() -> void:
@@ -111,6 +116,9 @@ func step(delta: float) -> void:
 		if reservations[key].remaining <= 0:
 			reservations.erase(key)
 	update_lights()
+	if grid != null:
+		step_grid(delta)
+		return
 	for vehicle: Dictionary in vehicles:
 		if not vehicle.node.visible:
 			continue
@@ -215,6 +223,9 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		if ahead >= stop_distance - 0.1 and ahead <= stop_distance + distance + 0.2:
 			if not permission(intersection, vehicle.axis, vehicle.id, delta):
 				distance = minf(distance, maxf(0, ahead - stop_distance))
+	if grid != null:
+		var proposed := current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0.0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0.0)
+		distance = grid_safe_distance(vehicle, current_position, proposed)
 	return distance
 
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
@@ -244,12 +255,17 @@ func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) 
 	return true
 
 func lane_position(vehicle: Dictionary) -> Vector3:
+	if grid != null:
+		return vehicle.node.position
 	if vehicle.axis == "H":
 		return Vector3(vehicle.coordinate, 0.18, vehicle.road + vehicle.direction)
 	return Vector3(vehicle.road - vehicle.direction, 0.18, vehicle.coordinate)
 
 func place_vehicle(vehicle: Dictionary) -> void:
-	vehicle.node.position = lane_position(vehicle)
+	if grid != null and vehicle.get("managed", false):
+		vehicle.node.position = Vector3(vehicle.coordinate, 0.22, vehicle.road + vehicle.direction * 0.68) if vehicle.axis == "H" else Vector3(vehicle.road - vehicle.direction * 0.68, 0.22, vehicle.coordinate)
+	else:
+		vehicle.node.position = lane_position(vehicle)
 	vehicle.node.rotation.y = (PI / 2 * vehicle.direction) if vehicle.axis == "H" else (0.0 if vehicle.direction == 1 else PI)
 
 static func stop_distance_for(type_id: String) -> float:
@@ -308,3 +324,102 @@ func set_active_count(count: int) -> void:
 	reservations.clear()
 	for i in range(cars.size()):
 		cars[i].visible = i < count or vehicles[i].get("managed", false)
+
+func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_nodes: Array) -> void:
+	grid = source
+	intersections.clear()
+	for node: Node3D in signal_nodes:
+		intersections.append({"key": str(node.name), "x": node.position.x, "z": node.position.z, "offset": float(node.get_meta("signal_offset", 0.0)), "node": node})
+	var roads: Array[Vector2i] = []
+	for row in range(source.HEIGHT):
+		for col in range(source.WIDTH):
+			if source.state_at(col, row) == "road":
+				roads.append(Vector2i(col, row))
+	var signature := str(roads)
+	var changed := signature != grid_signature
+	grid_signature = signature
+	grid_roads = roads
+	if roads.is_empty() or (desired <= 0 and not bus_active):
+		for car in cars:
+			remove_child(car)
+			car.queue_free()
+		cars.clear()
+		vehicles.clear()
+		return
+	if vehicles.is_empty():
+		for index in range(9):
+			var node := ObjectScene.instantiate()
+			node.name = "grid_vehicle_%d" % index
+			add_child(node)
+			node.setup("city_bus" if index == 2 else "civilian_car", "grid_vehicle_%d" % index)
+			node.interaction_area.collision_layer = 0
+			node.visual_root.scale = Vector3.ONE * (0.7 if index == 2 else 0.8)
+			vehicles.append({"id": "grid_vehicle_%d" % index, "node": node, "axis": "H", "direction": 1, "road": 0.0, "coordinate": 0.0, "spacing": 5.8 if index == 2 else 3.6, "speed_factor": route_rng.randf_range(0.75, 1.15), "managed": index == 2})
+			cars.append(node)
+	var enabled := 0
+	var limit := mini(desired, maxi(1, roads.size() / 6))
+	for index in range(vehicles.size()):
+		var vehicle: Dictionary = vehicles[index]
+		if index == 2:
+			vehicle.node.visible = bus_active
+			continue
+		var active := enabled < limit
+		if active and (changed or not vehicle.node.visible or not vehicle.has("cell")):
+			var cell := roads[(enabled * 6) % roads.size()]
+			vehicle.cell = cell
+			vehicle.previous = Vector2i(-1, -1)
+			vehicle.target = grid.cell_world(cell.x, cell.y) + Vector3(0, 0.22, 0)
+			vehicle.node.position = vehicle.target
+		vehicle.node.visible = active
+		enabled += 1
+
+func step_grid(delta: float) -> void:
+	for vehicle: Dictionary in vehicles:
+		if not vehicle.node.visible or vehicle.get("managed", false):
+			continue
+		var current: Vector3 = vehicle.node.position
+		var target: Vector3 = vehicle.target
+		if current.distance_to(target) < 0.08:
+			var options: Array[Vector2i] = []
+			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var next: Vector2i = vehicle.cell + offset
+				if grid.state_at(next.x, next.y) == "road":
+					options.append(next)
+			if options.size() > 1:
+				options.erase(vehicle.previous)
+			if options.is_empty():
+				continue
+			var next: Vector2i = options[route_rng.randi_range(0, options.size() - 1)]
+			var offset: Vector2i = next - vehicle.cell
+			vehicle.previous = vehicle.cell
+			vehicle.cell = next
+			vehicle.axis = "H" if offset.x != 0 else "V"
+			vehicle.direction = offset.x if offset.x != 0 else offset.y
+			var center: Vector3 = grid.cell_world(next.x, next.y)
+			vehicle.road = center.z if vehicle.axis == "H" else center.x
+			target = center + (Vector3(0, 0.22, vehicle.direction * 0.68) if vehicle.axis == "H" else Vector3(-vehicle.direction * 0.68, 0.22, 0))
+			vehicle.target = target
+		vehicle.coordinate = current.x if vehicle.axis == "H" else current.z
+		var allowed := travel_distance(vehicle, delta)
+		var proposed := current.move_toward(target, allowed)
+		vehicle.node.position = current.move_toward(proposed, grid_safe_distance(vehicle, current, proposed))
+		vehicle.coordinate = vehicle.node.position.x if vehicle.axis == "H" else vehicle.node.position.z
+		vehicle.node.rotation.y = PI / 2 * vehicle.direction if vehicle.axis == "H" else (0.0 if vehicle.direction > 0 else PI)
+
+func grid_half_extents(vehicle: Dictionary) -> Vector2:
+	var half_length := 1.8 if vehicle.node.type_id == "city_bus" else 1.1
+	var half_width := 0.67 if vehicle.node.type_id == "city_bus" else 0.65
+	return Vector2(half_length, half_width) if vehicle.axis == "H" else Vector2(half_width, half_length)
+
+func grid_safe_distance(vehicle: Dictionary, current: Vector3, proposed: Vector3) -> float:
+	var own := grid_half_extents(vehicle)
+	for other: Dictionary in vehicles:
+		if other.id == vehicle.id or not other.node.visible:
+			continue
+		var sum := own + grid_half_extents(other)
+		var other_position: Vector3 = other.node.position
+		if absf(proposed.x - other_position.x) < sum.x and absf(proposed.z - other_position.z) < sum.y:
+			if proposed.distance_squared_to(other_position) > current.distance_squared_to(other_position) and absf(current.x - other_position.x) < sum.x and absf(current.z - other_position.z) < sum.y:
+				continue
+			return 0.0
+	return current.distance_to(proposed)

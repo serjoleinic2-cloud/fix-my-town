@@ -14,6 +14,8 @@ func _ready() -> void:
 		rotation.y = (seed_value % 4) * PI / 2
 	elif visual_type == "ruins":
 		ruins(seed_value)
+	elif visual_type == "shanty":
+		shanty(seed_value)
 	elif visual_type == "cafe":
 		cafe()
 	elif visual_type == "depot":
@@ -129,6 +131,30 @@ func house(seed_value: int) -> void:
 	for i in range(4):
 		Art.hedge(self, Vector3(2.1 + (i % 2) * 1.1, 0.35, 2.6 + (i / 2) * 0.9), Vector3(0.8, 0.7, 0.7))
 
+func shanty(seed_value: int) -> void:
+	var wall_colors := [Color("82715c"), Color("746c5e"), Color("87745e"), Color("6c7164")]
+	var wall: Color = wall_colors[seed_value % wall_colors.size()]
+	Art.box(self, Vector3(0, 0.1, 0), Vector3(4.05, 0.2, 4.05), Color("b9a77e"))
+	Art.box(self, Vector3(0, 0.95, -0.25), Vector3(3.2, 1.65, 2.8), wall)
+	Art.box(self, Vector3(0.15, 1.82, -0.25), Vector3(3.55, 0.16, 3.05), Color("514e48"))
+	for index in range(5):
+		var panel := Art.box(self, Vector3(-1.25 + index * 0.62, 1.98, -0.25), Vector3(0.67, 0.08, 3.18), Color("79766b") if index % 2 == 0 else Color("8a7357"))
+		panel.rotation.z = 0.03 if index % 2 == 0 else -0.04
+	Art.box(self, Vector3(0, 0.68, 1.18), Vector3(0.68, 1.16, 0.12), Color("493b30"))
+	Art.box(self, Vector3(-0.95, 1.15, 1.2), Vector3(0.62, 0.42, 0.12), Color("59686a"))
+	Art.box(self, Vector3(-0.95, 1.15, 1.27), Vector3(0.07, 0.52, 0.08), Color("d0b98a"))
+	# Small, low-detail protesters read clearly at district scale without adding
+	# animated characters or expensive skeletal rigs.
+	for index in range(3):
+		var x := -1.35 + index * 1.12
+		var shirt: Color = [Color("b56c55"), Color("647d86"), Color("827a58")][index]
+		Art.cylinder(self, Vector3(x, 0.58, 2.15), 0.18, 0.68, shirt, 0.72, 7)
+		Art.sphere(self, Vector3(x, 1.05, 2.15), 0.16, Color("c99f78"))
+		Art.cylinder(self, Vector3(x - 0.1, 0.28, 2.15), 0.055, 0.5, Color("3c4140"), 0.8, 6)
+		Art.cylinder(self, Vector3(x + 0.1, 0.28, 2.15), 0.055, 0.5, Color("3c4140"), 0.8, 6)
+		Art.box(self, Vector3(x, 1.34, 2.15), Vector3(0.76, 0.5, 0.08), Color("e4ddc8"))
+		Art.box(self, Vector3(x, 1.34, 2.21), Vector3(0.025, 0.4, 0.025), Color("847d6c"))
+
 func window(pos: Vector3, side: bool) -> void:
 	var trim := Vector3(0.12, 1.42, 0.98) if side else Vector3(1.02, 1.42, 0.12)
 	Art.box(self, pos, trim, Color("faf1d9"))
@@ -170,7 +196,7 @@ func cafe() -> void:
 		awning.rotation.x = 0.16
 		Art.box(self, Vector3(-2.4 + i * 0.53, 2.65, 2.65), Vector3(0.53, 0.35, 0.1), Color("498faa") if i % 2 == 0 else Color("f8f3dd"))
 	Art.box(self, Vector3(0, 3.8, 1.23), Vector3(3.8, 1, 0.16), Color("3f5860"))
-	signs.append(Art.sign_text(self, Vector3(0, 3.8, 1.34), "КАФЕ", 46))
+
 	for x in [-1.7, 1.7]:
 		Art.cylinder(self, Vector3(x, 0.6, 3.1), 0.07, 1.1, Color("726956"))
 		Art.cylinder(self, Vector3(x, 1.2, 3.1), 0.67, 0.13, Color("f2eedc"))
@@ -188,7 +214,7 @@ func depot() -> void:
 		for y in [0.3, 0.7, 1.1, 1.5, 1.9, 2.3]:
 			Art.box(self, Vector3(x, y, 1.66), Vector3(2.4, 0.04, 0.04), Color("758483"))
 	Art.box(self, Vector3(0, 3.25, 1.68), Vector3(6.2, 0.8, 0.12), Color("9c5d49"))
-	signs.append(Art.sign_text(self, Vector3(0, 3.3, 1.79), "СЛУЖБЫ", 42))
+
 	for x in [-2.8, 0, 2.8]:
 		Art.box(self, Vector3(x, 0.03, 3), Vector3(0.06, 0.025, 2.2), Color("e5dfc9"))
 	Art.box(self, Vector3(2.3, 5, -1.5), Vector3(1.3, 3.3, 1.5), Color("b7896e"))
@@ -204,7 +230,7 @@ func logistics_center() -> void:
 		Art.box(self, Vector3(x, 1.15, 2.53), Vector3(1.95, 2.0, 0.12), Color("566b73"))
 		Art.box(self, Vector3(x, 2.22, 2.62), Vector3(2.0, 0.18, 0.1), Color("dea84e"))
 	Art.box(self, Vector3(0, 3.05, 2.72), Vector3(6.6, 0.68, 0.18), Color("3e6d78"))
-	signs.append(Art.sign_text(self, Vector3(0, 3.08, 2.84), "ЛОГИСТИКА", 30))
+
 	Art.box(self, Vector3(-4.35, 0.42, -1.6), Vector3(0.5, 0.7, 5.6), Color("d7c78e"))
 	Art.box(self, Vector3(4.35, 0.42, -1.6), Vector3(0.5, 0.7, 5.6), Color("d7c78e"))
 	if visual_level >= 2:
@@ -227,7 +253,7 @@ func warehouse() -> void:
 		Art.box(self, Vector3(x, 1.05, 3.24), Vector3(1.7, 1.72, 0.1), Color("71858a"))
 		Art.box(self, Vector3(x, 2.0, 3.31), Vector3(1.78, 0.13, 0.08), Color("e3ba62"))
 	Art.box(self, Vector3(0, 2.95, 3.38), Vector3(4.5, 0.55, 0.15), Color("465f68"))
-	signs.append(Art.sign_text(self, Vector3(0, 2.97, 3.48), "СКЛАД", 32))
+
 	for x in [-3.35, 3.35]:
 		Art.box(self, Vector3(x, 0.32, 3.6), Vector3(0.08, 0.04, 0.65), Color("f0ead8"))
 	if visual_level >= 2:
@@ -245,7 +271,7 @@ func fire_station() -> void:
 	for y in [0.35, 0.75, 1.15, 1.55, 1.95, 2.35]:
 		Art.box(self, Vector3(0, y, 2.71), Vector3(3.42, 0.045, 0.04), Color("99a5a0"))
 	Art.box(self, Vector3(0, 3.15, 2.72), Vector3(5.8, 0.75, 0.13), Color("a9503e"))
-	signs.append(Art.sign_text(self, Vector3(0, 3.2, 2.82), "ПОЖАРНЫЕ", 32))
+
 	for x in [-2.55, 2.55]:
 		Art.box(self, Vector3(x, 1.15, 2.78), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
 
@@ -254,7 +280,7 @@ func service_station(wall: Color, accent: Color, sign_text: String) -> void:
 	Art.box(self, Vector3(0, 3.7, -0.5), Vector3(7.5, 0.35, 6.5), Color("70787a"))
 	Art.box(self, Vector3(0, 1.25, 2.65), Vector3(3.6, 2.5, 0.08), Color("56666a"))
 	Art.box(self, Vector3(0, 3.1, 2.72), Vector3(5.9, 0.72, 0.13), accent)
-	signs.append(Art.sign_text(self, Vector3(0, 3.15, 2.82), sign_text, 34))
+
 	for x in [-2.6, 2.6]:
 		Art.box(self, Vector3(x, 1.6, 2.7), Vector3(0.8, 1.0, 0.08), Color("9bc7d0"))
 
@@ -424,16 +450,42 @@ func city_hall() -> void:
 	Art.box(self, Vector3(0, 0.34, -3.8), Vector3(5.7, 0.12, 0.36), Color("71915f"))
 	for x in [-2.0, 2.0]:
 		Art.tree(self, Vector3(x, 0.38, -3.8), 0.42, false, 2)
-	var sign := Label3D.new()
-	sign.text = "МЭРИЯ"
-	sign.font_size = 42
-	sign.pixel_size = 0.012
-	sign.position = Vector3(0, 4.75, 3.28)
-	sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	add_child(sign)
-	signs.append(sign)
 
-func elite_residence() -> void:
+func set_elite_arch_axis(axis: String, lane_offset: int = 0) -> void:
+	if visual_type != "elite_residence" or axis not in ["horizontal", "vertical"]:
+		return
+	for child in get_children():
+		remove_child(child)
+		child.queue_free()
+	elite_residence(axis, lane_offset)
+	Art.batch(self)
+
+func set_neglect_stage(stage: int) -> void:
+	if visual_type != "house":
+		return
+	var old_details := get_node_or_null("NeglectDetails")
+	if old_details != null:
+		remove_child(old_details)
+		old_details.queue_free()
+	if stage <= 0:
+		return
+	var details := Node3D.new()
+	details.name = "NeglectDetails"
+	add_child(details)
+	for index in range(mini(stage, 3)):
+		var x: float = [-1.5, 1.55, -1.5][index]
+		var y: float = [2.0, 2.0, 3.5][index]
+		var z := 1.87 if index < 2 else 1.8
+		Art.box(details, Vector3(x, y, z), Vector3(0.9, 0.12, 0.1), Color("736756"))
+		if index < 2:
+			Art.box(details, Vector3(x, y - 0.34, z), Vector3(0.12, 0.68, 0.1), Color("736756"))
+	Art.batch(details)
+
+func elite_residence(arch_axis: String = "", lane_offset: int = 0) -> void:
+	scale = Vector3(0.48, 1.0, 0.48) if arch_axis == "" else Vector3.ONE
+	if arch_axis != "":
+		elite_residence_arch(arch_axis, lane_offset)
+		return
 	# A 4x4-cell renewal parcel: residence, private parking, planted edge and pool.
 	Art.box(self, Vector3(0, 0.12, 0), Vector3(18.6, 0.18, 18.6), Color("8e9f78"))
 	Art.box(self, Vector3(-5.0, 0.19, -4.8), Vector3(7.6, 0.12, 8.2), Color("666f72"))
@@ -448,6 +500,41 @@ func elite_residence() -> void:
 		for z in [-7.8, 7.8]:
 			Art.tree(self, Vector3(x, 0.1, z), 0.48, false, absi(roundi(x * 10 + z)))
 	Art.box(self, Vector3(0, 4.7, -0.4), Vector3(2.6, 0.18, 3.4), Color("c8b583"))
+
+func elite_residence_arch(axis: String, lane_offset: int) -> void:
+	# Two private halves frame a public road; the elevated connector forms a visible arch.
+	var lane_shift := float(lane_offset) * 2.4
+	if axis == "horizontal":
+		for side in [-1.0, 1.0]:
+			var z: float = lane_shift + side * 7.0
+			Art.box(self, Vector3(0, 0.12, z), Vector3(18.5, 0.18, 4.2), Color("8e9f78"))
+			Art.box(self, Vector3(0, 2.35, z), Vector3(12.8, 4.3, 4.1), Color("f2eee2"))
+			Art.box(self, Vector3(0, 4.6, z), Vector3(13.2, 0.25, 4.35), Color("39586a"))
+			for window_x in [-4.4, -1.5, 1.5, 4.4]:
+				Art.box(self, Vector3(window_x, 2.35, z + side * 2.08), Vector3(1.0, 1.25, 0.08), Color("7fabb4"))
+		# Four edge piers leave the 2.8 m roadway clear; the bridge deck crosses overhead.
+		for x in [-8.45, 8.45]:
+			for side in [-1.0, 1.0]:
+				Art.box(self, Vector3(x, 2.0, lane_shift + side * 2.25), Vector3(0.62, 4.0, 0.62), Color("d7d7cd"))
+		Art.box(self, Vector3(0, 4.15, lane_shift), Vector3(18.3, 0.9, 4.45), Color("d8d5c8"))
+		Art.box(self, Vector3(0, 4.64, lane_shift), Vector3(18.4, 0.18, 4.55), Color("39586a"))
+		Art.box(self, Vector3(-5.7, 0.24, lane_shift - 7.1), Vector3(4.8, 0.22, 4.2), Color("666f72"))
+		Art.box(self, Vector3(5.6, 0.22, lane_shift + 7.1), Vector3(4.5, 0.2, 3.5), Color("72b5c4"))
+	else:
+		for side in [-1.0, 1.0]:
+			var x: float = lane_shift + side * 7.0
+			Art.box(self, Vector3(x, 0.12, 0), Vector3(4.2, 0.18, 18.5), Color("8e9f78"))
+			Art.box(self, Vector3(x, 2.35, 0), Vector3(4.1, 4.3, 12.8), Color("f2eee2"))
+			Art.box(self, Vector3(x, 4.6, 0), Vector3(4.35, 0.25, 13.2), Color("39586a"))
+			for window_z in [-4.4, -1.5, 1.5, 4.4]:
+				Art.box(self, Vector3(x + side * 2.08, 2.35, window_z), Vector3(0.08, 1.25, 1.0), Color("7fabb4"))
+		for z in [-8.45, 8.45]:
+			for side in [-1.0, 1.0]:
+				Art.box(self, Vector3(lane_shift + side * 2.25, 2.0, z), Vector3(0.62, 4.0, 0.62), Color("d7d7cd"))
+		Art.box(self, Vector3(lane_shift, 4.15, 0), Vector3(4.45, 0.9, 18.3), Color("d8d5c8"))
+		Art.box(self, Vector3(lane_shift, 4.64, 0), Vector3(4.55, 0.18, 18.4), Color("39586a"))
+		Art.box(self, Vector3(lane_shift - 7.1, 0.24, -5.7), Vector3(4.2, 0.22, 4.8), Color("666f72"))
+		Art.box(self, Vector3(lane_shift + 7.1, 0.22, 5.6), Vector3(3.5, 0.2, 4.5), Color("72b5c4"))
 
 func business_tower() -> void:
 	# Tall glass office tower with a retail podium and landscaped forecourt.
@@ -552,4 +639,3 @@ func bus_stop() -> void:
 		Art.box(platform, Vector3(0, 2.5, 0), Vector3(0.9, 0.16, 4), Color("6c9ca8"))
 		Art.box(platform, Vector3(0, 0.7, 0), Vector3(0.45, 0.12, 2.4), Color("ad9978"))
 		Art.box(platform, Vector3(0, 2, 2.1), Vector3(0.65, 0.8, 0.12), Color("328cb8"))
-		Art.sign_text(platform, Vector3(0, 2, 2.18), "BUS", 30)

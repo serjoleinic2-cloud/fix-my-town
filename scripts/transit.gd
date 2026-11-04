@@ -162,7 +162,7 @@ func set_leg(next_points: Array[Vector3], to_index: int) -> bool:
 	return true
 
 func tick(delta: float, traffic: Node3D, grid: RefCounted = null) -> void:
-	if not active or stops.size() != 2 or traffic == null:
+	if not active or stops.size() != 2 or traffic == null or traffic.vehicles.size() < 3:
 		return
 	var bus: Dictionary = traffic.vehicles[2]
 	bus.managed = true

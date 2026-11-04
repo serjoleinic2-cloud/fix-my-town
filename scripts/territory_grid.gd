@@ -228,15 +228,24 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 		if Vector2i(col, row) != CITY_HALL_SITE:
 			return false
 	var footprint: Vector2i = Catalog.footprint_cells(type_id)
-	if lot_alignment_reason(col, row, footprint) != "":
+	if lot_alignment_reason(col, row, footprint, type_id) != "":
 		return false
 	if not in_bounds(col, row) or not in_bounds(col + footprint.x - 1, row + footprint.y - 1):
 		return false
 	var has_access := false
+	var arch_axis := ""
+	if type_id == "elite_residence" and footprint == Vector2i(4, 4):
+		if elite_residence_placement_reason(col, row, footprint) != "":
+			return false
+		arch_axis = elite_residence_arch_axis(col, row, footprint)
 	for dy in range(footprint.y):
 		for dx in range(footprint.x):
-			if cells[row + dy][col + dx] != "free":
+			var cell_state: String = cells[row + dy][col + dx]
+			var road_slot: bool = (arch_axis == "horizontal" and dy in [1, 2] and cell_state == "road") or (arch_axis == "vertical" and dx in [1, 2] and cell_state == "road")
+			if cell_state != "free" and not road_slot and not (arch_axis != "" and cell_state == "road"):
 				return false
+			if road_slot:
+				has_access = true
 			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 				var next: Vector2i = Vector2i(col + dx, row + dy) + offset
 				if in_bounds(next.x, next.y) and cells[next.y][next.x] == "road" and connected_road(next.x, next.y):
@@ -261,9 +270,14 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 				cells[contour_cell.y][contour_cell.x] = "road"
 	for dy in range(footprint.y):
 		for dx in range(footprint.x):
-			cells[row + dy][col + dx] = "occupied"
+			var keep_as_arch_road: bool = (arch_axis == "horizontal" and dy in [1, 2] and cells[row + dy][col + dx] == "road") or (arch_axis == "vertical" and dx in [1, 2] and cells[row + dy][col + dx] == "road")
+			if not keep_as_arch_road:
+				cells[row + dy][col + dx] = "occupied"
 	var prefix := "pine_district_%s" % type_id
 	var entry := {"type_id": type_id, "instance_id": "%s_%d_%d" % [prefix, col, row], "col": col, "row": row, "width": footprint.x, "height": footprint.y, "level": 1, "inspected": false}
+	if arch_axis != "":
+		entry.arch_axis = arch_axis
+		entry.arch_offset = elite_residence_arch_offset(col, row, footprint, arch_axis)
 	if type_id in ["depot", "fire_station", "police_station", "hospital"]:
 		entry.service_building = true
 	buildings.append(entry)
@@ -306,6 +320,9 @@ func building_center(entry: Dictionary) -> Vector3:
 	return cell_world(entry.col, entry.row) + Vector3((entry.width - 1) * CELL_SIZE / 2, 0, (entry.height - 1) * CELL_SIZE / 2)
 
 func building_at(col: int, row: int) -> Dictionary:
+	# A road passing below an elite residence arch remains a road, not a building tap target.
+	if state_at(col, row) == "road":
+		return {}
 	for entry: Dictionary in buildings:
 		if col >= entry.col and col < entry.col + entry.width and row >= entry.row and row < entry.row + entry.height:
 			return entry
@@ -317,6 +334,17 @@ func building_road_frontage(entry: Dictionary) -> Array[Vector2i]:
 		return result
 	for dy in range(int(entry.height)):
 		for dx in range(int(entry.width)):
+			var inside_road := state_at(int(entry.col) + dx, int(entry.row) + dy) == "road"
+			if inside_road:
+				if str(entry.get("arch_axis", "")) == "horizontal" and dy in [1, 2]:
+					var horizontal_cell := Vector2i(int(entry.col) + dx, int(entry.row) + dy)
+					if horizontal_cell not in result:
+						result.append(horizontal_cell)
+				elif str(entry.get("arch_axis", "")) == "vertical" and dx in [1, 2]:
+					var vertical_cell := Vector2i(int(entry.col) + dx, int(entry.row) + dy)
+					if vertical_cell not in result:
+						result.append(vertical_cell)
+				continue
 			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 				var cell := Vector2i(int(entry.col) + dx, int(entry.row) + dy) + offset
 				if state_at(cell.x, cell.y) == "road" and connected_road(cell.x, cell.y) and cell not in result:
@@ -476,12 +504,14 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 		for dx in range(footprint.x):
 			if not is_revealed(col + dx, row + dy):
 				return "outside"
-	if tool not in ["clear", "road", "landscaping"] and lot_alignment_reason(col, row, footprint) != "":
+	if tool not in ["clear", "road", "landscaping"] and lot_alignment_reason(col, row, footprint, tool) != "":
 		return "misaligned"
 	if tool == "clear":
 		if state_at(col, row) != "forest":
 			return "not_forest"
 		return "" if not strict_building_frontier or near_connected_road_frontier(col, row, 3) else "no_road"
+	if tool == "elite_residence" and footprint == Vector2i(4, 4):
+		return elite_residence_placement_reason(col, row, footprint)
 	for dy in range(footprint.y):
 		for dx in range(footprint.x):
 			if state_at(col + dx, row + dy) != "free":
@@ -495,18 +525,72 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 		return "" if footprint_touches_connected_road(col, row, footprint) else "no_road"
 	return "" if not auto_access_path(entry).is_empty() else "no_road"
 
-func lot_alignment_reason(col: int, row: int, footprint: Vector2i) -> String:
+func lot_alignment_reason(col: int, row: int, footprint: Vector2i, type_id: String = "") -> String:
 	# New-city parcels use a building-width plus one street-cell rhythm from
 	# City Hall. A 2x2 home therefore has one stable 3x3 parcel position; tapping
 	# any cell within that lot can resolve to the same anchor instead of shifting
 	# the model by a tile. Legacy showcase placement remains untouched.
 	if not strict_building_frontier or footprint == Vector2i.ONE:
 		return ""
-	var pitch_x: int = footprint.x + 1
-	var pitch_y: int = footprint.y + 1
+	# Elite redevelopment uses the same 3-cell anchor rhythm as two adjacent starter lots;
+	# its special placement rule can preserve the lane between them under an arch.
+	var pitch_x: int = 3 if type_id == "elite_residence" else footprint.x + 1
+	var pitch_y: int = 3 if type_id == "elite_residence" else footprint.y + 1
 	if posmod(col - CITY_HALL_SITE.x, pitch_x) != 0 or posmod(row - CITY_HALL_SITE.y, pitch_y) != 0:
 		return "misaligned"
 	return ""
+
+func elite_residence_placement_reason(col: int, row: int, footprint: Vector2i) -> String:
+	var road_count := 0
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			var state := state_at(col + dx, row + dy)
+			if state == "road":
+				road_count += 1
+			elif state != "free":
+				return "clear_first"
+	if road_count == 0:
+		return "no_road"
+	var axis := elite_residence_arch_axis(col, row, footprint)
+	if axis == "":
+		return "clear_first"
+	for offset in range(footprint.x if axis == "horizontal" else footprint.y):
+		var lane := 1 if elite_residence_arch_offset(col, row, footprint, axis) == -1 else 2
+		var road_cell := Vector2i(col + offset, row + lane) if axis == "horizontal" else Vector2i(col + lane, row + offset)
+		if not connected_road(road_cell.x, road_cell.y):
+			return "no_road"
+	return ""
+
+func elite_residence_arch_axis(col: int, row: int, footprint: Vector2i) -> String:
+	return elite_residence_arch_axis_from_cells(cells, col, row, footprint)
+
+func elite_residence_arch_axis_from_cells(source_cells: Array, col: int, row: int, footprint: Vector2i) -> String:
+	if footprint.x != 4 or footprint.y != 4:
+		return ""
+	for local_row in [1, 2]:
+		var complete_row := true
+		for dx in range(footprint.x):
+			if str(source_cells[row + local_row][col + dx]) != "road":
+				complete_row = false
+				break
+		if complete_row:
+			return "horizontal"
+	for local_col in [1, 2]:
+		var complete_column := true
+		for dy in range(footprint.y):
+			if str(source_cells[row + dy][col + local_col]) != "road":
+				complete_column = false
+				break
+		if complete_column:
+			return "vertical"
+	return ""
+
+func elite_residence_arch_offset(col: int, row: int, footprint: Vector2i, axis: String) -> int:
+	if axis == "horizontal":
+		return -1 if state_at(col, row + 1) == "road" else 1
+	if axis == "vertical":
+		return -1 if state_at(col + 1, row) == "road" else 1
+	return 0
 
 func near_connected_road_frontier(col: int, row: int, radius: int) -> bool:
 	for dy in range(-radius, radius + 1):
@@ -591,6 +675,11 @@ func restore(value: Variant) -> bool:
 		if not building is Dictionary or building.get("type_id") not in BUILDINGS or str(building.get("instance_id", "")) == "" or int(building.get("col", -1)) < 0 or int(building.get("row", -1)) < 0:
 			return false
 		var expected_footprint: Vector2i = Catalog.footprint_cells(str(building.type_id))
+		# Preserve already-built residences from the old 4x4 format. New ones use 2x2.
+		if str(building.type_id) == "elite_residence" and int(building.get("width", 0)) == 4 and int(building.get("height", 0)) == 4:
+			expected_footprint = Vector2i(4, 4)
+		if bool(building.get("shanty", false)) and str(building.type_id) == "house":
+			expected_footprint = Vector2i.ONE
 		if int(building.get("width", 0)) != expected_footprint.x or int(building.get("height", 0)) != expected_footprint.y or int(building.col) + expected_footprint.x > WIDTH or int(building.row) + expected_footprint.y > HEIGHT:
 			return false
 		var identifier: String = building.instance_id
@@ -599,12 +688,21 @@ func restore(value: Variant) -> bool:
 			return false
 		if typeof(building.get("inspected", false)) != TYPE_BOOL:
 			return false
+		if typeof(building.get("shanty", false)) != TYPE_BOOL or (bool(building.get("shanty", false)) and str(building.type_id) != "house"):
+			return false
 		if identifiers.has(identifier):
 			return false
 		identifiers[identifier] = true
+		var saved_arch_axis := str(building.get("arch_axis", ""))
+		if saved_arch_axis not in ["", "horizontal", "vertical"]:
+			return false
+		if saved_arch_axis != "" and (str(building.type_id) != "elite_residence" or elite_residence_arch_axis_from_cells(new_cells, int(building.col), int(building.row), expected_footprint) != saved_arch_axis):
+			return false
 		for dy in range(expected_footprint.y):
 			for dx in range(expected_footprint.x):
-				if new_cells[building.row + dy][building.col + dx] != "occupied":
+				var saved_state: String = str(new_cells[building.row + dy][building.col + dx])
+				var saved_road_slot := (saved_arch_axis == "horizontal" and dy in [1, 2] and saved_state == "road") or (saved_arch_axis == "vertical" and dx in [1, 2] and saved_state == "road")
+				if saved_state != "occupied" and not saved_road_slot:
 					return false
 	cells = new_cells.duplicate(true)
 	buildings = new_buildings.duplicate(true)

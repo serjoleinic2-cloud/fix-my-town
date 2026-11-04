@@ -39,6 +39,8 @@ var vehicle: Vector3 = Vector3(3, 0, -6)
 var repair_left: float = 4.0
 var income_clock: float = 0.0
 var service_neglect_clock: float = 0.0
+var housing_neglect_clock: float = 0.0
+var housing_neglect: Dictionary = {}
 var completed: bool = false
 var target_instance_id: String = ""
 var depot_instance_id: String = "pine_district_legacy_2"
@@ -55,6 +57,8 @@ var fire_jobs: Dictionary = {}
 var jam_cleared: Dictionary = {}
 var police_job: Dictionary = {}
 var construction_job: Dictionary = {}
+var parallel_construction_jobs: Array[Dictionary] = []
+var construction_batch := false
 var incident_seed: int = 48291
 var incident_clock: float = 0.0
 var incident_rng := RandomNumberGenerator.new()
@@ -119,6 +123,8 @@ func start_empty_city() -> void:
 	incident_rng.seed = incident_seed
 	income_clock = 0.0
 	service_neglect_clock = 0.0
+	housing_neglect_clock = 0.0
+	housing_neglect.clear()
 	job = ""
 	job_phase = "travel"
 	target_instance_id = ""
@@ -135,6 +141,7 @@ func start_empty_city() -> void:
 	police_job.clear()
 	jam_cleared.clear()
 	construction_job.clear()
+	parallel_construction_jobs.clear()
 	fire_jobs.clear()
 	incidents.clear()
 	incident_clock = 0.0
@@ -296,7 +303,7 @@ func logistics_vehicle_routes(source_id: String) -> Array:
 func campaign_level_count(type_id: String, minimum_level: int) -> int:
 	var total := 0
 	for entry: Dictionary in all_buildings():
-		if entry.type_id == type_id and int(entry.get("level", 1)) >= minimum_level:
+		if entry.type_id == type_id and not bool(entry.get("shanty", false)) and int(entry.get("level", 1)) >= minimum_level:
 			total += 1
 	return total
 
@@ -386,7 +393,7 @@ func continue_campaign() -> void:
 func district_house_count() -> int:
 	var total := 0
 	for entry: Dictionary in all_buildings():
-		if entry.type_id == "house":
+		if entry.type_id == "house" and not bool(entry.get("shanty", false)):
 			total += 1
 	return total
 
@@ -467,6 +474,8 @@ func record_residents(entry: Dictionary) -> int:
 	var damage := int(fire_damage.get(entry.instance_id, 0))
 	if damage >= 100:
 		return 0
+	if bool(entry.get("shanty", false)):
+		return 3
 	var occupied := capacity if record_water(entry) else capacity / 2
 	return int(occupied * (1.0 - float(damage) / 140.0))
 
@@ -531,8 +540,11 @@ func stop_orientation(stop: Variant) -> String:
 	var cell := transit.stop_cell(stop, territory)
 	return territory.road_orientation(cell.x, cell.y) if cell.x >= 0 else "vertical"
 
+func transit_available() -> bool:
+	return campaign_stage >= 2 and has_city_hall() if empty_city_mode else completed
+
 func place_stop(location: Variant) -> bool:
-	if not completed or transit.stops.size() >= 2 or budget < Transit.STOP_COST:
+	if not transit_available() or transit.stops.size() >= 2 or budget < Transit.STOP_COST:
 		return false
 	var stop: Variant = int(location) if location is int else {"col": location.x, "row": location.y} if location is Vector2i else {}
 	if stop is Dictionary:
@@ -546,7 +558,7 @@ func place_stop(location: Variant) -> bool:
 	return true
 
 func move_stop(index: int, location: Variant) -> bool:
-	if not completed or index < 0 or index >= transit.stops.size():
+	if not transit_available() or index < 0 or index >= transit.stops.size():
 		return false
 	var stop: Variant = int(location) if location is int else {"col": location.x, "row": location.y} if location is Vector2i else {}
 	if stop is Dictionary:
@@ -570,7 +582,7 @@ func move_stop(index: int, location: Variant) -> bool:
 	return true
 
 func start_transit() -> bool:
-	if not completed or transit.active or transit.stops.size() != 2 or budget < Transit.BUS_COST:
+	if not transit_available() or transit.active or transit.stops.size() != 2 or budget < Transit.BUS_COST:
 		return false
 	budget -= Transit.BUS_COST
 	transit.active = true
@@ -608,6 +620,11 @@ func record_quality(entry: Dictionary) -> Dictionary:
 			environment += Catalog.level_data(neighbor.type_id, neighbor.level).environment
 	var damage := house_damage(entry.instance_id) if is_residential_type(entry.type_id) else 0
 	var score := (30 if water else 0) + (20 if services else 10) + (20 if transport else 0) + mini(environment, 30) - int(damage * 0.35)
+	if bool(entry.get("shanty", false)):
+		score -= 28
+	for neighbor: Dictionary in territory.buildings:
+		if bool(neighbor.get("shanty", false)) and neighbor.instance_id != entry.get("instance_id", "") and territory.building_center(neighbor).distance_to(point) <= TerritoryGrid.CELL_SIZE * 3.0:
+			score -= 10
 	if not water:
 		score = mini(score, 19)
 	return {"score": clampi(score, 0, 100), "water": water, "services": services, "transport": transport, "environment": mini(environment, 30)}
@@ -694,6 +711,51 @@ func apply_service_neglect_damage(amount: int, identifiers: Array) -> void:
 
 const CONSTRUCTION_DURATION := 6.0
 
+func active_construction_jobs() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if not construction_job.is_empty():
+		result.append(construction_job)
+	for task in parallel_construction_jobs:
+		if not task.is_empty():
+			result.append(task)
+	return result
+
+func construction_cells(task: Dictionary, grid: RefCounted = null) -> Array[Vector2i]:
+	if grid == null:
+		grid = territory
+	var result: Array[Vector2i] = []
+	var kind := str(task.get("kind", ""))
+	if kind == "departing":
+		return result
+	if kind.ends_with("legacy"):
+		var world_point := building_world(int(task.get("index", 0)))
+		var point := Vector2i(floori((world_point.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE), floori((world_point.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE))
+		for dy in range(2):
+			for dx in range(2):
+				result.append(point + Vector2i(dx, dy))
+		return result
+	var col := int(task.get("col", -1))
+	var row := int(task.get("row", -1))
+	var type_id := str(task.get("type_id", ""))
+	var size := Vector2i.ONE if kind in ["clear", "road", "demolish_road"] else Catalog.footprint_cells(type_id)
+	for dy in range(size.y):
+		for dx in range(size.x):
+			result.append(Vector2i(col + dx, row + dy))
+	if kind == "build_grid" and not Catalog.is_landscaping(type_id):
+		result.append_array(grid.building_contour({"col": col, "row": row, "width": size.x, "height": size.y}))
+	return result
+
+func construction_conflict(task: Dictionary) -> bool:
+	var cells := construction_cells(task)
+	for existing in active_construction_jobs():
+		for cell in construction_cells(existing):
+			if cell in cells:
+				return true
+	return false
+
+func grid_work_busy(col: int, row: int, type_id: String, kind: String = "build_grid") -> bool:
+	return construction_conflict({"col": col, "row": row, "type_id": type_id, "kind": kind})
+
 func start_legacy_construction(index: int, type_id: String) -> bool:
 	if not construction_job.is_empty() or index < 0 or index >= 24 or buildings[index] != "empty" or type_id not in ["house", "cafe", "park"] or budget < Catalog.cost(type_id) or city_level() < Catalog.unlock_level(type_id):
 		return false
@@ -709,7 +771,7 @@ func start_grid_construction(col: int, row: int, type_id: String) -> bool:
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
 	if territory.placement_reason(col, row, placement_kind) != "" or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
 		return false
-	if type_id in ["elite_residence", "business_tower"] and renewal_credits < 2:
+	if type_id == "business_tower" and renewal_credits < 2:
 		return false
 	return _start_construction({"kind": "build_grid", "type_id": type_id, "col": col, "row": row, "cost": Catalog.cost(type_id)})
 
@@ -728,7 +790,7 @@ func start_grid_upgrade(identifier: String) -> bool:
 	if not construction_job.is_empty():
 		return false
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or not Catalog.LEVELS.has(entry.type_id) or is_ruined(identifier) or not logistics_upgrade_allowed(entry):
+	if entry.is_empty() or entry.has("legacy_plot") or not Catalog.LEVELS.has(entry.type_id) or is_ruined(identifier) or bool(entry.get("shanty", false)) or not logistics_upgrade_allowed(entry):
 		return false
 	var level_value := int(entry.get("level", 1))
 	if empty_city_mode and campaign_stage <= level_value:
@@ -773,7 +835,10 @@ func start_road_demolition(col: int, row: int) -> bool:
 	return _start_construction({"kind": "demolish_road", "type_id": "", "col": col, "row": row, "cost": 0})
 
 func _start_construction(fields: Dictionary) -> bool:
+	if construction_conflict(fields) or budget < int(fields.get("cost", 0)):
+		return false
 	var data := fields.duplicate(true)
+	data.work_id = "%s_%d" % [str(fields.kind), Time.get_ticks_usec()]
 	budget -= int(data.get("cost", 0))
 	data.total = CONSTRUCTION_DURATION
 	data.remaining = CONSTRUCTION_DURATION
@@ -823,7 +888,10 @@ func _start_construction(fields: Dictionary) -> bool:
 	data.excavator_target_position = work_route[-1].duplicate()
 	data.excavator_position = data.excavator_start_position.duplicate()
 	data.arrival_duration = 0.8
-	construction_job = data
+	if construction_job.is_empty():
+		construction_job = data
+	else:
+		parallel_construction_jobs.append(data)
 	save_game()
 	return true
 
@@ -958,6 +1026,8 @@ func _finish_construction() -> bool:
 	return true
 
 func record_income(entry: Dictionary) -> int:
+	if bool(entry.get("shanty", false)):
+		return 0
 	var amount: int = int(Catalog.level_data(entry.type_id, entry.level).get("income", 0)) if Catalog.LEVELS.has(entry.type_id) else int(Catalog.TYPES.get(entry.type_id, {}).get("income", 0))
 	if entry.type_id == "house":
 		if not record_water(entry):
@@ -990,7 +1060,7 @@ func build_grid_building(col: int, row: int, type_id: String, reserved: bool = f
 		return false
 	if not initial_building_allowed(col, row, type_id) or not logistics_site_allowed(type_id, col, row) or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
 		return false
-	if type_id in ["elite_residence", "business_tower"] and renewal_credits < 2:
+	if type_id == "business_tower" and renewal_credits < 2:
 		return false
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
 	var price: int = Catalog.cost(type_id)
@@ -998,7 +1068,7 @@ func build_grid_building(col: int, row: int, type_id: String, reserved: bool = f
 		return false
 	if not reserved:
 		budget -= price
-	if type_id in ["elite_residence", "business_tower"]:
+	if type_id == "business_tower":
 		renewal_credits -= 2
 	save_game()
 	return true
@@ -1027,8 +1097,10 @@ func demolish_grid_building(identifier: String) -> bool:
 	budget += Catalog.cost(entry.type_id) / 4
 	for dy in range(entry.height):
 		for dx in range(entry.width):
-			territory.cells[entry.row + dy][entry.col + dx] = "free"
+			if territory.cells[entry.row + dy][entry.col + dx] == "occupied":
+				territory.cells[entry.row + dy][entry.col + dx] = "free"
 	territory.buildings.erase(entry)
+	housing_neglect.erase(identifier)
 	save_game()
 	return true
 
@@ -1060,7 +1132,7 @@ func demolish_road(col: int, row: int) -> bool:
 
 func upgrade_grid_house(identifier: String, reserved: bool = false) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or is_ruined(identifier) or not Catalog.LEVELS.has(entry.type_id) or not logistics_upgrade_allowed(entry):
+	if entry.is_empty() or entry.has("legacy_plot") or is_ruined(identifier) or not Catalog.LEVELS.has(entry.type_id) or bool(entry.get("shanty", false)) or not logistics_upgrade_allowed(entry):
 		return false
 	var level_value := int(entry.get("level", 1))
 	if empty_city_mode and campaign_stage <= level_value:
@@ -1090,8 +1162,10 @@ func demolish_grid_house(identifier: String) -> bool:
 	budget += grid_demolition_refund(identifier)
 	for dy in range(entry.height):
 		for dx in range(entry.width):
-			territory.cells[entry.row + dy][entry.col + dx] = "free"
+			if territory.cells[entry.row + dy][entry.col + dx] == "occupied":
+				territory.cells[entry.row + dy][entry.col + dx] = "free"
 	territory.buildings.erase(entry)
+	housing_neglect.erase(identifier)
 	save_game()
 	return true
 
@@ -1545,6 +1619,13 @@ func dispatch_police(incident_id: String) -> bool:
 
 func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
+	if movement_allowed and empty_city_mode:
+		housing_neglect_clock += maxf(0.0, delta)
+		if housing_neglect_clock >= 60.0:
+			var neglect_cycles := floori(housing_neglect_clock / 60.0)
+			housing_neglect_clock = fmod(housing_neglect_clock, 60.0)
+			if advance_housing_neglect(neglect_cycles):
+				changed = true
 	if empty_city_mode and not campaign_complete_pending:
 		campaign_elapsed_seconds += maxf(0.0, delta)
 	if movement_allowed:
@@ -1763,6 +1844,55 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		save_game()
 	return changed
 
+func advance_housing_neglect(minutes: int = 1) -> bool:
+	var changed := false
+	var active_ids: Dictionary = {}
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id != "house":
+			continue
+		var identifier := str(entry.instance_id)
+		active_ids[identifier] = true
+		if bool(entry.get("shanty", false)):
+			continue
+		var quality_entry: Dictionary = entry.duplicate(true)
+		quality_entry.position = territory.building_center(entry)
+		var quality: int = record_quality(quality_entry).score
+		var current := float(housing_neglect.get(identifier, 0.0))
+		if quality < 55:
+			current = minf(100.0, current + 4.0 * float(minutes))
+		elif quality >= 70:
+			current = maxf(0.0, current - 3.0 * float(minutes))
+		else:
+			current = maxf(0.0, current - float(minutes))
+		var previous := float(housing_neglect.get(identifier, 0.0))
+		if not is_equal_approx(previous, current):
+			changed = true
+		if current <= 0.0:
+			housing_neglect.erase(identifier)
+		else:
+			housing_neglect[identifier] = current
+		if current >= 100.0:
+			# Keep the original lot anchor and road network. Only the house collapses
+			# to one cell; its other three cells become available for redevelopment.
+			for dy in range(int(entry.height)):
+				for dx in range(int(entry.width)):
+					if dx != 0 or dy != 0:
+						territory.cells[int(entry.row) + dy][int(entry.col) + dx] = "free"
+			entry.width = 1
+			entry.height = 1
+			entry.shanty = true
+			housing_neglect.erase(identifier)
+			changed = true
+	for identifier in housing_neglect.keys():
+		if not active_ids.has(str(identifier)):
+			housing_neglect.erase(identifier)
+	if changed:
+		save_game()
+	return changed
+
+func housing_neglect_percent(identifier: String) -> int:
+	return clampi(roundi(float(housing_neglect.get(identifier, 0.0))), 0, 100)
+
 
 func incident_is_valid(incident: Dictionary) -> bool:
 	var kind := str(incident.get("type", ""))
@@ -1809,6 +1939,8 @@ func check_complete() -> void:
 	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
 
 func save_game() -> void:
+	if construction_batch:
+		return
 	# Fixed-plot compatibility sync is forbidden for clean-grid cities: the
 	# 24 empty legacy slots would otherwise recreate their old free pads.
 	if not empty_city_mode:
@@ -1845,7 +1977,7 @@ func save_game() -> void:
 		"city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
-		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
+		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_clock": incident_clock, "incidents": incidents,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
@@ -2019,6 +2151,15 @@ func load_game() -> bool:
 		for identifier in loaded_damage:
 			if float(loaded_damage[identifier]) >= 100.0:
 				loaded_ruins[str(identifier)] = true
+	var loaded_housing_neglect: Dictionary = {}
+	var raw_housing_neglect: Variant = data.get("housing_neglect", {})
+	if not raw_housing_neglect is Dictionary or raw_housing_neglect.size() > TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT:
+		return false
+	for identifier in raw_housing_neglect:
+		var value: Variant = raw_housing_neglect[identifier]
+		if not is_house_id_in(str(identifier), stored, loaded_territory) or not (value is int or value is float) or not is_finite(float(value)) or float(value) <= 0.0 or float(value) >= 100.0:
+			return false
+		loaded_housing_neglect[str(identifier)] = float(value)
 	var loaded_fire_jobs: Dictionary = {}
 	var raw_fire_jobs: Variant = data.get("fire_jobs", {})
 	if not raw_fire_jobs is Dictionary or raw_fire_jobs.size() > 2:
@@ -2193,6 +2334,8 @@ func load_game() -> bool:
 	fires = loaded_fires
 	fire_damage = loaded_damage
 	fire_ruins = loaded_ruins
+	housing_neglect = loaded_housing_neglect
+	housing_neglect_clock = clampf(float(data.get("housing_neglect_clock", 0.0)), 0.0, 60.0)
 	fire_jobs = loaded_fire_jobs
 	jam_cleared = loaded_jam_cleared
 	police_job = loaded_police_job

@@ -2,8 +2,9 @@ extends RefCounted
 
 # Постоянные игровые типы и единственная точка выбора визуальных сцен.
 const TYPES = {
+	"construction_site": {"scene": "res://scenes/visuals/construction_site.tscn", "footprint": Vector2(9.6, 9.6)},
 	"city_hall": {"icon": "res://assets/icons/city_hall.svg", "scene": "res://scenes/visuals/city_hall.tscn", "cost": 180, "footprint": Vector2(9, 9)},
-	"elite_residence": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/elite_residence.tscn", "cost": 1200, "income": 36, "residents": 30, "footprint": Vector2(19.2, 19.2)},
+	"elite_residence": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/elite_residence.tscn", "cost": 1200, "income": 36, "residents": 30, "footprint": Vector2(9.6, 9.6)},
 	"business_tower": {"icon": "res://assets/icons/hospital.svg", "scene": "res://scenes/visuals/business_tower.tscn", "cost": 2400, "income": 90, "residents": 80, "footprint": Vector2(19.2, 19.2)},
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
 	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
@@ -81,7 +82,7 @@ static func is_landscaping(type_id: String) -> bool:
 static func footprint_cells(type_id: String) -> Vector2i:
 	if type_id == "logistics_center":
 		return Vector2i(3, 3)
-	if type_id in ["elite_residence", "business_tower"]:
+	if type_id == "business_tower":
 		return Vector2i(4, 4)
 	return Vector2i.ONE if is_landscaping(type_id) else Vector2i(2, 2)
 
@@ -95,6 +96,8 @@ static func level_data(type_id: String, level: int = 1) -> Dictionary:
 	return LEVELS[type_id][clampi(level, 1, 3) - 1] if LEVELS.has(type_id) else TYPES[type_id]
 
 static func scene_path(type_id: String, alternate: bool = false, level: int = 1) -> String:
+	if type_id == "shanty":
+		return "res://scenes/visuals/shanty.tscn"
 	if alternate and level == 1 and ALTERNATIVES.has(type_id):
 		return ALTERNATIVES[type_id]
 	return level_data(type_id, level).scene

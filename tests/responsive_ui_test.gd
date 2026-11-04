@@ -54,11 +54,29 @@ func run() -> void:
 		check(map_tools.size.y <= 140 and map_tools.get_global_rect().end.y < scene.navbar.position.y, "Compact map actions leave the map visible")
 		var settings_rect: Rect2 = scene.audio_button.get_global_rect()
 		var condition_rect: Rect2 = scene.state_button.get_global_rect()
-		var bus_rect: Rect2 = scene.transit_button.get_global_rect()
-		check(map_tools.position.y >= scene.hud.get_global_rect().end.y and settings_rect.position.y == condition_rect.position.y and bus_rect.position.y > condition_rect.position.y,
-			"BUS is placed on the third line below the condition button")
-		check(absf(condition_rect.position.x - bus_rect.position.x) <= 1 and bus_rect.end.x <= scene.screen.size.x - scene.safe_right + 1,
-			"BUS aligns beneath Condition and remains within the safe area")
+		check(map_tools.position.y >= scene.hud.get_global_rect().end.y and settings_rect.position.y == condition_rect.position.y,
+			"Settings and Condition remain below the HUD")
+		check(not map_tools.has_node("BusControlRow") and not map_tools.has_node("BusAlignmentSpacer"), "Map has no persistent bus row or spacer")
+		check(map_tools.find_children("*", "Button", true, false).all(func(item): return item.text != "BUS"), "Map has no separate BUS button")
+		check(scene.nav_buttons.keys() == ["district", "build_tab", "services"], "Bottom navigation has no separate bus/transit tab")
+		for language in ["ru", "en"]:
+			scene.game.language = language
+			scene.select_tab("district")
+			for frame in range(3):
+				await process_frame
+			var district_transit: Button = scene.sheet.find_child("DistrictTransitButton", true, false)
+			check(district_transit != null and not district_transit.disabled, "District offers route access: " + language)
+			district_transit.pressed.emit()
+			await process_frame
+			check(scene.selection_kind == "transit" and scene.sheet.visible, "District button opens the route: " + language)
+			scene.select_plot(0)
+			var building_transit: Button = scene.sheet.find_child("BuildingTransitButton", true, false)
+			check(building_transit != null, "Legacy building offers route access: " + language)
+			building_transit.pressed.emit()
+			await process_frame
+			check(scene.selection_kind == "transit", "Building route action opens transit without a purchase")
+			scene.close_sheet()
+		scene.game.language = "ru"
 		scene.open_territory()
 		scene.set_territory_tool("service")
 		check(not scene.mode_switcher.get_global_rect().intersects(map_tools.get_global_rect()), "Four land-mode buttons never overlap floating map controls")
@@ -180,6 +198,12 @@ func run() -> void:
 		check(scene.sheet_scroll.get_parent() == scene.sheet and scene.sheet_scroll.get_global_rect().end.y <= scene.screen.size.y + 1, "City Hall card uses an in-screen, vertically scrollable panel")
 		check(not civic_close_buttons.is_empty() and civic_close_buttons[0].get_global_rect().end.y <= scene.sheet_scroll.get_global_rect().end.y + 1, "City Hall card close button stays inside its visible panel")
 		check(scene.sheet_column.find_child("MoreButton", true, false) == null, "Permanent City Hall has no unusable demolition action")
+		var civic_transit: Button = scene.sheet.find_child("BuildingTransitButton", true, false)
+		check(civic_transit != null, "New-grid building also offers route access")
+		var civic_budget: int = scene.game.budget
+		civic_transit.pressed.emit()
+		await process_frame
+		check(scene.selection_kind == "transit" and scene.game.budget == civic_budget, "New-grid building opens the route without changing budget")
 		scene.audio.shutdown()
 		scene.queue_free()
 		await process_frame

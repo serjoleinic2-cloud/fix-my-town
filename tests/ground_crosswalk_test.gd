@@ -109,6 +109,7 @@ func run() -> void:
 		check(scene.game.clear_grid_cell(cell.x, cell.y), "Prepare test-only neighbouring house")
 	check(scene.game.territory.place_building(9, 19, "house"), "Neighbouring building creates a T junction")
 	scene.refresh()
+	check(scene.junction_has_signal("tee") and scene.junction_has_signal("cross"), "T-junctions and crossroads both receive traffic signals")
 	scene.set_camera_focus(scene.game.territory.cell_world(11, 18) + Vector3(7, 0, 7))
 	await capture("ground-junction-zebra")
 	scene.game.save_game()

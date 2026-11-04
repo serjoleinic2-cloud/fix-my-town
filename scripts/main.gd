@@ -1089,19 +1089,7 @@ func redraw_territory() -> void:
 							var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)
 							var dash_size := Vector3(0.62, 0.018, 0.055) if offset.x != 0 else Vector3(0.055, 0.018, 0.62)
 							Art.box(tile_visuals, dash_center, dash_size, markings)
-				var junction_signal := topology == "cross"
-				if topology == "tee":
-					# A tee directly beside a cross belongs to the same junction;
-					# the cross cell owns the single signal controller.
-					for neighbour: Vector2i in links:
-						var neighbour_links: Array[Vector2i] = []
-						for candidate: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-							if game.territory.state_at(col + neighbour.x + candidate.x, row + neighbour.y + candidate.y) == "road":
-								neighbour_links.append(candidate)
-						if road_topology(neighbour_links) == "cross":
-							junction_signal = false
-							break
-				if junction_signal:
+				if junction_has_signal(topology):
 					var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
 					road_light.set_meta("expansion_intersection", true)
 					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
@@ -1132,6 +1120,9 @@ func redraw_territory() -> void:
 				Art.box(object, offset + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.2, 0.12, TerritoryGrid.CELL_SIZE - 0.2), base_color)
 	Art.batch(tile_visuals)
 	update_fog_overlay()
+
+func junction_has_signal(topology: String) -> bool:
+	return topology in ["tee", "cross"]
 
 func road_topology(links: Array[Vector2i]) -> String:
 	var horizontal := Vector2i.LEFT in links or Vector2i.RIGHT in links
@@ -2521,10 +2512,17 @@ func build_sheet() -> void:
 	elif selection_kind == "stop_place":
 		build_stop_placement_sheet()
 	elif selection_kind == "vehicle":
-		action_height = 190
-		header(t(selected_vehicle_type) if TEXT.has(selected_vehicle_type) else tr_text("Транспорт", "Vehicle"))
-		var busy_text := tr_text("В пути по поручению", "On assignment") if game.job != "" and selected_vehicle_type in ["repair_van", "fire_engine"] else tr_text("Ожидает поручения", "Waiting for an assignment")
-		label(20, sheet_column, busy_text)
+		action_height = 230
+		if selected_vehicle_type == "civilian_car":
+			header(tr_text("Городской поток", "City traffic"), "pin")
+			label(20, sheet_column, tr_text("Легковые автомобили едут по дорожной сети автоматически. Поручения им не назначаются.", "Civilian cars follow the road network automatically; they do not receive assignments."))
+		elif selected_vehicle_type == "delivery_truck":
+			header(tr_text("Городская доставка", "City deliveries"), "pin")
+			label(20, sheet_column, tr_text("Грузовики выполняют доставки логистического центра и складов.", "Trucks deliver goods for the logistics center and warehouses."))
+		else:
+			header(t(selected_vehicle_type) if TEXT.has(selected_vehicle_type) else tr_text("Транспорт", "Vehicle"))
+			var busy_text := tr_text("В пути по поручению", "On assignment") if game.job != "" and selected_vehicle_type in ["repair_van", "fire_engine"] else tr_text("Ожидает поручения", "Waiting for an assignment")
+			label(20, sheet_column, busy_text)
 	elif selection_kind == "traffic_jam":
 		action_height = 300
 		header(tr_text("Затор у пожарной машины", "Fire engine roadblock"))

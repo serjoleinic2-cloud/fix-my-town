@@ -3,6 +3,7 @@ extends SceneTree
 const Simulation = preload("res://scripts/simulation.gd")
 const Traffic = preload("res://scripts/traffic_system.gd")
 const Grid = preload("res://scripts/territory_grid.gd")
+const Catalog = preload("res://scripts/asset_catalog.gd")
 var failures := 0
 
 func check(value: bool, message: String) -> void:
@@ -14,6 +15,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	check(Catalog.footprint_cells("business_tower") == Vector2i(2, 2), "Business tower fits standard 2x2 lot")
 	var game := Simulation.new(false)
 	game.save_path = "user://modern_city_transport_test.json"
 	game.start_empty_city()
@@ -40,7 +42,9 @@ func run() -> void:
 	check(traffic.vehicles.is_empty(), "No vehicles are instantiated before population traffic is enabled")
 	traffic.configure_grid(game.territory, 5, false, [])
 	check(traffic.cars.any(func(car): return car.visible) and not traffic.vehicles[2].node.visible, "Civilians appear on current roads; unlaunched bus stays hidden")
-	var before: Vector3 = traffic.vehicles[0].node.position
+	var starting_positions: Array[Vector3] = []
+	for vehicle: Dictionary in traffic.vehicles:
+		starting_positions.append(vehicle.node.position)
 	var on_roads := true
 	var no_overlaps := true
 	for frame in range(800):
@@ -62,7 +66,16 @@ func run() -> void:
 				no_overlaps = no_overlaps and not (absf(one.node.position.x - two.node.position.x) < half.x - 0.01 and absf(one.node.position.z - two.node.position.z) < half.y - 0.01)
 	check(no_overlaps, "Grid vehicles keep physical clearance through turns and queues")
 	check(on_roads, "Every sampled civilian position remains on the actual constructed road network")
-	check(traffic.vehicles[0].node.position.distance_to(before) > 0.1, "New-city traffic actually moves")
+	var moving_count := 0
+	var active_count := 0
+	for index in range(traffic.vehicles.size()):
+		if not traffic.vehicles[index].node.visible:
+			continue
+		active_count += 1
+		if traffic.vehicles[index].node.position.distance_to(starting_positions[index]) > 0.5:
+			moving_count += 1
+	check(moving_count >= mini(2, active_count), "Traffic does not freeze as a single jammed group")
+	check(traffic.vehicles[0].node.position.distance_to(starting_positions[0]) > 0.1, "New-city traffic actually moves")
 	check(game.transit_available() and not game.completed, "Campaign transit does not require the obsolete legacy repair mission")
 	var stops: Array[Vector2i] = []
 	for cell in traffic.grid_roads:
@@ -76,6 +89,16 @@ func run() -> void:
 		check(traffic.vehicles[2].node.visible, "Launched route gets a visible replaceable bus model")
 		game.save_game()
 		check(loaded.load_game() and loaded.transit.active and loaded.transit.stops.size() == 2, "Bus and route persist")
+	var elite_entry: Dictionary = game.territory.building_at(9, 19)
+	check(not elite_entry.is_empty() and game.demolish_grid_building(str(elite_entry.get("instance_id", ""))), "Open the compact parcel for the tower-size regression")
+	game.campaign_stage = 5
+	game.renewal_credits = 2
+	game.budget = 10000
+	check(game.start_grid_construction(9, 19, "business_tower"), "Stage-five tower accepts the standard cleared 2x2 parcel")
+	game.tick(6.1, false)
+	game.tick(1.3, false)
+	var tower_entry: Dictionary = game.territory.building_at(9, 19)
+	check(tower_entry.get("type_id", "") == "business_tower" and tower_entry.get("width", 0) == 2, "Tall business tower completes in 2x2 cells")
 	traffic.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(game.save_path)

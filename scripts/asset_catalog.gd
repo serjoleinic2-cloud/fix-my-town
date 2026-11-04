@@ -5,7 +5,7 @@ const TYPES = {
 	"construction_site": {"scene": "res://scenes/visuals/construction_site.tscn", "footprint": Vector2(9.6, 9.6)},
 	"city_hall": {"icon": "res://assets/icons/city_hall.svg", "scene": "res://scenes/visuals/city_hall.tscn", "cost": 180, "footprint": Vector2(9, 9)},
 	"elite_residence": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/elite_residence.tscn", "cost": 1200, "income": 36, "residents": 30, "footprint": Vector2(9.6, 9.6)},
-	"business_tower": {"icon": "res://assets/icons/hospital.svg", "scene": "res://scenes/visuals/business_tower.tscn", "cost": 2400, "income": 90, "residents": 80, "footprint": Vector2(19.2, 19.2)},
+	"business_tower": {"icon": "res://assets/icons/hospital.svg", "scene": "res://scenes/visuals/business_tower.tscn", "cost": 2400, "income": 90, "residents": 80, "footprint": Vector2(9.6, 9.6)},
 	"house": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/house.tscn", "cost": 80, "footprint": Vector2(9, 9)},
 	"ruins": {"scene": "res://scenes/visuals/ruins.tscn", "cost": 0, "footprint": Vector2(9, 9)},
 	"empty": {"scene": "res://scenes/visuals/empty.tscn", "cost": 0, "footprint": Vector2(9, 9)},
@@ -35,6 +35,10 @@ const TYPES = {
 	"water_leak": {"scene": "res://scenes/visuals/water_leak.tscn", "cost": 90, "footprint": Vector2(1, 1)}
 }
 const LEVELS = {
+	"elite_residence": [
+		{"scene": "res://scenes/visuals/elite_residence.tscn", "residents": 30, "income": 36, "upgrade_cost": 900},
+		{"scene": "res://scenes/visuals/elite_residence_level_2.tscn", "residents": 38, "income": 52, "upgrade_cost": 1700},
+		{"scene": "res://scenes/visuals/elite_residence_level_3.tscn", "residents": 48, "income": 70, "upgrade_cost": 0}],
 	"house": [
 		{"scene": "res://scenes/visuals/house.tscn", "residents": 8, "income": 1, "upgrade_cost": 90},
 		{"scene": "res://scenes/visuals/house_level_2.tscn", "residents": 12, "income": 2, "upgrade_cost": 160},
@@ -82,8 +86,6 @@ static func is_landscaping(type_id: String) -> bool:
 static func footprint_cells(type_id: String) -> Vector2i:
 	if type_id == "logistics_center":
 		return Vector2i(3, 3)
-	if type_id == "business_tower":
-		return Vector2i(4, 4)
 	return Vector2i.ONE if is_landscaping(type_id) else Vector2i(2, 2)
 
 static func icon_path(type_id: String) -> String:

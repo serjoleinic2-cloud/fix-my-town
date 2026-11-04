@@ -486,20 +486,65 @@ func elite_residence(arch_axis: String = "", lane_offset: int = 0) -> void:
 	if arch_axis != "":
 		elite_residence_arch(arch_axis, lane_offset)
 		return
-	# A 4x4-cell renewal parcel: residence, private parking, planted edge and pool.
-	Art.box(self, Vector3(0, 0.12, 0), Vector3(18.6, 0.18, 18.6), Color("8e9f78"))
-	Art.box(self, Vector3(-5.0, 0.19, -4.8), Vector3(7.6, 0.12, 8.2), Color("666f72"))
-	for x in [-7.3, -5.0, -2.7]:
-		Art.box(self, Vector3(x, 0.29, -4.8), Vector3(0.08, 0.025, 7.2), Color("e5dfc9"))
-	Art.box(self, Vector3(4.7, 0.2, -5.4), Vector3(4.6, 0.22, 6.2), Color("72b5c4"))
-	Art.box(self, Vector3(0, 2.1, 1.4), Vector3(10.2, 3.8, 9.6), Color("f2eee2"))
-	Art.box(self, Vector3(0, 4.2, 1.4), Vector3(10.7, 0.28, 10.1), Color("39586a"))
-	Art.box(self, Vector3(0, 1.5, 6.28), Vector3(7.4, 2.4, 0.16), Color("79aebe"))
-	Art.box(self, Vector3(-4.0, 0.72, 6.0), Vector3(2.8, 0.18, 3.8), Color("d9cda9"))
-	for x in [-7.8, 7.8]:
-		for z in [-7.8, 7.8]:
-			Art.tree(self, Vector3(x, 0.1, z), 0.48, false, absi(roundi(x * 10 + z)))
-	Art.box(self, Vector3(0, 4.7, -0.4), Vector3(2.6, 0.18, 3.4), Color("c8b583"))
+	# A compact 2x2 luxury lot. Each upgrade adds a richer silhouette.
+	var stone := Color("e8e1d3")
+	var trim := Color("a88757")
+	var glass := Color("79b7c5")
+	var dark_glass := Color("355766")
+	Art.box(self, Vector3(0, 0.12, 0), Vector3(18.4, 0.18, 18.4), Color("79956b"))
+	Art.box(self, Vector3(-6.9, 0.22, -3.6), Vector3(3.2, 0.12, 7.8), Color("626d72"))
+	for x in [-7.7, -6.9, -6.1]:
+		Art.box(self, Vector3(x, 0.30, -3.6), Vector3(0.06, 0.025, 7.2), Color("eee6d5"))
+	Art.box(self, Vector3(0, 0.34, 0.2), Vector3(14.2, 0.34, 12.2), Color("d1c5ae"))
+	Art.box(self, Vector3(0, 1.78, -0.15), Vector3(13.2, 2.55, 10.8), stone)
+	Art.box(self, Vector3(0, 3.85, -0.35), Vector3(11.7, 2.0, 9.6), Color("eee9df"))
+	Art.box(self, Vector3(0, 4.93, -0.35), Vector3(12.1, 0.24, 10.0), dark_glass)
+	for x in [-4.5, -2.7, 2.7, 4.5]:
+		Art.box(self, Vector3(x, 1.9, 5.28), Vector3(1.18, 1.38, 0.10), glass)
+		Art.box(self, Vector3(x, 4.0, 4.46), Vector3(1.35, 1.05, 0.10), glass)
+		Art.box(self, Vector3(x - 0.7, 1.9, 5.35), Vector3(0.08, 1.52, 0.08), trim)
+		Art.box(self, Vector3(x + 0.7, 1.9, 5.35), Vector3(0.08, 1.52, 0.08), trim)
+	Art.box(self, Vector3(0, 1.55, 5.38), Vector3(1.42, 2.12, 0.14), Color("354653"))
+	Art.box(self, Vector3(0.42, 1.6, 5.48), Vector3(0.12, 0.12, 0.04), Color("e9c779"))
+	Art.box(self, Vector3(0, 2.74, 5.95), Vector3(3.7, 0.18, 1.72), trim)
+	for x in [-1.48, 1.48]:
+		Art.box(self, Vector3(x, 1.72, 5.95), Vector3(0.2, 2.1, 0.2), stone)
+	Art.box(self, Vector3(0, 0.50, 6.28), Vector3(4.3, 0.18, 2.5), Color("c8baa0"))
+	# Pool lies beyond the front wall, in the forecourt—not under the house.
+	Art.box(self, Vector3(0, 0.72, 7.62), Vector3(5.4, 0.18, 2.2), Color("72b5c4"))
+	Art.box(self, Vector3(0, 0.83, 7.62), Vector3(5.0, 0.05, 1.8), Color("57a7bb"))
+	for x in [-3.2, 3.2]:
+		Art.box(self, Vector3(x, 3.05, 5.18), Vector3(3.25, 0.16, 1.32), Color("cfc5b4"))
+		Art.box(self, Vector3(x, 3.48, 5.78), Vector3(3.25, 0.08, 0.07), glass)
+		for post in [-1.5, 1.5]:
+			Art.box(self, Vector3(x + post, 3.27, 5.78), Vector3(0.07, 0.48, 0.07), glass)
+	if visual_level >= 2:
+		Art.box(self, Vector3(0, 6.15, -0.55), Vector3(9.3, 2.25, 7.2), Color("e8e4dc"))
+		Art.box(self, Vector3(0, 7.32, -0.55), Vector3(9.7, 0.22, 7.6), Color("7c8581"))
+		for x in [-3.15, -1.05, 1.05, 3.15]:
+			Art.box(self, Vector3(x, 6.22, 3.12), Vector3(1.3, 1.1, 0.10), glass)
+		Art.box(self, Vector3(0, 5.22, -3.2), Vector3(8.0, 0.12, 3.1), Color("a99878"))
+		for x in [-3.8, 3.8]:
+			Art.box(self, Vector3(x, 5.55, -3.2), Vector3(0.07, 0.7, 2.9), glass)
+		for x in [-4.5, -2.25, 0.0, 2.25, 4.5]:
+			Art.box(self, Vector3(x, 4.0, -5.22), Vector3(0.14, 4.0, 0.12), trim)
+		Art.tree(self, Vector3(-3.15, 7.45, -2.8), 0.28, false, 13)
+		Art.tree(self, Vector3(3.15, 7.45, -2.8), 0.28, false, 29)
+	if visual_level >= 3:
+		Art.box(self, Vector3(0, 8.7, -0.7), Vector3(7.8, 2.3, 6.1), dark_glass)
+		Art.box(self, Vector3(0, 9.95, -0.7), Vector3(8.25, 0.24, 6.5), trim)
+		for x in [-3.0, -1.0, 1.0, 3.0]:
+			Art.box(self, Vector3(x, 8.7, 2.42), Vector3(0.92, 1.48, 0.10), Color("b4d9d7"))
+		Art.box(self, Vector3(0, 10.18, -0.7), Vector3(10.1, 0.12, 8.0), Color("637e6d"))
+		Art.box(self, Vector3(0, 10.68, -0.7), Vector3(6.8, 0.14, 5.2), Color("b8aa8c"))
+		for x in [-2.85, 2.85]:
+			Art.box(self, Vector3(x, 10.42, -0.7), Vector3(0.08, 0.55, 5.0), glass)
+		Art.box(self, Vector3(0, 10.31, -0.7), Vector3(3.2, 0.08, 1.3), Color("4ca4b9"))
+		for x in [-3.3, 3.3]:
+			Art.box(self, Vector3(x, 11.02, -0.7), Vector3(0.10, 1.4, 0.10), trim)
+		Art.box(self, Vector3(0, 11.68, -0.7), Vector3(6.7, 0.12, 0.12), trim)
+	for x in [-8.0, 8.0]:
+		Art.tree(self, Vector3(x, 0.1, -7.7), 0.42, false, absi(roundi(x * 10)))
 
 func elite_residence_arch(axis: String, lane_offset: int) -> void:
 	# Two private halves frame a public road; the elevated connector forms a visible arch.
@@ -537,7 +582,8 @@ func elite_residence_arch(axis: String, lane_offset: int) -> void:
 		Art.box(self, Vector3(lane_shift + 7.1, 0.22, 5.6), Vector3(3.5, 0.2, 4.5), Color("72b5c4"))
 
 func business_tower() -> void:
-	# Tall glass office tower with a retail podium and landscaped forecourt.
+	# Keep the 12-floor silhouette while fitting on a standard 2x2 lot.
+	scale = Vector3(0.48, 1.0, 0.48)
 	Art.box(self, Vector3(0, 0.12, 0), Vector3(18.6, 0.18, 18.6), Color("a6a88f"))
 	Art.box(self, Vector3(0, 0.55, 0), Vector3(13.4, 0.8, 13.4), Color("d5d0c0"))
 	for floor_index in range(12):

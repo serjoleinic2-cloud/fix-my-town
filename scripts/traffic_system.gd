@@ -2,6 +2,7 @@ extends Node3D
 
 const Art = preload("res://scripts/art.gd")
 const ObjectScene = preload("res://scenes/objects/game_object.tscn")
+const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 const ROAD_X = [-57.6, -43.2, -28.8, -14.4, 0.0, 14.4, 28.8]
 const ROAD_Z = [-43.2, -28.8, -14.4, 0.0, 14.4, 28.8, 43.2]
 const STOP_LINE_DISTANCE = 3.9
@@ -365,9 +366,12 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			continue
 		var active := enabled < limit
 		if active and (changed or not vehicle.node.visible or not vehicle.has("cell")):
-			var cell := roads[(enabled * 6) % roads.size()]
+			# Spread cars across all roads; taking every sixth row-major cell clustered them in one corner.
+			var road_index := int(floor((float(enabled) + 0.5) * float(roads.size()) / float(maxi(1, limit))))
+			var cell := roads[mini(road_index, roads.size() - 1)]
 			vehicle.cell = cell
 			vehicle.previous = Vector2i(-1, -1)
+			vehicle.erase("waiting_next")
 			vehicle.target = grid.cell_world(cell.x, cell.y) + Vector3(0, 0.22, 0)
 			vehicle.node.position = vehicle.target
 		vehicle.node.visible = active
@@ -381,21 +385,39 @@ func step_grid(delta: float) -> void:
 		var target: Vector3 = vehicle.target
 		if current.distance_to(target) < 0.08:
 			var options: Array[Vector2i] = []
-			for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var next: Vector2i = vehicle.cell + offset
-				if grid.state_at(next.x, next.y) == "road":
-					options.append(next)
+			for neighbour: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var candidate: Vector2i = vehicle.cell + neighbour
+				if grid.state_at(candidate.x, candidate.y) == "road":
+					options.append(candidate)
 			if options.size() > 1:
 				options.erase(vehicle.previous)
 			if options.is_empty():
 				continue
-			var next: Vector2i = options[route_rng.randi_range(0, options.size() - 1)]
+			var forward := Vector2i(int(vehicle.direction), 0) if str(vehicle.axis) == "H" else Vector2i(0, int(vehicle.direction))
+			var forward_cell: Vector2i = vehicle.cell + forward
+			var next: Vector2i
+			if vehicle.has("waiting_next"):
+				next = vehicle["waiting_next"]
+			else:
+				next = options[route_rng.randi_range(0, options.size() - 1)]
+				if forward_cell in options and options.size() > 1 and route_rng.randf() < 0.86:
+					next = forward_cell
+			var next_center: Vector3 = grid.cell_world(next.x, next.y)
+			var crossing := find_intersection(next_center.x, next_center.z)
+			var incoming_axis := "H" if next.x != vehicle.cell.x else "V"
+			if not crossing.is_empty() and not permission(crossing, incoming_axis, str(vehicle.id), delta):
+				vehicle.waiting_next = next
+				var current_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
+				var lane_shift := Vector3(0, 0.22, float(vehicle.direction) * 0.68) if str(vehicle.axis) == "H" else Vector3(-float(vehicle.direction) * 0.68, 0.22, 0)
+				vehicle.target = current_center + lane_shift + Vector3(float(forward.x), 0, float(forward.y)) * (TerritoryGrid.CELL_SIZE * 0.5 - 1.45)
+				continue
+			vehicle.erase("waiting_next")
 			var offset: Vector2i = next - vehicle.cell
 			vehicle.previous = vehicle.cell
 			vehicle.cell = next
 			vehicle.axis = "H" if offset.x != 0 else "V"
 			vehicle.direction = offset.x if offset.x != 0 else offset.y
-			var center: Vector3 = grid.cell_world(next.x, next.y)
+			var center: Vector3 = next_center
 			vehicle.road = center.z if vehicle.axis == "H" else center.x
 			target = center + (Vector3(0, 0.22, vehicle.direction * 0.68) if vehicle.axis == "H" else Vector3(-vehicle.direction * 0.68, 0.22, 0))
 			vehicle.target = target

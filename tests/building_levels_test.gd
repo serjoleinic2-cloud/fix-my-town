@@ -10,6 +10,9 @@ func check(condition: bool, message: String) -> void:
 func _initialize() -> void:
 	call_deferred("run")
 func run() -> void:
+	check(Catalog.LEVELS.has("elite_residence") and Catalog.LEVELS["elite_residence"].size() == 3, "Elite residence has three upgrade tiers")
+	for tier in [1, 2, 3]:
+		check(ResourceLoader.exists(Catalog.scene_path("elite_residence", false, tier)), "Elite residence tier scene exists: " + str(tier))
 	var game := Simulation.new(true)
 	game.save_path = "user://building_levels_test.json"
 	game.budget = 5000

@@ -40,7 +40,10 @@ func run() -> void:
 	check(not scene.mission.visible, "Toast completely disappears after deadline")
 	scene.refresh()
 	check(not scene.mission.visible, "Income/UI refresh cannot resurrect old task")
-	for intersection in scene.scenery.traffic_controller.intersections:
+	for intersection: Dictionary in scene.scenery.traffic_controller.intersections:
+		# Virtual right-angle conflict nodes intentionally have no signal model.
+		if intersection.get("unsignalized", false) or intersection.get("node") == null:
+			continue
 		for i in range(4):
 			var pole = intersection.node.visual_root.get_child(0).get_node("SignalPole%d" % i)
 			for lamp in scene.scenery.street_lamp_positions:

@@ -215,6 +215,13 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		blockers.append({"id": "primary_service", "position": service_position})
 	for blocker: Dictionary in blockers:
 		var block_position: Vector3 = blocker.position
+		if blocker.get("moving_vehicle", false):
+			var proposed_position := position_value + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0.0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0.0)
+			var own_half := grid_half_extents(vehicle)
+			var block_half: Vector2 = blocker.get("half_extents", Vector2(0.7, 0.7))
+			if absf(proposed_position.x - block_position.x) < own_half.x + block_half.x + 0.12 and absf(proposed_position.z - block_position.z) < own_half.y + block_half.y + 0.12:
+				distance = 0.0
+			continue
 		var lateral: float = absf(block_position.z - position_value.z) if vehicle.axis == "H" else absf(block_position.x - position_value.x)
 		var gap: float = ((block_position.x - position_value.x) if vehicle.axis == "H" else (block_position.z - position_value.z)) * vehicle.direction
 		if lateral < 1.8 and gap > 0 and gap < vehicle.spacing + distance:

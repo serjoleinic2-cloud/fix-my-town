@@ -126,10 +126,16 @@ static func bench(parent: Node3D, pos: Vector3, angle: float = 0, scale_value: f
 	box(node, Vector3(0, 1.1, -0.3), Vector3(1.7, 0.38, 0.12), Color("aa8756"))
 	return node
 
-static func lamp(parent: Node3D, pos: Vector3) -> void:
-	cylinder(parent, pos + Vector3(0, 2, 0), 0.055, 4, Color("56646a"), 1, 7)
-	box(parent, pos + Vector3(0.2, 4, 0), Vector3(0.5, 0.1, 0.14), Color("58666c"))
-	box(parent, pos + Vector3(0.4, 3.96, 0), Vector3(0.32, 0.12, 0.28), Color("edf0dc"))
+static func lamp(parent: Node3D, pos: Vector3, pole_height: float = 6.2, angle: float = 0.0) -> Node3D:
+	var node := Node3D.new()
+	node.name = "StreetLamp"
+	node.position = pos
+	node.rotation.y = angle
+	parent.add_child(node)
+	cylinder(node, Vector3(0, pole_height * 0.5, 0), 0.065, pole_height, Color("56646a"), 1, 7)
+	box(node, Vector3(0.35, pole_height, 0), Vector3(0.72, 0.13, 0.16), Color("58666c"))
+	box(node, Vector3(0.62, pole_height - 0.08, 0), Vector3(0.34, 0.16, 0.3), Color("edf0dc"))
+	return node
 
 static func fence(parent: Node3D, pos: Vector3, length: float, angle: float = 0) -> void:
 	var node := Node3D.new()

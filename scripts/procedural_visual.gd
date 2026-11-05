@@ -20,6 +20,7 @@ func _ready() -> void:
 		cafe()
 	elif visual_type == "depot":
 		depot()
+		parked_service_vehicle("work_vehicle")
 	elif visual_type == "logistics_center":
 		logistics_center()
 	elif visual_type == "warehouse":
@@ -32,10 +33,13 @@ func _ready() -> void:
 		business_tower()
 	elif visual_type == "fire_station":
 		fire_station()
+		parked_service_vehicle("fire_engine")
 	elif visual_type == "police_station":
 		service_station(Color("54768c"), Color("d9e5e6"), "ПОЛИЦИЯ")
+		parked_service_vehicle("police_car")
 	elif visual_type == "hospital":
 		service_station(Color("e6e5dc"), Color("62a9a0"), "БОЛЬНИЦА")
+		parked_service_vehicle("ambulance")
 	elif visual_type == "park":
 		park()
 	elif visual_type == "lawn":
@@ -70,8 +74,10 @@ func _ready() -> void:
 		Art.box(self, Vector3(0, 1.34, -0.25), Vector3(1.6, 0.14, 1.9), Color("315b88"))
 		var beacon_red := Art.box(self, Vector3(-0.23, 1.92, 0.2), Vector3(0.2, 0.12, 0.12), Color("dc4242"))
 		beacon_red.name = "BeaconRed"
+		beacon_red.set_meta("dynamic", true)
 		var beacon_blue := Art.box(self, Vector3(0.23, 1.92, 0.2), Vector3(0.2, 0.12, 0.12), Color("438ee8"))
 		beacon_blue.name = "BeaconBlue"
+		beacon_blue.set_meta("dynamic", true)
 	elif visual_type == "traffic_signal":
 		make_signals()
 	elif visual_type == "bus_stop":
@@ -277,6 +283,54 @@ func fire_station() -> void:
 	for x in [-2.55, 2.55]:
 		Art.box(self, Vector3(x, 1.15, 2.78), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
 
+func add_vehicle_lights(half_width: float, front_z: float, y: float, rear_z: float) -> void:
+	for side in [-1.0, 1.0]:
+		Art.box(self, Vector3(side * half_width, y, front_z), Vector3(0.22, 0.14, 0.08), Color("fff1bf"))
+		Art.box(self, Vector3(side * half_width, y * 0.78, rear_z), Vector3(0.18, 0.12, 0.08), Color("e45e4f"))
+
+func parked_service_vehicle(kind: String) -> void:
+	# Dedicated parking pad and one vehicle for this service, kept inside its 2x2 lot.
+	Art.box(self, Vector3(3.1, 0.19, 3.35), Vector3(2.8, 0.12, 2.75), Color("697276"))
+	var vehicle := Node3D.new()
+	vehicle.name = "ParkedServiceVehicle"
+	vehicle.position = Vector3(3.1, 0.27, 3.25)
+	vehicle.scale = Vector3.ONE * 0.68
+	add_child(vehicle)
+	var body_color := Color("d64f3e") if kind == "fire_engine" else (Color("f4f0df") if kind in ["police_car", "ambulance"] else Color("e5a932"))
+	Art.box(vehicle, Vector3(0, 0.72, -0.15), Vector3(1.85, 0.62, 2.6), body_color)
+	Art.box(vehicle, Vector3(0, 1.24, 0.68), Vector3(1.68, 0.86, 1.0), body_color.darkened(0.04))
+	Art.box(vehicle, Vector3(0, 1.34, 1.2), Vector3(1.42, 0.58, 0.06), Color("8bb6c0"))
+	if kind == "ambulance":
+		Art.box(vehicle, Vector3(0, 1.0, -0.18), Vector3(0.18, 0.44, 0.06), Color("d95046"))
+		Art.box(vehicle, Vector3(0, 1.0, -0.18), Vector3(0.52, 0.16, 0.06), Color("d95046"))
+		Art.box(vehicle, Vector3(0, 0.7, 0), Vector3(1.9, 0.12, 2.5), Color("4aa4a0"))
+	elif kind == "police_car":
+		Art.box(vehicle, Vector3(0, 1.57, 0.15), Vector3(1.54, 0.12, 1.9), Color("315b88"))
+	elif kind == "fire_engine":
+		Art.box(vehicle, Vector3(0, 0.96, -0.3), Vector3(0.16, 0.18, 1.6), Color("f3d463"))
+	else:
+		Art.box(vehicle, Vector3(0, 1.18, -0.64), Vector3(1.35, 0.42, 1.15), Color("d79626"))
+	for side in [-1.0, 1.0]:
+		for z in [-0.88, 0.88]:
+			var wheel := Art.cylinder(vehicle, Vector3(side * 0.9, 0.39, z), 0.34, 0.2, Color("343a3b"), 0.0, 10)
+			wheel.rotation.z = PI / 2
+	for side in [-1.0, 1.0]:
+		Art.box(vehicle, Vector3(side * 0.55, 0.75, 1.34), Vector3(0.2, 0.14, 0.07), Color("fff1bf"))
+	if kind == "work_vehicle":
+		var amber := Art.cylinder(vehicle, Vector3(0, 1.72, 0.18), 0.2, 0.14, Color("ff9b24"), 0.0, 10)
+		amber.name = "BeaconLamp"
+		amber.set_meta("dynamic", true)
+		amber.material_override = Art.material(Color("755827"))
+	if kind in ["fire_engine", "police_car", "ambulance"]:
+		var red := Art.box(vehicle, Vector3(-0.22, 1.76, 0.25), Vector3(0.2, 0.12, 0.13), Color("dc4242"))
+		red.name = "BeaconRed"
+		red.set_meta("dynamic", true)
+		var blue := Art.box(vehicle, Vector3(0.22, 1.76, 0.25), Vector3(0.2, 0.12, 0.13), Color("438ee8"))
+		blue.name = "BeaconBlue"
+		blue.set_meta("dynamic", true)
+		red.material_override = Art.material(Color("7f3838"))
+		blue.material_override = Art.material(Color("344d75"))
+
 func service_station(wall: Color, accent: Color, sign_text: String) -> void:
 	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), wall)
 	Art.box(self, Vector3(0, 3.7, -0.5), Vector3(7.5, 0.35, 6.5), Color("70787a"))
@@ -295,8 +349,11 @@ func fire_engine() -> void:
 	Art.cylinder(self, Vector3(0, 2.02, 0.25), 0.13, 0.12, Color("4c9de0"), 1, 8)
 	var beacon_left := Art.box(self, Vector3(-0.28, 2.02, 0.25), Vector3(0.22, 0.12, 0.14), Color("dc4242"))
 	beacon_left.name = "BeaconRed"
+	beacon_left.set_meta("dynamic", true)
 	var beacon_right := Art.box(self, Vector3(0.28, 2.02, 0.25), Vector3(0.22, 0.12, 0.14), Color("438ee8"))
 	beacon_right.name = "BeaconBlue"
+	beacon_right.set_meta("dynamic", true)
+	add_vehicle_lights(0.5, 1.14, 1.35, -1.8)
 	for x in [-0.78, 0.78]:
 		for z in [-1.15, 0.95]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.43, z), 0.4, 0.24, Color("3a3b3a"), 0.8, 12)
@@ -314,10 +371,18 @@ func ruins(seed_value: int) -> void:
 func set_emergency_lights(enabled: bool, time_value: float = 0.0) -> void:
 	var red := get_node_or_null("BeaconRed") as MeshInstance3D
 	var blue := get_node_or_null("BeaconBlue") as MeshInstance3D
+	var red_flash := enabled and int(time_value * 8.0) % 2 == 0
+	var blue_flash := enabled and not red_flash
 	if red != null:
-		red.visible = enabled and int(time_value * 8.0) % 2 == 0
+		red.visible = true
+		red.material_override = Art.material(Color("ff3e35") if red_flash else (Color("7f3838") if not enabled else Color("362a2b")))
 	if blue != null:
-		blue.visible = enabled and int(time_value * 8.0) % 2 == 1
+		blue.visible = true
+		blue.material_override = Art.material(Color("398bff") if blue_flash else (Color("344d75") if not enabled else Color("29313b")))
+	var amber := get_node_or_null("BeaconLamp") as MeshInstance3D
+	if amber != null:
+		amber.visible = true
+		amber.material_override = Art.material(Color("ff9b24") if enabled and int(time_value * 6.0) % 2 == 0 else Color("755827"))
 
 func park() -> void:
 	if visual_level >= 2:
@@ -362,10 +427,13 @@ func van() -> void:
 	for x in [-0.56, 0.56]:
 		Art.box(self, Vector3(x, 0.7, 1.29), Vector3(0.28, 0.23, 0.06), Color("fff0be"))
 	Art.box(self, Vector3(0, 0.37, 1.35), Vector3(1.65, 0.18, 0.13), Color("566971"))
+	add_vehicle_lights(0.58, 1.3, 0.78, -1.25)
 	var beacon_red := Art.box(self, Vector3(-0.18, 1.7, 0.7), Vector3(0.16, 0.12, 0.14), Color("dc4242"))
 	beacon_red.name = "BeaconRed"
+	beacon_red.set_meta("dynamic", true)
 	var beacon_blue := Art.box(self, Vector3(0.18, 1.7, 0.7), Vector3(0.16, 0.12, 0.14), Color("438ee8"))
 	beacon_blue.name = "BeaconBlue"
+	beacon_blue.set_meta("dynamic", true)
 
 func construction_vehicle() -> void:
 	var yellow := Color("e5a932")
@@ -383,9 +451,11 @@ func construction_vehicle() -> void:
 			wheel.rotation.z = PI / 2
 			var hub := Art.cylinder(self, Vector3(float(side) * 1.13, 0.46, z), 0.2, 0.04, Color("a5a8a6"), 0.0, 10)
 			hub.rotation.z = PI / 2
+	add_vehicle_lights(0.72, 1.3, 0.78, -1.8)
 	if work_car:
 		var beacon := Art.cylinder(self, Vector3(0, 2.03, 0.5), 0.23, 0.2, Color("ff8c24"), 0.0, 10)
 		beacon.name = "BeaconLamp"
+		beacon.set_meta("dynamic", true)
 		beacon.material_override = Art.material(Color("ff8c24"))
 
 func set_serviced(value: bool) -> void:
@@ -512,9 +582,9 @@ func elite_residence(arch_axis: String = "", lane_offset: int = 0) -> void:
 	for x in [-1.48, 1.48]:
 		Art.box(self, Vector3(x, 1.72, 5.95), Vector3(0.2, 2.1, 0.2), stone)
 	Art.box(self, Vector3(0, 0.50, 6.28), Vector3(4.3, 0.18, 2.5), Color("c8baa0"))
-	# Pool lies beyond the front wall, in the forecourt—not under the house.
-	Art.box(self, Vector3(0, 0.72, 7.62), Vector3(5.4, 0.18, 2.2), Color("72b5c4"))
-	Art.box(self, Vector3(0, 0.83, 7.62), Vector3(5.0, 0.05, 1.8), Color("57a7bb"))
+	# Keep the pool beside the entrance path so it never blocks the front door.
+	Art.box(self, Vector3(7.0, 0.72, 2.5), Vector3(5.0, 0.18, 2.2), Color("72b5c4"))
+	Art.box(self, Vector3(7.0, 0.83, 2.5), Vector3(4.6, 0.05, 1.8), Color("57a7bb"))
 	for x in [-3.2, 3.2]:
 		Art.box(self, Vector3(x, 3.05, 5.18), Vector3(3.25, 0.16, 1.32), Color("cfc5b4"))
 		Art.box(self, Vector3(x, 3.48, 5.78), Vector3(3.25, 0.08, 0.07), glass)
@@ -659,6 +729,7 @@ func civilian_vehicle(bus: bool, seed_value: int) -> void:
 		Art.box(self, Vector3(0, 0.55, 0), Vector3(1.4, 0.6, 2.5), color)
 		Art.box(self, Vector3(0, 1, -0.2), Vector3(1.25, 0.55, 1.35), color.lightened(0.1))
 		Art.box(self, Vector3(0, 1.02, 0.5), Vector3(1.05, 0.37, 0.03), Color("aac4c5"))
+	add_vehicle_lights(0.58 if bus else 0.48, 2.3 if bus else 1.22, 0.66 if bus else 0.62, -2.28 if bus else -1.22)
 	for x in [-0.85 if bus else -0.73, 0.85 if bus else 0.73]:
 		for z in [-1.5 if bus else -0.8, 1.5 if bus else 0.8]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.3, z), 0.3, 0.15, Color("3f4c4d"), 1, 10)
@@ -670,6 +741,7 @@ func delivery_truck() -> void:
 	Art.box(self, Vector3(0, 1.22, 1.57), Vector3(1.18, 0.62, 0.06), Color("9fc7ca"))
 	Art.box(self, Vector3(0, 0.14, -0.35), Vector3(1.62, 0.1, 2.35), Color("3f555a"))
 	Art.box(self, Vector3(0, 1.12, -0.32), Vector3(1.42, 0.14, 1.9), Color("83a66f"))
+	add_vehicle_lights(0.52, 1.59, 0.72, -1.47)
 	for x in [-0.78, 0.78]:
 		for z in [-1.0, 1.15]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.34, z), 0.34, 0.18, Color("374345"), 1, 10)

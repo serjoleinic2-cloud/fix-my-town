@@ -218,6 +218,9 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 			continue
 		var crossing: float = intersection.x if vehicle.axis == "H" else intersection.z
 		var ahead: float = (crossing - vehicle.coordinate) * vehicle.direction
+		var reservation: Dictionary = reservations.get(intersection.key, {})
+		if ahead < -1.5 and str(reservation.get("actor", "")) == str(vehicle.id):
+			reservations.erase(intersection.key)
 		var stop_distance: float = stop_distance_for(vehicle.node.type_id)
 		if ahead < stop_distance - 0.3:
 			wait_times.erase(intersection.key + ":" + vehicle.id)
@@ -241,7 +244,7 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 	if reservations.has(intersection.key) and reservations[intersection.key].actor != actor:
 		return false
 	# Сломанный узел пропускает машины по очереди после паузы.
-	reservations[intersection.key] = {"actor": actor, "remaining": 5.0}
+	reservations[intersection.key] = {"actor": actor, "remaining": 2.0}
 	return true
 
 func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
@@ -313,6 +316,9 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		if lateral > 0.15:
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
+		var reservation: Dictionary = reservations.get(intersection.key, {})
+		if ahead < -1.5 and str(reservation.get("actor", "")) == actor_id:
+			reservations.erase(intersection.key)
 		if ahead < stop_distance - 0.01:
 			wait_times.erase(intersection.key + ":" + actor_id)
 		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01:
@@ -383,6 +389,24 @@ func step_grid(delta: float) -> void:
 			continue
 		var current: Vector3 = vehicle.node.position
 		var target: Vector3 = vehicle.target
+		var last_position: Vector3 = vehicle.get("last_position", current)
+		var stalled_time: float = float(vehicle.get("stalled_time", 0.0))
+		if current.distance_to(last_position) < 0.02:
+			stalled_time += delta
+		else:
+			stalled_time = 0.0
+		vehicle.last_position = current
+		vehicle.stalled_time = stalled_time
+		if stalled_time > 18.0 and vehicle.has("waiting_next") and not has_nearby_incident_blocker(current):
+			# A signal/conflict deadlock must not freeze traffic permanently. Back up
+			# to the previous road cell, then let the ordinary route picker choose again.
+			vehicle.previous = vehicle.waiting_next
+			vehicle.erase("waiting_next")
+			var recovery_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
+			var recovery_lane := Vector3(0, 0.22, float(vehicle.direction) * 0.68) if str(vehicle.axis) == "H" else Vector3(-float(vehicle.direction) * 0.68, 0.22, 0)
+			vehicle.target = recovery_center + recovery_lane
+			vehicle.stalled_time = 0.0
+			target = vehicle.target
 		if current.distance_to(target) < 0.08:
 			var options: Array[Vector2i] = []
 			for neighbour: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
@@ -427,6 +451,14 @@ func step_grid(delta: float) -> void:
 		vehicle.node.position = current.move_toward(proposed, grid_safe_distance(vehicle, current, proposed))
 		vehicle.coordinate = vehicle.node.position.x if vehicle.axis == "H" else vehicle.node.position.z
 		vehicle.node.rotation.y = PI / 2 * vehicle.direction if vehicle.axis == "H" else (0.0 if vehicle.direction > 0 else PI)
+
+func has_nearby_incident_blocker(position_value: Vector3) -> bool:
+	if service_active:
+		return true
+	for blocker: Dictionary in blocking_positions:
+		if position_value.distance_to(blocker.position) < 18.0:
+			return true
+	return false
 
 func grid_half_extents(vehicle: Dictionary) -> Vector2:
 	var half_length := 1.8 if vehicle.node.type_id == "city_bus" else 1.1

@@ -1089,6 +1089,11 @@ func redraw_territory() -> void:
 							var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)
 							var dash_size := Vector3(0.62, 0.018, 0.055) if offset.x != 0 else Vector3(0.055, 0.018, 0.62)
 							Art.box(tile_visuals, dash_center, dash_size, markings)
+				if topology in ["straight", "dead_end"] and posmod(col + row, 3) == 0:
+					if Vector2i.LEFT in links or Vector2i.RIGHT in links:
+						Art.lamp(tile_visuals, center + Vector3(0, 0.2, 3.05), 6.2)
+					else:
+						Art.lamp(tile_visuals, center + Vector3(3.05, 0.2, 0), 6.2, PI / 2)
 				if junction_has_signal(topology):
 					var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
 					road_light.set_meta("expansion_intersection", true)

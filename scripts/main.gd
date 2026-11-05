@@ -4099,7 +4099,9 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 	var first_direction: Vector3 = first_route[1] - first_route[0]
 	truck.position = first_route[0] + logistics_lane_offset(first_direction) + Vector3(0, 0.22, 0)
 	truck.rotation.y = atan2(first_direction.x, first_direction.z)
-	logistics_vehicles.append({"id": identifier, "object": truck, "routes": routes, "route_index": 0, "progress": 0.0, "speed": 4.6})
+	var speed_slot := posmod(identifier.hash(), 6)
+	var delivery_speed := 4.0 + float(speed_slot) * 0.36
+	logistics_vehicles.append({"id": identifier, "object": truck, "routes": routes, "route_index": 0, "progress": 0.0, "speed": delivery_speed})
 
 func tick_logistics_vehicles(delta: float) -> void:
 	var traffic_controller: Node = scenery.traffic_controller if scenery != null else null

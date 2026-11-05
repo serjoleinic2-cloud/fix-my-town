@@ -28,6 +28,19 @@ func run() -> void:
 	check(traffic.permission(turn_lock, "H", "turn_car_a", 0.05), "First car reserves an unsignalized turn conflict point")
 	check(not traffic.permission(turn_lock, "V", "turn_car_b", 0.05), "Opposing car waits for the same turn conflict point")
 	traffic.reservations.erase("synthetic_turn_lock")
+	traffic.grid = RefCounted.new()
+	var grid_actor: String = str(traffic.vehicles[0].id)
+	check(traffic.permission(turn_lock, "H", grid_actor, 0.05), "Grid car reserves the turn conflict point")
+	check(traffic.reservations["synthetic_turn_lock"].get("grid_lock", false), "Grid intersection lease is tracked until the vehicle clears")
+	traffic.reservations["synthetic_turn_lock"].entered = true
+	var saved_vehicles: Array = traffic.vehicles.duplicate()
+	traffic.vehicles.clear()
+	for _step in range(60):
+		traffic.step(0.05)
+	check(traffic.reservations.has("synthetic_turn_lock"), "Grid turn lease does not expire while a car still occupies the intersection")
+	traffic.reservations.erase("synthetic_turn_lock")
+	traffic.vehicles = saved_vehicles
+	traffic.grid = null
 	check(traffic.vehicles.filter(func(v): return v.node.type_id == "city_bus").size() == 1, "One replaceable bus")
 	var speed_factors: Array = traffic.vehicles.filter(func(v): return bool(v.get("randomized", false))).map(func(v): return float(v.get("speed_factor", 1.0)))
 	check(speed_factors.max() - speed_factors.min() > 0.08, "Civilian cars use different cruising speeds")

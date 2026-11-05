@@ -321,7 +321,7 @@ static func stop_distance_for(type_id: String, grid_markings: bool = false) -> f
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
 
-func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0", emergency: bool = false, ignore_incident_id: String = "") -> float:
+func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0", emergency: bool = false, ignore_incident_id: String = "", vehicle_type: String = "repair_van") -> float:
 	var direction_value := proposed - current
 	var distance := direction_value.length()
 	if distance < 0.0001:
@@ -352,10 +352,10 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		var ahead_to_blocker: float = ((block_position.x - current.x) if axis == "H" else (block_position.z - current.z)) * direction
 		if lateral < 1.7 and ahead_to_blocker > 0 and ahead_to_blocker < distance + 4.5:
 			distance = minf(distance, maxf(0, ahead_to_blocker - 4.5))
-	var stop_distance := stop_distance_for("repair_van")
+	var stop_distance := stop_distance_for(vehicle_type, grid != null)
 	for intersection: Dictionary in intersections:
 		var lateral: float = absf((current.z - intersection.z) if axis == "H" else (current.x - intersection.x))
-		if lateral > 0.15:
+		if lateral > (0.9 if grid != null else 0.15):
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
 		var reservation: Dictionary = reservations.get(intersection.key, {})

@@ -20,6 +20,26 @@ func run() -> void:
 	check(absf(Traffic.stop_distance_for("civilian_car", true) - 3.75) < 0.001, "Grid traffic stops with its bumper just before the new 2.3 m stop line")
 	check(absf(Traffic.stop_distance_for("civilian_car") - 5.35) < 0.001, "Legacy traffic retains its original stop-line offset")
 	check(absf(Traffic.stop_distance_for("city_bus", true) - 4.83) < 0.001, "Grid bus uses its longer front overhang at the new stop line")
+	var legacy_intersections: Array = traffic.intersections.duplicate()
+	var prior_visibility: Array[bool] = []
+	for vehicle: Dictionary in traffic.vehicles:
+		prior_visibility.append(vehicle.node.visible)
+		vehicle.node.hide()
+	traffic.grid = RefCounted.new()
+	var logistics_probe := {"key": "logistics_signal", "x": 0.0, "z": 0.0, "offset": 0.0, "node": null}
+	traffic.intersections = [logistics_probe]
+	traffic.clock = 10.0
+	var logistics_current := Vector3(-8, 0.22, -0.68)
+	var logistics_target := Vector3(-2, 0.22, -0.68)
+	var logistics_red_distance: float = traffic.service_travel_distance(logistics_current, logistics_target, 0.05, "logistics_probe", false, "", "delivery_truck")
+	check(logistics_red_distance < logistics_current.distance_to(logistics_target), "Logistics truck obeys red light from its offset road lane")
+	traffic.clock = 0.0
+	var logistics_green_distance: float = traffic.service_travel_distance(logistics_current, logistics_target, 0.05, "logistics_probe", false, "", "delivery_truck")
+	check(logistics_green_distance > logistics_red_distance, "Logistics truck proceeds on green")
+	traffic.grid = null
+	traffic.intersections = legacy_intersections
+	for index in range(traffic.vehicles.size()):
+		traffic.vehicles[index].node.visible = prior_visibility[index]
 	check(traffic.grid_half_extents(traffic.vehicles[0]).y <= 0.56 + 0.00001, "Civilian cars fit within their road lane instead of clipping opposing turns")
 	var probe_car: Dictionary = traffic.vehicles[0]
 	var original_probe_position: Vector3 = probe_car.node.position

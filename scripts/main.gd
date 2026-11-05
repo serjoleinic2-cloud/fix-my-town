@@ -4149,6 +4149,14 @@ func tick_logistics_vehicles(delta: float) -> void:
 			var direction := second - first
 			var center_position: Vector3 = first.lerp(second, clampf(remaining / maxf(segment_length, 0.001), 0.0, 1.0))
 			var proposed_position: Vector3 = center_position + logistics_lane_offset(direction) + Vector3(0, 0.22, 0)
+			var current_position: Vector3 = truck.position
+			if traffic_controller != null:
+				var intended_distance: float = current_position.distance_to(proposed_position)
+				if intended_distance > 0.0001:
+					var allowed_distance: float = traffic_controller.service_travel_distance(
+						current_position, proposed_position, delta, str(vehicle.get("id", "")), false, "", "delivery_truck"
+					)
+					proposed_position = current_position.move_toward(proposed_position, allowed_distance)
 			if traffic_controller != null and not traffic_controller.external_vehicle_step_is_clear(truck.position, proposed_position, 0.78, 0.52, str(vehicle.get("id", ""))):
 				break
 			vehicle.route_index = route_index

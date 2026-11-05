@@ -1330,6 +1330,19 @@ func fire_assignments() -> Array[Dictionary]:
 		result.append(assignment)
 	return result
 
+func has_active_service_dispatch(station_id: String) -> bool:
+	if station_id.is_empty():
+		return false
+	for assignment: Dictionary in fire_assignments():
+		if str(assignment.get("depot_instance_id", "")) == station_id:
+			return true
+	if not police_job.is_empty() and str(police_job.get("depot_instance_id", "")) == station_id:
+		return true
+	# Legacy repair crews still use the depot's instance ID as their origin.
+	if job != "" and job != "fire" and depot_instance_id == station_id:
+		return true
+	return false
+
 func fire_assignment(identifier: String) -> Dictionary:
 	for assignment in fire_assignments():
 		if assignment.instance_id == identifier:

@@ -330,6 +330,14 @@ func parked_service_vehicle(kind: String) -> void:
 		blue.set_meta("dynamic", true)
 		red.material_override = Art.material(Color("7f3838"))
 		blue.material_override = Art.material(Color("344d75"))
+	# Keep the vehicle's geometry grouped under this node so dispatch can hide it
+	# while the matching service vehicle is out on a call.
+	Art.batch(vehicle)
+
+func set_parked_service_vehicle_visible(value: bool) -> void:
+	var vehicle := find_child("ParkedServiceVehicle", false, false) as Node3D
+	if vehicle != null:
+		vehicle.visible = value
 
 func service_station(wall: Color, accent: Color, sign_text: String) -> void:
 	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), wall)

@@ -168,6 +168,12 @@ func run() -> void:
 	var police_clearance := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "police", false, "fire_incident")
 	check(police_clearance > following_service, "Police can reach the exact fire engine it was called to clear")
 	traffic.blocking_positions.clear()
+	traffic.service_active = true
+	traffic.service_position = Vector3(100, 0.18, 100)
+	check(not traffic.has_nearby_incident_blocker(Vector3.ZERO), "A distant service van does not block local jam recovery")
+	traffic.service_position = Vector3(10, 0.18, 0)
+	check(traffic.has_nearby_incident_blocker(Vector3.ZERO), "A nearby service van still blocks recovery")
+	traffic.service_active = false
 	# Полный сценарий с тем же дорожным контроллером, который вызывает main.
 	# Изолированные проверки выше меняли полосы и удаляли перекрёстки.
 	traffic.queue_free()

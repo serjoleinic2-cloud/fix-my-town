@@ -99,6 +99,13 @@ func set_elite_arch_axis(axis: String, lane_offset: int = 0) -> void:
 	if model.has_method("set_elite_arch_axis"):
 		model.set_elite_arch_axis(axis, lane_offset)
 
+func set_parked_service_vehicle_visible(value: bool) -> void:
+	if visual_root.get_child_count() == 0:
+		return
+	var model := visual_root.get_child(0)
+	if model.has_method("set_parked_service_vehicle_visible"):
+		model.set_parked_service_vehicle_visible(value)
+
 func set_serviced(value: bool) -> void:
 	serviced_value = value
 	# Только визуальное состояние; игровой источник истины находится в Simulation.

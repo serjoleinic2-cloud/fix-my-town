@@ -23,7 +23,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	for kind in ["fire_station", "fire_engine", "police_station", "police_car", "ruins"]:
+	for kind in ["depot", "fire_station", "fire_engine", "police_station", "police_car", "hospital", "ruins"]:
 		var wrapper: PackedScene = load(Catalog.scene_path(kind))
 		check(wrapper != null, "%s resolves through the visual catalog" % kind)
 		if wrapper != null:
@@ -32,6 +32,14 @@ func run() -> void:
 			visual.setup(kind, "fire_test_%s" % kind)
 			await process_frame
 			check(visual.visual_root.get_child_count() > 0, "%s creates its replaceable VisualRoot model" % kind)
+			if kind in ["depot", "fire_station", "police_station", "hospital"]:
+				var parked := visual.visual_root.find_child("ParkedServiceVehicle", true, false) as Node3D
+				check(parked != null, "%s includes its parked service vehicle" % kind)
+				if parked != null:
+					visual.set_parked_service_vehicle_visible(false)
+					check(not parked.visible, "%s parked vehicle hides while dispatched" % kind)
+					visual.set_parked_service_vehicle_visible(true)
+					check(parked.visible, "%s parked vehicle returns when available" % kind)
 			visual.queue_free()
 	var ruin_test: Node3D = GameObjectScene.instantiate()
 	root.add_child(ruin_test)
@@ -51,6 +59,8 @@ func run() -> void:
 	var station_id := build_service(game, 12, "fire_station")
 	var police_id := build_service(game, 16, "police_station")
 	var income_before := game.income()
+	check(not game.has_active_service_dispatch(station_id), "An idle fire station shows its vehicle as available")
+	check(not game.has_active_service_dispatch(police_id), "An idle police station shows its vehicle as available")
 	check(not game.has_service_building("hospital"), "Unplaced service buildings do not appear automatically")
 	check(game.job == "", "Fire warning does not dispatch a vehicle automatically")
 	check(game.start_fire(), "Opening incident starts at its stable house ID")
@@ -83,6 +93,7 @@ func run() -> void:
 	check(loaded_second_scene, "Two simultaneous fire states load")
 	check(offline_reload.can_dispatch_fire(Simulation.FIRST_FIRE_TARGET), "An available fire engine can be assigned to a selected fire")
 	check(offline_reload.dispatch_fire(Simulation.FIRST_FIRE_TARGET), "First fire engine dispatches on the common road network")
+	check(offline_reload.has_active_service_dispatch(station_id), "Fire station is marked busy while its engine is dispatched")
 	var second_dispatch: bool = offline_reload.dispatch_fire(Simulation.FIRST_FIRE_NEIGHBOR)
 	check(second_dispatch, "Second fire engine can dispatch while the first is busy")
 	if offline_reload.fire_jobs.has(Simulation.FIRST_FIRE_NEIGHBOR):
@@ -111,6 +122,7 @@ func run() -> void:
 	check(police_dispatched, "Police can be called to a blocked fire location")
 	if police_dispatched:
 		check(in_transit.police_job.depot_instance_id == police_id, "Police respond from the player-built police station")
+		check(in_transit.has_active_service_dispatch(police_id), "Police station is marked busy while its car is dispatched")
 	var police_reload = Simulation.new(true)
 	police_reload.save_path = save_path
 	var police_loaded: bool = police_reload.load_game() and not police_reload.police_job.is_empty()

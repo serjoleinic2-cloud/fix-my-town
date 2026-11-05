@@ -3003,6 +3003,17 @@ func sync_police_vehicle() -> void:
 	if audio != null:
 		audio.set_loop("police_siren", "siren", "Effects", game.police_job.phase == "travel", game.police_job.vehicle, 0.3)
 
+func sync_service_vehicle_parking() -> void:
+	if game == null or territory_visuals == null:
+		return
+	for entry: Dictionary in game.territory.buildings:
+		if str(entry.type_id) not in ["depot", "fire_station", "police_station", "hospital"]:
+			continue
+		var station_id := str(entry.instance_id)
+		var station := territory_visuals.get_node_or_null(station_id) as Node3D
+		if station != null:
+			station.set_parked_service_vehicle_visible(not game.has_active_service_dispatch(station_id))
+
 func open_fire_station_build() -> void:
 	open_service_catalog("fire_station")
 	refresh()
@@ -3121,6 +3132,7 @@ func _process(delta: float) -> void:
 		fire_car.rotation = car.rotation
 	sync_fire_engine_nodes()
 	sync_police_vehicle()
+	sync_service_vehicle_parking()
 	if leak_effect != null and is_instance_valid(leak_effect):
 		leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
 	for marker_name in ["LeakMarker", "SignalMarker"]:

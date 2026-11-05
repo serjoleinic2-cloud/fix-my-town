@@ -453,7 +453,7 @@ func step_grid(delta: float) -> void:
 		vehicle.node.rotation.y = PI / 2 * vehicle.direction if vehicle.axis == "H" else (0.0 if vehicle.direction > 0 else PI)
 
 func has_nearby_incident_blocker(position_value: Vector3) -> bool:
-	if service_active:
+	if service_active and position_value.distance_to(service_position) < 18.0:
 		return true
 	for blocker: Dictionary in blocking_positions:
 		if position_value.distance_to(blocker.position) < 18.0:

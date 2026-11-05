@@ -2820,8 +2820,15 @@ func draw_buildable_hints(type_id: String) -> void:
 	if type_id == "business_tower" and game.renewal_credits < 2:
 		return
 	var placements: Array[Vector3] = []
-	for row in range(TerritoryGrid.HEIGHT):
-		for col in range(TerritoryGrid.WIDTH):
+	# Preview only nearby build sites; this is recalculated on map pan. A full
+	# 96x96 search on every catalog click stalls phones as a district grows.
+	var hint_radius := minf(camera.size * 0.65, 48.0) if camera != null else 34.0
+	var min_col := clampi(floori((focus_point.x - hint_radius - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE), 0, TerritoryGrid.WIDTH - 1)
+	var max_col := clampi(ceili((focus_point.x + hint_radius - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE), 0, TerritoryGrid.WIDTH - 1)
+	var min_row := clampi(floori((focus_point.z - hint_radius - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE), 0, TerritoryGrid.HEIGHT - 1)
+	var max_row := clampi(ceili((focus_point.z + hint_radius - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE), 0, TerritoryGrid.HEIGHT - 1)
+	for row in range(min_row, max_row + 1):
+		for col in range(min_col, max_col + 1):
 			if game.empty_city_mode and not game.territory.is_revealed(col, row):
 				continue
 			# Skip impossible building footprints before running logistics network searches.
@@ -2845,6 +2852,24 @@ func draw_buildable_hints(type_id: String) -> void:
 						break
 				if not footprint_is_free:
 					continue
+				if game.territory.strict_building_frontier:
+					if game.territory.lot_alignment_reason(col, row, footprint, type_id) != "":
+						continue
+					var touches_road := false
+					for dy in range(footprint.y):
+						for dx in range(footprint.x):
+							var tile_col := col + dx
+							var tile_row := row + dy
+							for edge: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+								if game.territory.state_at(tile_col + edge.x, tile_row + edge.y) == "road":
+									touches_road = true
+									break
+							if touches_road:
+								break
+						if touches_road:
+							break
+					if not touches_road:
+						continue
 			if type_id in ["logistics_center", "warehouse"] and not game.logistics_site_allowed(type_id, col, row):
 				continue
 			var kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id

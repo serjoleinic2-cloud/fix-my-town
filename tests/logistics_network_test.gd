@@ -92,6 +92,14 @@ func run() -> void:
 	check(has_batched_feature(depot_model, "RepairServiceRoofBadge") and has_batched_feature(depot_model, "RepairVehicleRoofBadge"), "Repair depot and work van have matching roof emblems")
 	depot.queue_free()
 	await process_frame
+	var truck := GameObjectScene.instantiate()
+	root.add_child(truck)
+	truck.setup("delivery_truck", "delivery_shape_test")
+	var truck_model: Variant = truck.visual_root.get_child(0)
+	check(has_batched_feature(truck_model, "DeliveryCargoBox") and has_batched_feature(truck_model, "DeliveryCab"), "Logistics truck has a distinct enclosed cargo box and cab")
+	check(float(truck_model.delivery_cargo_height) > float(truck_model.delivery_cab_height), "Closed cargo box stands higher than the cab roof")
+	truck.queue_free()
+	await process_frame
 	check(not game.can_demolish_grid_building(center.instance_id), "A logistics center with active warehouses cannot be removed")
 	check(game.upgrade_grid_house(center.instance_id, true), "The logistics center can be upgraded")
 	check(game.logistics_warehouse_limit() == 2 and game.can_build_warehouse() and game.logistics_upgrade_allowed(warehouse), "Center level two permits a second warehouse and level-two warehouse upgrades")

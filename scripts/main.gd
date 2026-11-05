@@ -4083,17 +4083,37 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 	var first_route: Array = routes[0]
 	if first_route.size() < 2:
 		return
+	# Dispatch trucks from staggered positions on their assigned tour. Starting
+	# every truck at the same depot frontage made their footprints mutually block.
+	var first_route_length := 0.0
+	for segment in range(1, first_route.size()):
+		first_route_length += first_route[segment - 1].distance_to(first_route[segment])
+	if first_route_length <= 0.01:
+		return
+	var initial_progress := fposmod(float(index) * 4.2, first_route_length)
+	var initial_pose := logistics_route_pose(first_route, initial_progress)
 	var identifier := "delivery_%s_%d" % [source_id, index]
-	var truck := create_object(logistics_visuals, "delivery_truck", identifier, first_route[0])
+	var truck := create_object(logistics_visuals, "delivery_truck", identifier, initial_pose.position)
 	truck.interaction_area.collision_layer = 0
 	truck.set_language(game.language)
 	truck.visual_root.scale = Vector3.ONE * 0.68
-	var first_direction: Vector3 = first_route[1] - first_route[0]
-	truck.position = first_route[0] + logistics_lane_offset(first_direction) + Vector3(0, 0.22, 0)
+	var first_direction: Vector3 = initial_pose.direction
+	truck.position = initial_pose.position + logistics_lane_offset(first_direction) + Vector3(0, 0.22, 0)
 	truck.rotation.y = atan2(first_direction.x, first_direction.z)
 	var speed_slot := posmod(identifier.hash(), 6)
 	var delivery_speed := 4.0 + float(speed_slot) * 0.36
-	logistics_vehicles.append({"id": identifier, "object": truck, "routes": routes, "route_index": 0, "progress": 0.0, "speed": delivery_speed})
+	logistics_vehicles.append({"id": identifier, "object": truck, "routes": routes, "route_index": 0, "progress": initial_progress, "speed": delivery_speed})
+
+func logistics_route_pose(route: Array, progress_value: float) -> Dictionary:
+	var remaining := progress_value
+	for segment in range(1, route.size()):
+		var first: Vector3 = route[segment - 1]
+		var second: Vector3 = route[segment]
+		var length_value := first.distance_to(second)
+		if remaining <= length_value or segment == route.size() - 1:
+			return {"position": first.lerp(second, clampf(remaining / maxf(length_value, 0.001), 0.0, 1.0)), "direction": (second - first).normalized()}
+		remaining -= length_value
+	return {"position": route[0], "direction": (route[1] - route[0]).normalized()}
 
 func tick_logistics_vehicles(delta: float) -> void:
 	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null

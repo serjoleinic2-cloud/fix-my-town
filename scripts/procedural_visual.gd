@@ -14,6 +14,8 @@ var helicopter_timer: float = 0.0
 var helicopter_elapsed: float = 0.0
 var helicopter_departure_target := Vector3.ZERO
 var helicopter_pad := Vector3(-0.9, 3.95, -0.7)
+var delivery_cargo_height: float = 0.0
+var delivery_cab_height: float = 0.0
 
 func _ready() -> void:
 	var seed_value := absi(str(get_parent().get_parent().get("instance_id")).hash())
@@ -897,14 +899,22 @@ func civilian_vehicle(bus: bool, seed_value: int) -> void:
 			wheel.rotation.z = PI / 2
 
 func delivery_truck() -> void:
-	Art.box(self, Vector3(0, 0.62, -0.35), Vector3(1.55, 0.9, 2.25), Color("d9e0d8"))
-	Art.box(self, Vector3(0, 1.02, 1.02), Vector3(1.48, 1.15, 1.05), Color("4a7c86"))
-	Art.box(self, Vector3(0, 1.22, 1.57), Vector3(1.18, 0.62, 0.06), Color("9fc7ca"))
-	Art.box(self, Vector3(0, 0.14, -0.35), Vector3(1.62, 0.1, 2.35), Color("3f555a"))
-	Art.box(self, Vector3(0, 1.12, -0.32), Vector3(1.42, 0.14, 1.9), Color("83a66f"))
-	add_vehicle_lights(0.52, 1.59, 0.72, -1.47)
+	# Closed cargo box is taller than the cab, with distinct roof and side panels.
+	Art.box(self, Vector3(0, 0.62, -0.48), Vector3(1.62, 0.9, 2.65), Color("3f555a"))
+	var cargo_box := Art.box(self, Vector3(0, 1.55, -0.55), Vector3(1.72, 1.75, 2.55), Color("d9e0d8"))
+	cargo_box.set_meta("batch_feature", "DeliveryCargoBox")
+	delivery_cargo_height = 1.75
+	Art.box(self, Vector3(0, 2.44, -0.55), Vector3(1.76, 0.09, 2.60), Color("bcc9c5"))
+	Art.box(self, Vector3(-0.87, 1.55, -0.55), Vector3(0.06, 1.62, 2.43), Color("bfcac4"))
+	Art.box(self, Vector3(0.87, 1.55, -0.55), Vector3(0.06, 1.62, 2.43), Color("bfcac4"))
+	Art.box(self, Vector3(0, 1.55, -1.84), Vector3(1.62, 1.62, 0.06), Color("aebcb7"))
+	var cab := Art.box(self, Vector3(0, 1.02, 0.92), Vector3(1.48, 1.15, 1.0), Color("4a7c86"))
+	cab.set_meta("batch_feature", "DeliveryCab")
+	delivery_cab_height = 1.15
+	Art.box(self, Vector3(0, 1.22, 1.46), Vector3(1.18, 0.62, 0.06), Color("9fc7ca"))
+	add_vehicle_lights(0.52, 1.49, 0.72, -1.8)
 	for x in [-0.78, 0.78]:
-		for z in [-1.0, 1.15]:
+		for z in [-1.38, 1.12]:
 			var wheel := Art.cylinder(self, Vector3(x, 0.34, z), 0.34, 0.18, Color("374345"), 1, 10)
 			wheel.rotation.z = PI / 2
 

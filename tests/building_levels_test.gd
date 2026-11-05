@@ -186,6 +186,8 @@ func run() -> void:
 		# headless process exits (the check script treats leak warnings as errors).
 		for _frame in range(3):
 			await process_frame
+		# Allow asynchronous viewport/audio cleanup to finish before engine shutdown.
+		await create_timer(0.2).timeout
 	if failures == 0:
 		print("BUILDING LEVEL CHECKS: PASS")
 	quit(0 if failures == 0 else 1)

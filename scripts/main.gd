@@ -233,7 +233,7 @@ const TEXT = {
 	"catalog_requires": ["Требования: %s", "Requirements: %s"],
 	"catalog_price": ["Цена: %d", "Cost: %d"],
 	"catalog_requirement_house": ["Расчищенные клетки 2×2 и связь с дорогой города", "Cleared 2×2 cells connected to a city road"],
-	"catalog_requirement_logistics_center": ["Этап 6 · один центр на город; к нему подключаются склады", "Stage 6 · one center per city; warehouses connect to it"],
+	"catalog_requirement_logistics_center": ["Участок 2×2 у соединённой дороги · один центр на город; к нему подключаются склады", "2×2 lot beside a connected road · one center per city; warehouses connect to it"],
 	"catalog_requirement_warehouse": ["Сначала постройте логистический центр; число и уровень складов зависят от его уровня", "Build a logistics center first; warehouse count and level depend on its level"],
 	"catalog_requirement_city_hall": ["Отмеченный центральный участок 2×2; сначала расчистите его", "Highlighted central 2×2 site; clear it first"],
 	"catalog_requirement_landscape": ["Одна свободная расчищенная клетка", "One cleared free cell"],
@@ -1335,6 +1335,10 @@ func map_input(event: InputEvent) -> void:
 				open_land_cell(selected_cell)
 				return
 			var selectable: bool = cell_state == "forest" if territory_tool == "clear" else cell_state == "free"
+			# В режиме размещения здание можно навести на лес, чтобы показать
+			# контур участка и объяснить, что его сначала нужно расчистить.
+			if territory_tool not in ["clear", "road"]:
+				selectable = cell_state in ["forest", "free", "road"]
 			if selectable:
 				select_territory_cell(selected_cell)
 		return
@@ -1679,8 +1683,6 @@ func catalog_icon(type_id: String) -> String:
 func catalog_size(type_id: String) -> String:
 	if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id):
 		return t("catalog_footprint_small")
-	if type_id == "logistics_center":
-		return tr_text("3×3 клетки", "3×3 cells")
 	if type_id == "business_tower":
 		return t("catalog_footprint_renewal")
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
@@ -1718,7 +1720,7 @@ func catalog_item_unlocked(type_id: String) -> bool:
 func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	var item := Button.new()
 	item.name = "CatalogItem_" + type_id
-	item.custom_minimum_size.y = 96
+	item.custom_minimum_size.y = 144 if type_id == "warehouse" else (128 if type_id == "logistics_center" else 96)
 	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item.disabled = not catalog_item_unlocked(type_id)
 	item.add_theme_stylebox_override("normal", style(Color("eaf4f0"), 5, Color("b4c9bf")))
@@ -1772,6 +1774,7 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	size_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var requirement := label(13, info, t("catalog_requires") % catalog_requirement(type_id))
 	requirement.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	requirement.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	requirement.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var cost_label := label(17, row, t("catalog_price") % catalog_cost(type_id), true)
 	cost_label.custom_minimum_size.x = 88
@@ -1819,7 +1822,7 @@ func catalog_model_preview(type_id: String) -> Control:
 	preview_world.add_child(fill_light)
 	var camera_preview := Camera3D.new()
 	camera_preview.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera_preview.size = 20.0 if type_id in ["elite_residence", "business_tower"] else (17.0 if type_id == "logistics_center" else 13.2)
+	camera_preview.size = 20.0 if type_id in ["elite_residence", "business_tower"] else 13.2
 	camera_preview.position = Vector3(12, 11, 14)
 	camera_preview.look_at_from_position(camera_preview.position, Vector3(0, 2.0, 0), Vector3.UP)
 	camera_preview.current = true

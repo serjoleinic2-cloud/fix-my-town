@@ -25,11 +25,11 @@ func run() -> void:
 	game.start_empty_city()
 	game.campaign_stage = 6
 	game.budget = 20000
-	check(Catalog.footprint_cells("logistics_center") == Vector2i(3, 3) and Catalog.footprint_cells("warehouse") == Vector2i(2, 2), "Logistics center is a 3x3 campus and warehouse fits a standard 2x2 lot")
+	check(Catalog.footprint_cells("logistics_center") == Vector2i(2, 2) and Catalog.footprint_cells("warehouse") == Vector2i(2, 2), "Logistics center and warehouse both fit standard 2x2 lots")
 	check(game.can_build_logistics_center() and not game.can_build_warehouse(), "Stage six unlocks one logistics center before warehouses")
-	prepare_footprint(game, 8, 19, Vector2i(3, 3))
-	check(game.build_grid_building(8, 19, "logistics_center"), "Connected city can build its aligned logistics center")
-	var center: Dictionary = game.territory.building_by_id("pine_district_logistics_center_8_19")
+	prepare_footprint(game, 9, 19, Vector2i(2, 2))
+	check(game.build_grid_building(9, 19, "logistics_center"), "Connected city can build its aligned logistics center")
+	var center: Dictionary = game.territory.building_by_id("pine_district_logistics_center_9_19")
 	check(not center.is_empty() and game.logistics_warehouse_limit() == 1, "Level-one center authorizes one warehouse")
 	if center.is_empty():
 		quit(1)

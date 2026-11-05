@@ -55,7 +55,7 @@ func run() -> void:
 	check(reward_reload.load_game() and reward_reload.budget == 400 and reward_reload.campaign_reward_granted_stage == 1, "The paid stage and its reward survive save/load")
 	DirAccess.remove_absolute(reward_probe.save_path)
 	DirAccess.remove_absolute(reward_probe.save_path + ".tmp")
-	check(Catalog.footprint_cells("elite_residence") == Vector2i(2, 2) and Catalog.footprint_cells("business_tower") == Vector2i(4, 4), "Elite home fits a standard lot; tower retains its large footprint")
+	check(Catalog.footprint_cells("elite_residence") == Vector2i(2, 2) and Catalog.footprint_cells("business_tower") == Vector2i(2, 2), "Elite home and business tower both fit standard 2x2 lots")
 	campaign_contract.territory.buildings.append({"type_id": "elite_residence", "instance_id": "test_elite", "col": 5, "row": 5, "width": 4, "height": 4})
 	campaign_contract.territory.buildings.append({"type_id": "business_tower", "instance_id": "test_tower", "col": 12, "row": 5, "width": 4, "height": 4})
 	check(campaign_contract.fire_service_duration("test_elite") == 8.0 and campaign_contract.fire_service_duration("test_tower") == 12.0, "Fire response takes longer for elite residences and towers")

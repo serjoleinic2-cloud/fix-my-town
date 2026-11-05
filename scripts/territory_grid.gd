@@ -664,6 +664,25 @@ func restore(value: Variant) -> bool:
 	var new_revealed: Variant = value.get("revealed", null)
 	if not new_cells is Array or new_cells.size() != HEIGHT or not new_buildings is Array:
 		return false
+	# Older logistics centers used 3x3 lots. Shrink them in-place in the loaded
+	# snapshot, keeping their anchor, level and identity while freeing the excess.
+	new_cells = new_cells.duplicate(true)
+	new_buildings = new_buildings.duplicate(true)
+	for building: Dictionary in new_buildings:
+		if str(building.get("type_id", "")) != "logistics_center" or int(building.get("width", 0)) != 3 or int(building.get("height", 0)) != 3:
+			continue
+		var old_col := int(building.get("col", -1))
+		var old_row := int(building.get("row", -1))
+		if old_col < 0 or old_row < 0 or old_col + 3 > WIDTH or old_row + 3 > HEIGHT:
+			return false
+		for dy in range(3):
+			for dx in range(3):
+				if dx < 2 and dy < 2:
+					continue
+				if str(new_cells[old_row + dy][old_col + dx]) == "occupied":
+					new_cells[old_row + dy][old_col + dx] = "free"
+		building["width"] = 2
+		building["height"] = 2
 	for row in new_cells:
 		if not row is Array or row.size() != WIDTH:
 			return false
@@ -675,8 +694,8 @@ func restore(value: Variant) -> bool:
 		if not building is Dictionary or building.get("type_id") not in BUILDINGS or str(building.get("instance_id", "")) == "" or int(building.get("col", -1)) < 0 or int(building.get("row", -1)) < 0:
 			return false
 		var expected_footprint: Vector2i = Catalog.footprint_cells(str(building.type_id))
-		# Preserve already-built residences from the old 4x4 format. New ones use 2x2.
-		if str(building.type_id) == "elite_residence" and int(building.get("width", 0)) == 4 and int(building.get("height", 0)) == 4:
+		# Keep old saves with larger lots readable; new buildings follow the shared 2x2 grid.
+		if str(building.type_id) in ["elite_residence", "business_tower"] and int(building.get("width", 0)) == 4 and int(building.get("height", 0)) == 4:
 			expected_footprint = Vector2i(4, 4)
 		if bool(building.get("shanty", false)) and str(building.type_id) == "house":
 			expected_footprint = Vector2i.ONE

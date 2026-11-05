@@ -221,7 +221,9 @@ func depot() -> void:
 	Art.box(self, Vector3(2.3, 6.7, -1.5), Vector3(1.6, 0.2, 1.8), Color("e3d0ae"))
 
 func logistics_center() -> void:
-	# A dispatch campus; higher levels visibly add operating capacity.
+	# Keep the campus model inside the shared 2x2 building footprint.
+	scale = Vector3(0.68, 1.0, 0.68)
+	# Higher levels visibly add operating capacity.
 	Art.box(self, Vector3(0, 0.12, 0), Vector3(13.4, 0.22, 13.4), Color("9a9c91"))
 	Art.box(self, Vector3(0, 1.7, -1.15), Vector3(8.6, 3.25, 7.0), Color("d5d4c7"))
 	Art.box(self, Vector3(0, 3.4, -1.15), Vector3(8.95, 0.22, 7.25), Color("405c70"))

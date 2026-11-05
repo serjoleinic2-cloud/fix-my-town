@@ -31,6 +31,8 @@ func run() -> void:
 		for col in range(3, 7):
 			old_city.cells[row][col] = "occupied"
 	check(restored_grid.restore(old_city) and restored_grid.building_by_id("old_elite").width == 4, "Existing 4x4 elite saves remain readable")
+	old_city.buildings[0].type_id = "business_tower"
+	check(restored_grid.restore(old_city) and restored_grid.building_by_id("old_elite").width == 4, "Existing 4x4 tower saves remain readable after the compact footprint update")
 	var game := Simulation.new(false)
 	game.save_path = "user://feature_transfer_neglect_test.json"
 	game.start_empty_city()

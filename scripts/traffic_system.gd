@@ -59,6 +59,7 @@ func make_cars() -> void:
 		var kind := "city_bus" if i == 2 else "civilian_car"
 		node.setup(kind, "civilian_%d" % i)
 		node.interaction_area.collision_layer = 0
+		node.visual_root.scale = Vector3.ONE * 0.70
 		var axis := "H" if i % 4 < 2 else "V"
 		var direction := 1 if i % 2 == 0 else -1
 		var road: float = ROAD_Z[(i / 4 + 1) % ROAD_Z.size()] if axis == "H" else ROAD_X[(i / 4 + 2) % ROAD_X.size()]
@@ -418,7 +419,7 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			add_child(node)
 			node.setup("city_bus" if index == 2 else "civilian_car", "grid_vehicle_%d" % index)
 			node.interaction_area.collision_layer = 0
-			node.visual_root.scale = Vector3.ONE * (0.7 if index == 2 else 0.8)
+			node.visual_root.scale = Vector3.ONE * 0.70
 			vehicles.append({"id": "grid_vehicle_%d" % index, "node": node, "axis": "H", "direction": 1, "road": 0.0, "coordinate": 0.0, "spacing": 5.8 if index == 2 else 3.6, "speed_factor": route_rng.randf_range(0.75, 1.15), "managed": index == 2})
 			cars.append(node)
 	var enabled := 0
@@ -522,8 +523,41 @@ func has_nearby_incident_blocker(position_value: Vector3) -> bool:
 
 func grid_half_extents(vehicle: Dictionary) -> Vector2:
 	var half_length := 1.8 if vehicle.node.type_id == "city_bus" else 1.1
-	var half_width := 0.67 if vehicle.node.type_id == "city_bus" else 0.65
+	var half_width := 0.60 if vehicle.node.type_id == "city_bus" else 0.56
 	return Vector2(half_length, half_width) if vehicle.axis == "H" else Vector2(half_width, half_length)
+
+func external_vehicle_step_is_clear(current: Vector3, proposed: Vector3, half_length: float, half_width: float, actor_id: String) -> bool:
+	var movement := proposed - current
+	var horizontal := absf(movement.x) >= absf(movement.z)
+	var own_half := Vector2(half_length, half_width) if horizontal else Vector2(half_width, half_length)
+	var own_position := Vector2(proposed.x, proposed.z)
+	var old_position := Vector2(current.x, current.z)
+	for vehicle: Dictionary in vehicles:
+		if not vehicle.node.visible or str(vehicle.id) == actor_id:
+			continue
+		var other_position: Vector3 = lane_position(vehicle)
+		var other_half := grid_half_extents(vehicle)
+		var overlaps := absf(own_position.x - other_position.x) < own_half.x + other_half.x + 0.12 and absf(own_position.y - other_position.z) < own_half.y + other_half.y + 0.12
+		if overlaps:
+			var was_overlapping := absf(old_position.x - other_position.x) < own_half.x + other_half.x + 0.12 and absf(old_position.y - other_position.z) < own_half.y + other_half.y + 0.12
+			if was_overlapping and own_position.distance_squared_to(Vector2(other_position.x, other_position.z)) > old_position.distance_squared_to(Vector2(other_position.x, other_position.z)):
+				continue
+			return false
+	if service_active:
+		var service_half := Vector2(0.95, 0.95)
+		if absf(own_position.x - service_position.x) < own_half.x + service_half.x + 0.12 and absf(own_position.y - service_position.z) < own_half.y + service_half.y + 0.12:
+			return false
+	for blocker: Dictionary in blocking_positions:
+		if str(blocker.get("id", "")) == actor_id:
+			continue
+		var block_position: Vector3 = blocker.position
+		var block_half: Vector2 = blocker.get("half_extents", Vector2(0.85, 0.85))
+		if absf(own_position.x - block_position.x) < own_half.x + block_half.x + 0.12 and absf(own_position.y - block_position.z) < own_half.y + block_half.y + 0.12:
+			var was_overlapping := absf(old_position.x - block_position.x) < own_half.x + block_half.x + 0.12 and absf(old_position.y - block_position.z) < own_half.y + block_half.y + 0.12
+			if was_overlapping and own_position.distance_squared_to(Vector2(block_position.x, block_position.z)) > old_position.distance_squared_to(Vector2(block_position.x, block_position.z)):
+				continue
+			return false
+	return true
 
 func grid_safe_distance(vehicle: Dictionary, current: Vector3, proposed: Vector3) -> float:
 	var own := grid_half_extents(vehicle)

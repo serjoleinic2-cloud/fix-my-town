@@ -221,7 +221,7 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		var reservation: Dictionary = reservations.get(intersection.key, {})
 		if ahead < -1.5 and str(reservation.get("actor", "")) == str(vehicle.id):
 			reservations.erase(intersection.key)
-		var stop_distance: float = stop_distance_for(vehicle.node.type_id)
+		var stop_distance: float = stop_distance_for(vehicle.node.type_id, grid != null)
 		if ahead < stop_distance - 0.3:
 			wait_times.erase(intersection.key + ":" + vehicle.id)
 		if ahead >= stop_distance - 0.1 and ahead <= stop_distance + distance + 0.2:
@@ -272,9 +272,12 @@ func place_vehicle(vehicle: Dictionary) -> void:
 		vehicle.node.position = lane_position(vehicle)
 	vehicle.node.rotation.y = (PI / 2 * vehicle.direction) if vehicle.axis == "H" else (0.0 if vehicle.direction == 1 else PI)
 
-static func stop_distance_for(type_id: String) -> float:
+static func stop_distance_for(type_id: String, grid_markings: bool = false) -> float:
 	var front := 2.33 if type_id == "city_bus" else (1.4 if type_id == "repair_van" else 1.25)
-	return STOP_LINE_DISTANCE + front + STOP_GAP
+	# New 2x2-growth streets draw the stop line 2.3 m from junction center.
+	# The legacy road layout retains its original 3.9 m marking offset.
+	var line_offset := 2.3 if grid_markings else STOP_LINE_DISTANCE
+	return line_offset + front + STOP_GAP
 
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
@@ -397,11 +400,12 @@ func step_grid(delta: float) -> void:
 			stalled_time = 0.0
 		vehicle.last_position = current
 		vehicle.stalled_time = stalled_time
-		if stalled_time > 18.0 and vehicle.has("waiting_next") and not has_nearby_incident_blocker(current):
-			# A signal/conflict deadlock must not freeze traffic permanently. Back up
-			# to the previous road cell, then let the ordinary route picker choose again.
-			vehicle.previous = vehicle.waiting_next
-			vehicle.erase("waiting_next")
+		if stalled_time > 22.0 and not has_nearby_incident_blocker(current):
+			# Recover accidental signal/car deadlocks locally, but keep deliberate
+			# service/construction roadblocks for their owning service or police.
+			if vehicle.has("waiting_next"):
+				vehicle.previous = vehicle.waiting_next
+				vehicle.erase("waiting_next")
 			var recovery_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
 			var recovery_lane := Vector3(0, 0.22, float(vehicle.direction) * 0.68) if str(vehicle.axis) == "H" else Vector3(-float(vehicle.direction) * 0.68, 0.22, 0)
 			vehicle.target = recovery_center + recovery_lane

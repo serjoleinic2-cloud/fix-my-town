@@ -2,6 +2,7 @@ extends SceneTree
 
 const Simulation = preload("res://scripts/simulation.gd")
 const Catalog = preload("res://scripts/asset_catalog.gd")
+const GameObjectScene = preload("res://scenes/objects/game_object.tscn")
 
 var failures := 0
 
@@ -47,6 +48,22 @@ func run() -> void:
 	check(game.build_grid_building(12, 16, "house"), "A home can be built beside the local road network")
 	check(game.logistics_covered_buildings(warehouse.instance_id).any(func(entry: Dictionary): return entry.instance_id == "pine_district_house_12_16"), "Warehouse coverage follows connected roads and reaches nearby homes")
 	check(not game.logistics_vehicle_routes(str(warehouse.instance_id)).is_empty(), "Warehouse delivery trucks receive local road routes")
+	var police := GameObjectScene.instantiate()
+	root.add_child(police)
+	police.setup("police_station", "police_visual_test")
+	var police_model: Node = police.visual_root.get_child(0)
+	var heli: Node3D = police_model.find_child("PoliceHelicopter", true, false)
+	check(police_model.find_child("HelipadH", true, false) != null and heli != null, "Police station displays an H helipad and its procedural helicopter")
+	police_model._process(100.0)
+	check(heli.visible and police_model.helicopter_state == "landing", "Helicopter periodically approaches the helipad")
+	police_model._process(10.0)
+	check(police_model.helicopter_state == "landed", "Helicopter lands and waits at the police station")
+	police_model._process(30.0)
+	check(police_model.helicopter_state == "departing" and Vector2(police_model.helicopter_departure_target.x - police_model.helicopter_pad.x, police_model.helicopter_departure_target.z - police_model.helicopter_pad.z).length() > 15.0, "Helicopter departs in a randomized direction")
+	police_model._process(10.0)
+	check(police_model.helicopter_state == "waiting" and not heli.visible, "Helicopter leaves the scene and returns after a delay")
+	police.queue_free()
+	await process_frame
 	check(not game.can_demolish_grid_building(center.instance_id), "A logistics center with active warehouses cannot be removed")
 	check(game.upgrade_grid_house(center.instance_id, true), "The logistics center can be upgraded")
 	check(game.logistics_warehouse_limit() == 2 and game.can_build_warehouse() and game.logistics_upgrade_allowed(warehouse), "Center level two permits a second warehouse and level-two warehouse upgrades")

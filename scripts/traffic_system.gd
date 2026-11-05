@@ -65,7 +65,7 @@ func make_cars() -> void:
 		var road: float = ROAD_Z[(i / 4 + 1) % ROAD_Z.size()] if axis == "H" else ROAD_X[(i / 4 + 2) % ROAD_X.size()]
 		var coordinate: float = -44 + fposmod(i * 11.3, 82)
 		var vehicle := {"id": "civilian_%d" % i, "node": node, "axis": axis, "direction": direction, "road": road, "coordinate": coordinate, "spacing": 5.8 if kind == "city_bus" else FOLLOW_DISTANCE,
-			"randomized": kind != "city_bus", "speed_factor": route_rng.randf_range(0.86, 1.14), "turn_cooldown": 0.0}
+			"randomized": kind != "city_bus", "speed_factor": route_rng.randf_range(0.72, 1.28), "turn_cooldown": 0.0}
 		vehicles.append(vehicle)
 		cars.append(node)
 		place_vehicle(vehicle)
@@ -427,7 +427,7 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			node.setup("city_bus" if index == 2 else "civilian_car", "grid_vehicle_%d" % index)
 			node.interaction_area.collision_layer = 0
 			node.visual_root.scale = Vector3.ONE * 0.70
-			vehicles.append({"id": "grid_vehicle_%d" % index, "node": node, "axis": "H", "direction": 1, "road": 0.0, "coordinate": 0.0, "spacing": 5.8 if index == 2 else 3.6, "speed_factor": route_rng.randf_range(0.75, 1.15), "managed": index == 2})
+			vehicles.append({"id": "grid_vehicle_%d" % index, "node": node, "axis": "H", "direction": 1, "road": 0.0, "coordinate": 0.0, "spacing": 5.8 if index == 2 else 3.6, "speed_factor": route_rng.randf_range(0.72, 1.28), "managed": index == 2})
 			cars.append(node)
 	var enabled := 0
 	var limit := mini(desired, maxi(1, roads.size() / 6))

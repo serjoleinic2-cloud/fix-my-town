@@ -48,6 +48,7 @@ func _ready() -> void:
 		parked_service_vehicle("police_car")
 	elif visual_type == "hospital":
 		service_station(Color("e6e5dc"), Color("62a9a0"), "БОЛЬНИЦА")
+		medical_roof_emblem()
 		parked_service_vehicle("ambulance")
 	elif visual_type == "park":
 		park()
@@ -285,6 +286,11 @@ func depot() -> void:
 		Art.box(self, Vector3(x, 0.03, 3.0), Vector3(0.06, 0.025, 2.2), Color("e5dfc9"))
 	Art.box(self, Vector3(2.7, 5, -1.8), Vector3(1.3, 3.3, 1.3), Color("b7896e"))
 	Art.box(self, Vector3(2.7, 6.7, -1.8), Vector3(1.6, 0.2, 1.6), Color("e3d0ae"))
+	Art.cylinder(self, Vector3(2.7, 6.86, -1.8), 0.62, 0.08, Color("f5f2e9"), 1.0, 16)
+	Art.box(self, Vector3(2.7, 6.92, -1.8), Vector3(0.13, 0.035, 0.68), Color("d99c34"))
+	Art.box(self, Vector3(2.7, 6.92, -1.8), Vector3(0.5, 0.035, 0.13), Color("d99c34"))
+	var wrench_grip := Art.box(self, Vector3(2.7, 6.92, -1.8), Vector3(0.13, 0.035, 0.28), Color("54768c"))
+	wrench_grip.rotation.y = 0.7
 
 func logistics_center() -> void:
 	# Keep the campus model inside the shared 2x2 building footprint.
@@ -340,6 +346,21 @@ func fire_station() -> void:
 	Art.box(self, Vector3(-0.9, 3.15, 2.42), Vector3(4.6, 0.75, 0.13), Color("a9503e"))
 	for x in [-2.55, 0.75]:
 		Art.box(self, Vector3(x, 1.15, 2.48), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
+	Art.cylinder(self, Vector3(-0.9, 3.99, -0.7), 0.82, 0.08, Color("f7f5ef"), 1.0, 20)
+	var emergency_911 := Label3D.new()
+	emergency_911.name = "FireStation911"
+	emergency_911.text = "911"
+	emergency_911.font_size = 86
+	emergency_911.modulate = Color("d83b34")
+	emergency_911.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	emergency_911.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	emergency_911.position = Vector3(-0.9, 4.15, 0.12)
+	add_child(emergency_911)
+
+func medical_roof_emblem() -> void:
+	Art.cylinder(self, Vector3(-0.9, 3.99, -0.7), 0.76, 0.08, Color("fbfaf6"), 1.0, 20)
+	Art.box(self, Vector3(-0.9, 4.07, -0.7), Vector3(0.18, 0.045, 0.68), Color("d44343"))
+	Art.box(self, Vector3(-0.9, 4.07, -0.7), Vector3(0.56, 0.045, 0.18), Color("d44343"))
 
 func add_vehicle_lights(half_width: float, front_z: float, y: float, rear_z: float) -> void:
 	for side in [-1.0, 1.0]:
@@ -355,19 +376,43 @@ func parked_service_vehicle(kind: String) -> void:
 	vehicle.scale = Vector3.ONE * 0.68
 	add_child(vehicle)
 	var body_color := Color("d64f3e") if kind == "fire_engine" else (Color("f4f0df") if kind in ["police_car", "ambulance"] else Color("e5a932"))
-	Art.box(vehicle, Vector3(0, 0.72, -0.15), Vector3(1.85, 0.62, 2.6), body_color)
-	Art.box(vehicle, Vector3(0, 1.24, 0.68), Vector3(1.68, 0.86, 1.0), body_color.darkened(0.04))
-	Art.box(vehicle, Vector3(0, 1.34, 1.2), Vector3(1.42, 0.58, 0.06), Color("8bb6c0"))
+	var ambulance := kind == "ambulance"
+	var body_size := Vector3(1.95, 1.1, 2.75) if ambulance else Vector3(1.85, 0.62, 2.6)
+	var body_y := 0.9 if ambulance else 0.72
+	var cabin_size := Vector3(1.8, 0.82, 1.18) if ambulance else Vector3(1.68, 0.86, 1.0)
+	var cabin_y := 1.72 if ambulance else 1.24
+	Art.box(vehicle, Vector3(0, body_y, -0.15), body_size, body_color)
+	Art.box(vehicle, Vector3(0, cabin_y, 0.68), cabin_size, body_color.darkened(0.04))
+	Art.box(vehicle, Vector3(0, cabin_y + (0.14 if ambulance else 0.10), 1.2), Vector3(1.42, 0.58, 0.06), Color("8bb6c0"))
 	if kind == "ambulance":
+		# Red cross on white roof circle and on both sides of the minibus body.
 		Art.box(vehicle, Vector3(0, 1.0, -0.18), Vector3(0.18, 0.44, 0.06), Color("d95046"))
 		Art.box(vehicle, Vector3(0, 1.0, -0.18), Vector3(0.52, 0.16, 0.06), Color("d95046"))
 		Art.box(vehicle, Vector3(0, 0.7, 0), Vector3(1.9, 0.12, 2.5), Color("4aa4a0"))
+		Art.cylinder(vehicle, Vector3(0, 2.20, -0.28), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
+		Art.box(vehicle, Vector3(0, 2.25, -0.28), Vector3(0.13, 0.04, 0.46), Color("d44343"))
+		Art.box(vehicle, Vector3(0, 2.25, -0.28), Vector3(0.40, 0.04, 0.13), Color("d44343"))
+		for side in [-1.0, 1.0]:
+			var side_disc := Art.cylinder(vehicle, Vector3(side * 0.99, 1.08, -0.2), 0.31, 0.06, Color("fffdf8"), 1.0, 16)
+			side_disc.rotation.z = PI / 2
+			Art.box(vehicle, Vector3(side * 1.03, 1.08, -0.2), Vector3(0.04, 0.10, 0.42), Color("d44343"))
+			Art.box(vehicle, Vector3(side * 1.03, 1.08, -0.2), Vector3(0.04, 0.36, 0.10), Color("d44343"))
 	elif kind == "police_car":
 		Art.box(vehicle, Vector3(0, 1.57, 0.15), Vector3(1.54, 0.12, 1.9), Color("315b88"))
+		for side in [-1.0, 1.0]:
+			Art.box(vehicle, Vector3(side * 0.94, 0.95, 0.0), Vector3(0.06, 0.42, 1.05), Color("315b88"))
+			Art.sphere(vehicle, Vector3(side * 0.98, 0.97, 0.0), 0.12, Color("d7c884"))
 	elif kind == "fire_engine":
 		Art.box(vehicle, Vector3(0, 0.96, -0.3), Vector3(0.16, 0.18, 1.6), Color("f3d463"))
+		Art.cylinder(vehicle, Vector3(0, 1.94, -0.58), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
+		for side in [-1.0, 1.0]:
+			Art.box(vehicle, Vector3(side * 0.18, 1.99, -0.58), Vector3(0.12, 0.04, 0.44), Color("d44343"))
+			Art.box(vehicle, Vector3(0, 1.99, -0.58), Vector3(0.38, 0.04, 0.12), Color("d44343"))
 	else:
 		Art.box(vehicle, Vector3(0, 1.18, -0.64), Vector3(1.35, 0.42, 1.15), Color("d79626"))
+		Art.cylinder(vehicle, Vector3(0, 1.48, -0.64), 0.31, 0.06, Color("fffdf8"), 1.0, 16)
+		Art.box(vehicle, Vector3(0, 1.53, -0.64), Vector3(0.10, 0.04, 0.38), Color("d99c34"))
+		Art.box(vehicle, Vector3(0, 1.53, -0.64), Vector3(0.34, 0.04, 0.10), Color("d99c34"))
 	for side in [-1.0, 1.0]:
 		for z in [-0.88, 0.88]:
 			var wheel := Art.cylinder(vehicle, Vector3(side * 0.9, 0.39, z), 0.34, 0.2, Color("343a3b"), 0.0, 10)

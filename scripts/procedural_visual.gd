@@ -6,6 +6,14 @@ const Art = preload("res://scripts/art.gd")
 @export_range(1, 3) var visual_level: int = 1
 var windows: Array[MeshInstance3D] = []
 var signs: Array[Label3D] = []
+var helicopter_rng := RandomNumberGenerator.new()
+var police_helicopter: Node3D
+var helicopter_rotor: Node3D
+var helicopter_state: String = "waiting"
+var helicopter_timer: float = 0.0
+var helicopter_elapsed: float = 0.0
+var helicopter_departure_target := Vector3.ZERO
+var helicopter_pad := Vector3(-0.9, 3.95, -0.7)
 
 func _ready() -> void:
 	var seed_value := absi(str(get_parent().get_parent().get("instance_id")).hash())
@@ -36,6 +44,7 @@ func _ready() -> void:
 		parked_service_vehicle("fire_engine")
 	elif visual_type == "police_station":
 		service_station(Color("54768c"), Color("d9e5e6"), "ПОЛИЦИЯ")
+		police_helipad()
 		parked_service_vehicle("police_car")
 	elif visual_type == "hospital":
 		service_station(Color("e6e5dc"), Color("62a9a0"), "БОЛЬНИЦА")
@@ -97,6 +106,44 @@ func _ready() -> void:
 			jet.rotation.x = cos(angle) * 0.45
 		Art.cylinder(self, Vector3(1.45, 0.06, 0), 0.48, 0.1, Color("776d58"))
 	Art.batch(self)
+	set_process(visual_type == "police_station")
+
+func _process(delta: float) -> void:
+	if police_helicopter == null or helicopter_rotor == null:
+		return
+	helicopter_rotor.rotation.y += delta * 16.0
+	match helicopter_state:
+		"waiting":
+			helicopter_timer -= delta
+			if helicopter_timer <= 0.0:
+				helicopter_state = "landing"
+				helicopter_elapsed = 0.0
+				police_helicopter.visible = true
+				police_helicopter.position = helicopter_pad + Vector3(0, 11, 0)
+		"landing":
+			helicopter_elapsed += delta
+			var landing_progress := clampf(helicopter_elapsed / 4.0, 0.0, 1.0)
+			police_helicopter.position = helicopter_pad + Vector3(0, lerpf(11.0, 0.48, landing_progress), 0)
+			if landing_progress >= 1.0:
+				helicopter_state = "landed"
+				helicopter_timer = helicopter_rng.randf_range(7.0, 14.0)
+		"landed":
+			helicopter_timer -= delta
+			if helicopter_timer <= 0.0:
+				var angle := helicopter_rng.randf_range(0.0, TAU)
+				var flight_direction := Vector3(sinf(angle), 0, cosf(angle))
+				police_helicopter.rotation.y = angle
+				helicopter_departure_target = helicopter_pad + flight_direction * 18.0 + Vector3(0, 12.0, 0)
+				helicopter_state = "departing"
+				helicopter_elapsed = 0.0
+		"departing":
+			helicopter_elapsed += delta
+			var departure_progress := clampf(helicopter_elapsed / 5.0, 0.0, 1.0)
+			police_helicopter.position = helicopter_pad + Vector3(0, 0.48, 0).lerp(helicopter_departure_target - helicopter_pad, departure_progress)
+			if departure_progress >= 1.0:
+				police_helicopter.visible = false
+				helicopter_state = "waiting"
+				helicopter_timer = helicopter_rng.randf_range(25.0, 55.0)
 
 func house(seed_value: int) -> void:
 	var lift := (visual_level - 1) * 1.5
@@ -349,6 +396,47 @@ func set_parked_service_vehicle_visible(value: bool) -> void:
 	var vehicle := find_child("ParkedServiceVehicle", false, false) as Node3D
 	if vehicle != null:
 		vehicle.visible = value
+
+func police_helipad() -> void:
+	# Roof pad stays within the police station's standard 2x2 lot.
+	Art.cylinder(self, helicopter_pad, 1.25, 0.08, Color("53646a"), 1.0, 20)
+	for side in [-1.0, 1.0]:
+		var rim := Art.box(self, helicopter_pad + Vector3(side * 1.12, 0.055, 0), Vector3(0.06, 0.025, 0.92), Color("e5e5d8"))
+		rim.rotation.y = 0.5
+		var cross_rim := Art.box(self, helicopter_pad + Vector3(0, 0.055, side * 1.12), Vector3(0.92, 0.025, 0.06), Color("e5e5d8"))
+		cross_rim.rotation.y = 0.5
+	for x in [-0.28, 0.28]:
+		var stem := Art.box(self, helicopter_pad + Vector3(x, 0.075, 0), Vector3(0.16, 0.035, 0.9), Color("fff4d8"))
+		stem.name = "HelipadH"
+	var bar := Art.box(self, helicopter_pad + Vector3(0, 0.075, 0), Vector3(0.56, 0.035, 0.16), Color("fff4d8"))
+	bar.name = "HelipadH"
+
+	police_helicopter = Node3D.new()
+	police_helicopter.name = "PoliceHelicopter"
+	police_helicopter.position = helicopter_pad + Vector3(0, 11, 0)
+	police_helicopter.visible = false
+	add_child(police_helicopter)
+	var fuselage := Art.box(police_helicopter, Vector3(0, 0, 0), Vector3(0.78, 0.42, 1.55), Color("354b57"))
+	fuselage.set_meta("dynamic", true)
+	var cabin := Art.box(police_helicopter, Vector3(0, 0.12, 0.3), Vector3(0.76, 0.48, 0.7), Color("78aebe"))
+	cabin.set_meta("dynamic", true)
+	var tail := Art.box(police_helicopter, Vector3(0, 0.06, -1.35), Vector3(0.14, 0.14, 1.35), Color("354b57"))
+	tail.set_meta("dynamic", true)
+	for side in [-1.0, 1.0]:
+		var skid := Art.box(police_helicopter, Vector3(side * 0.38, -0.34, 0), Vector3(0.08, 0.08, 1.65), Color("aebcc0"))
+		skid.set_meta("dynamic", true)
+		var strut := Art.box(police_helicopter, Vector3(side * 0.3, -0.2, 0), Vector3(0.06, 0.3, 0.06), Color("aebcc0"))
+		strut.set_meta("dynamic", true)
+	helicopter_rotor = Node3D.new()
+	helicopter_rotor.name = "MainRotor"
+	helicopter_rotor.position = Vector3(0, 0.38, 0)
+	police_helicopter.add_child(helicopter_rotor)
+	var blade_a := Art.box(helicopter_rotor, Vector3.ZERO, Vector3(2.6, 0.035, 0.1), Color("202c32"))
+	blade_a.set_meta("dynamic", true)
+	var blade_b := Art.box(helicopter_rotor, Vector3.ZERO, Vector3(0.1, 0.035, 2.6), Color("202c32"))
+	blade_b.set_meta("dynamic", true)
+	helicopter_rng.seed = absi(str(get_parent().get_parent().get("instance_id")).hash()) + 9271
+	helicopter_timer = helicopter_rng.randf_range(20.0, 45.0)
 
 func service_station(wall: Color, accent: Color, sign_text: String) -> void:
 	service_building_shell(wall, Color("70787a"), Color("8f8170"))

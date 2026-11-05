@@ -51,7 +51,7 @@ func run() -> void:
 	var police := GameObjectScene.instantiate()
 	root.add_child(police)
 	police.setup("police_station", "police_visual_test")
-	var police_model: Node = police.visual_root.get_child(0)
+	var police_model: Variant = police.visual_root.get_child(0)
 	var heli: Node3D = police_model.find_child("PoliceHelicopter", true, false)
 	check(police_model.find_child("HelipadH", true, false) != null and heli != null, "Police station displays an H helipad and its procedural helicopter")
 	police_model._process(100.0)
@@ -63,6 +63,28 @@ func run() -> void:
 	police_model._process(10.0)
 	check(police_model.helicopter_state == "waiting" and not heli.visible, "Helicopter leaves the scene and returns after a delay")
 	police.queue_free()
+	await process_frame
+	var fire_station := GameObjectScene.instantiate()
+	root.add_child(fire_station)
+	fire_station.setup("fire_station", "fire_visual_test")
+	var fire_model: Variant = fire_station.visual_root.get_child(0)
+	var fire_sign: Label3D = fire_model.find_child("FireStation911", true, false) as Label3D
+	check(fire_sign != null and fire_sign.text == "911" and fire_model.find_child("FireStation911Badge", true, false) != null and fire_model.find_child("FireEngineRoofBadge", true, false) != null, "Fire station has a 911 roof badge and fire engine roof insignia")
+	fire_station.queue_free()
+	await process_frame
+	var hospital := GameObjectScene.instantiate()
+	root.add_child(hospital)
+	hospital.setup("hospital", "hospital_visual_test")
+	var hospital_model: Variant = hospital.visual_root.get_child(0)
+	check(hospital_model.find_child("HospitalRoofBadge", true, false) != null and hospital_model.find_child("AmbulanceRoofBadge", true, false) != null and hospital_model.find_child("AmbulanceSideBadge", true, false) != null, "Hospital and ambulance carry visible medical emblems")
+	hospital.queue_free()
+	await process_frame
+	var depot := GameObjectScene.instantiate()
+	root.add_child(depot)
+	depot.setup("depot", "repair_visual_test")
+	var depot_model: Variant = depot.visual_root.get_child(0)
+	check(depot_model.find_child("RepairServiceRoofBadge", true, false) != null and depot_model.find_child("RepairVehicleRoofBadge", true, false) != null, "Repair depot and work van have matching roof emblems")
+	depot.queue_free()
 	await process_frame
 	check(not game.can_demolish_grid_building(center.instance_id), "A logistics center with active warehouses cannot be removed")
 	check(game.upgrade_grid_house(center.instance_id, true), "The logistics center can be upgraded")

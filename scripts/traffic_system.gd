@@ -115,8 +115,11 @@ func get_problem_signal() -> Node3D:
 func step(delta: float) -> void:
 	clock += delta
 	for key in reservations.keys():
-		reservations[key].remaining -= delta
-		if reservations[key].remaining <= 0:
+		var reservation: Dictionary = reservations[key]
+		reservation.remaining = float(reservation.get("remaining", 0.0)) - delta
+		if reservation.get("grid_lock", false) and reservation.get("entered", false):
+			continue
+		if reservation.remaining <= 0:
 			reservations.erase(key)
 	update_lights()
 	if grid != null:
@@ -221,7 +224,7 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		var crossing: float = intersection.x if vehicle.axis == "H" else intersection.z
 		var ahead: float = (crossing - vehicle.coordinate) * vehicle.direction
 		var reservation: Dictionary = reservations.get(intersection.key, {})
-		if ahead < -1.5 and str(reservation.get("actor", "")) == str(vehicle.id):
+		if ahead < -1.5 and str(reservation.get("actor", "")) == str(vehicle.id) and not reservation.get("grid_lock", false):
 			reservations.erase(intersection.key)
 		var stop_distance: float = stop_distance_for(vehicle.node.type_id, grid != null)
 		if ahead < stop_distance - 0.3:
@@ -234,25 +237,45 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		distance = grid_safe_distance(vehicle, current_position, proposed)
 	return distance
 
+func reserve_intersection(intersection: Dictionary, actor: String) -> void:
+	var reservation := {"actor": actor, "remaining": 2.5}
+	var is_grid_vehicle := grid != null and vehicles.any(func(vehicle: Dictionary) -> bool: return str(vehicle.get("id", "")) == actor)
+	if is_grid_vehicle:
+		# A moving grid car owns the turn until its rear clears the conflict point.
+		reservation = {"actor": actor, "remaining": 8.0, "grid_lock": true, "entered": false, "x": float(intersection.x), "z": float(intersection.z)}
+	reservations[intersection.key] = reservation
+
+func release_grid_reservations_for_vehicle(vehicle: Dictionary) -> void:
+	var position_value: Vector3 = vehicle.node.position
+	for key in reservations.keys():
+		var reservation: Dictionary = reservations[key]
+		if not reservation.get("grid_lock", false) or str(reservation.get("actor", "")) != str(vehicle.id):
+			continue
+		var distance := Vector2(position_value.x - float(reservation.x), position_value.z - float(reservation.z)).length()
+		if distance <= 3.0:
+			reservation.entered = true
+		elif reservation.get("entered", false):
+			reservations.erase(key)
+
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
 	if not cross_traffic_clear(intersection, axis, actor):
 		return false
 	if reservations.has(intersection.key) and str(reservations[intersection.key].get("actor", "")) != actor:
 		return false
 	if intersection.get("unsignalized", false):
-		reservations[intersection.key] = {"actor": actor, "remaining": 2.5}
+		reserve_intersection(intersection, actor)
 		return true
 	if not is_broken(intersection):
 		if phase(axis, clock + intersection.offset) != "green":
 			return false
-		reservations[intersection.key] = {"actor": actor, "remaining": 2.5}
+		reserve_intersection(intersection, actor)
 		return true
 	var wait_key: String = intersection.key + ":" + actor
 	wait_times[wait_key] = float(wait_times.get(wait_key, 0)) + delta
 	if wait_times[wait_key] < 0.9:
 		return false
 	# Сломанный узел пропускает машины по очереди после паузы.
-	reservations[intersection.key] = {"actor": actor, "remaining": 2.5}
+	reserve_intersection(intersection, actor)
 	return true
 
 func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
@@ -487,6 +510,7 @@ func step_grid(delta: float) -> void:
 		vehicle.node.position = current.move_toward(proposed, grid_safe_distance(vehicle, current, proposed))
 		vehicle.coordinate = vehicle.node.position.x if vehicle.axis == "H" else vehicle.node.position.z
 		vehicle.node.rotation.y = PI / 2 * vehicle.direction if vehicle.axis == "H" else (0.0 if vehicle.direction > 0 else PI)
+		release_grid_reservations_for_vehicle(vehicle)
 
 func has_nearby_incident_blocker(position_value: Vector3) -> bool:
 	if service_active and position_value.distance_to(service_position) < 18.0:

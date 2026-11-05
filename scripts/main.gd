@@ -4104,7 +4104,7 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 	logistics_vehicles.append({"id": identifier, "object": truck, "routes": routes, "route_index": 0, "progress": 0.0, "speed": delivery_speed})
 
 func tick_logistics_vehicles(delta: float) -> void:
-	var traffic_controller: Node = scenery.traffic_controller if scenery != null else null
+	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
 	# Register every truck's current lane/footprint before moving any of them.
 	for parked_vehicle: Dictionary in logistics_vehicles:
 		var parked_truck: Node3D = parked_vehicle.get("object")

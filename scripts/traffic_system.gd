@@ -361,20 +361,22 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 		)
 		signal_positions.append(signal_cell)
 	# Corner bends are conflict points too. Add virtual (unlit) intersections so
-	# opposing cars reserve the same narrow turn space instead of meeting nose-to-nose.
-	for road_cell: Vector2i in roads:
-		var links: Array[Vector2i] = []
-		for direction: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-			if source.state_at(road_cell.x + direction.x, road_cell.y + direction.y) == "road":
-				links.append(direction)
-		if links.size() != 2:
-			continue
-		var has_horizontal := links.any(func(item: Vector2i) -> bool: return item.y == 0)
-		var has_vertical := links.any(func(item: Vector2i) -> bool: return item.x == 0)
-		if not has_horizontal or not has_vertical or road_cell in signal_positions:
-			continue
-		var corner_world: Vector3 = source.cell_world(road_cell.x, road_cell.y)
-		intersections.append({"key": "grid_corner_%d_%d" % [road_cell.x, road_cell.y], "x": corner_world.x, "z": corner_world.z, "offset": 0.0, "node": null, "unsignalized": true})
+	# No cars on the empty foundation: do not publish virtual traffic nodes.
+	if desired > 0 or bus_active:
+		# opposing cars reserve the same narrow turn space instead of meeting nose-to-nose.
+		for road_cell: Vector2i in roads:
+			var links: Array[Vector2i] = []
+			for direction: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				if source.state_at(road_cell.x + direction.x, road_cell.y + direction.y) == "road":
+					links.append(direction)
+			if links.size() != 2:
+				continue
+			var has_horizontal := links.any(func(item: Vector2i) -> bool: return item.y == 0)
+			var has_vertical := links.any(func(item: Vector2i) -> bool: return item.x == 0)
+			if not has_horizontal or not has_vertical or road_cell in signal_positions:
+				continue
+			var corner_world: Vector3 = source.cell_world(road_cell.x, road_cell.y)
+			intersections.append({"key": "grid_corner_%d_%d" % [road_cell.x, road_cell.y], "x": corner_world.x, "z": corner_world.z, "offset": 0.0, "node": null, "unsignalized": true})
 	var signature := str(roads)
 	var changed := signature != grid_signature
 	grid_signature = signature

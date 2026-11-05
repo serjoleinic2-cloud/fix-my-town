@@ -24,6 +24,10 @@ func run() -> void:
 		var time := i * 0.05
 		check(not (Traffic.phase("H", time) == "green" and Traffic.phase("V", time) == "green"), "Conflicting greens")
 	check(traffic.intersections.size() == 49, "Every grid intersection controlled")
+	var turn_lock := {"key": "synthetic_turn_lock", "x": 1000.0, "z": 1000.0, "offset": 0.0, "unsignalized": true}
+	check(traffic.permission(turn_lock, "H", "turn_car_a", 0.05), "First car reserves an unsignalized turn conflict point")
+	check(not traffic.permission(turn_lock, "V", "turn_car_b", 0.05), "Opposing car waits for the same turn conflict point")
+	traffic.reservations.erase("synthetic_turn_lock")
 	check(traffic.vehicles.filter(func(v): return v.node.type_id == "city_bus").size() == 1, "One replaceable bus")
 	var speed_factors: Array = traffic.vehicles.filter(func(v): return bool(v.get("randomized", false))).map(func(v): return float(v.get("speed_factor", 1.0)))
 	check(speed_factors.max() - speed_factors.min() > 0.08, "Civilian cars use different cruising speeds")

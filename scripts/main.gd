@@ -146,7 +146,7 @@ const TEXT = {
 	"title": ["FIX MY TOWN · Мэрия", "FIX MY TOWN · City Hall"],
 	"goal": ["1. Почините светофор и протечку\n2. Постройте кафе или парк", "1. Repair the signal and water leak\n2. Build a café or park"],
 	"done": ["Квартал ожил! Сценарий завершён.\nПродолжайте обустраивать район.", "The neighborhood is thriving! Scenario complete.\nKeep improving your district."],
-	"stats": ["Бюджет  %d   •   Жители  %d\nНастроение  %d%%   •   Доход  +%d / 12 сек.", "Budget  %d   •   Residents  %d\nHappiness  %d%%   •   Income  +%d / 12 sec"],
+	"stats": ["Бюджет  %s   •   Жители  %d\nНастроение  %d%%   •   Доход  +%s / 12 сек.", "Budget  %s   •   Residents  %d\nHappiness  %d%%   •   Income  +%s / 12 sec"],
 	"signal": ["Светофор", "Traffic signal"], "leak": ["Протечка", "Water leak"],
 	"inspection": ["Проверка обслуживания", "Service inspection"],
 	"fire": ["Пожар", "Fire"],
@@ -438,7 +438,10 @@ func build_ui() -> void:
 	budget_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	var budget_row := hbox(budget_card, 5)
 	icon(budget_row, "coin", 25)
-	budget_label = label(22, budget_row, "", true)
+	budget_label = label(19, budget_row, "", true)
+	budget_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	budget_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	budget_label.clip_text = true
 	var rating_card := card(top_row)
 	rating_card.custom_minimum_size.x = 132
 	rating_card.add_theme_stylebox_override("panel", style(PAPER, 12))
@@ -1807,7 +1810,7 @@ func catalog_model_preview(type_id: String) -> Control:
 	preview_viewport.size = Vector2i(128, 112)
 	preview_viewport.own_world_3d = true
 	preview_viewport.transparent_bg = true
-	preview_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	preview_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	preview_box.add_child(preview_viewport)
 	var preview_world := Node3D.new()
 	preview_world.name = "PreviewWorld"
@@ -2323,9 +2326,9 @@ func refresh() -> void:
 	for i in range(5):
 		quality_legend.find_child("Band%d" % i, true, false).text = "● " + QUALITY_NAMES[0 if game.language == "ru" else 1][i]
 	redraw_transit()
-	stats.text = t("stats") % [game.budget, game.population(), game.happiness(), game.net_income()]
+	stats.text = t("stats") % [format_budget_display(game.budget), game.population(), game.happiness(), format_budget_display(game.net_income())]
 	district_label.text = t("district_name")
-	budget_label.text = str(game.budget)
+	budget_label.text = format_budget_display(game.budget)
 	rating_label.text = t("rating") % game.happiness()
 	language_button.text = "EN" if game.language == "ru" else "RU"
 	for key in nav_buttons:
@@ -2795,6 +2798,15 @@ func update_preview() -> void:
 	for entry: Dictionary in influence_targets(selected, preview_kind):
 		outline(entry.position, Color("a7f384"))
 
+func format_budget_display(value: int) -> String:
+	var sign_prefix := "-" if value < 0 else ""
+	var magnitude := absi(value)
+	if magnitude < 10000:
+		return str(value)
+	if magnitude < 1000000:
+		return sign_prefix + ("%.1fK" % (float(magnitude) / 1000.0))
+	return sign_prefix + ("%.1fM" % (float(magnitude) / 1000000.0))
+
 func draw_buildable_hints(type_id: String) -> void:
 	if type_id == "" or highlights == null:
 		return
@@ -2812,6 +2824,27 @@ func draw_buildable_hints(type_id: String) -> void:
 		for col in range(TerritoryGrid.WIDTH):
 			if game.empty_city_mode and not game.territory.is_revealed(col, row):
 				continue
+			# Skip impossible building footprints before running logistics network searches.
+			var requires_cleared_lot := type_id not in ["clear", "road"] and not Catalog.is_landscaping(type_id)
+			if requires_cleared_lot:
+				var footprint_is_free := true
+				for dy in range(footprint.y):
+					for dx in range(footprint.x):
+						var tile_col := col + dx
+						var tile_row := row + dy
+						if tile_col >= TerritoryGrid.WIDTH or tile_row >= TerritoryGrid.HEIGHT:
+							footprint_is_free = false
+							break
+						if game.empty_city_mode and not game.territory.is_revealed(tile_col, tile_row):
+							footprint_is_free = false
+							break
+						if game.territory.state_at(tile_col, tile_row) != "free":
+							footprint_is_free = false
+							break
+					if not footprint_is_free:
+						break
+				if not footprint_is_free:
+					continue
 			if type_id in ["logistics_center", "warehouse"] and not game.logistics_site_allowed(type_id, col, row):
 				continue
 			var kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id

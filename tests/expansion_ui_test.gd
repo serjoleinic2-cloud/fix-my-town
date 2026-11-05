@@ -27,6 +27,12 @@ func run() -> void:
 		scene.game.save_path = "user://test_startup.json"
 		viewport.add_child(scene)
 		scene.set_process(false)
+		check(scene.format_budget_display(1250000) == "1.3M", "Large balances are compact and cannot stretch the budget HUD")
+		check(scene.format_budget_display(-12500) == "-12.5K", "Negative balances retain their sign in compact form")
+		var logistics_preview: Control = scene.catalog_model_preview("logistics_center")
+		var logistics_viewport := logistics_preview.get_child(0) as SubViewport
+		check(logistics_viewport.render_target_update_mode == SubViewport.UPDATE_ONCE, "Static logistics catalog preview renders once instead of consuming every frame")
+		logistics_preview.queue_free()
 		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://expansion_ui_test.json"
 		scene.game.budget = 5000

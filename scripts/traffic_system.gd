@@ -90,6 +90,8 @@ func is_broken(intersection: Dictionary) -> bool:
 
 func update_lights() -> void:
 	for intersection: Dictionary in intersections:
+		if intersection.get("unsignalized", false) or intersection.get("node") == null:
+			continue
 		var horizontal := phase("H", clock + intersection.offset)
 		var vertical := phase("V", clock + intersection.offset)
 		if is_broken(intersection):
@@ -235,16 +237,22 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
 	if not cross_traffic_clear(intersection, axis, actor):
 		return false
+	if reservations.has(intersection.key) and str(reservations[intersection.key].get("actor", "")) != actor:
+		return false
+	if intersection.get("unsignalized", false):
+		reservations[intersection.key] = {"actor": actor, "remaining": 2.5}
+		return true
 	if not is_broken(intersection):
-		return phase(axis, clock + intersection.offset) == "green"
+		if phase(axis, clock + intersection.offset) != "green":
+			return false
+		reservations[intersection.key] = {"actor": actor, "remaining": 2.5}
+		return true
 	var wait_key: String = intersection.key + ":" + actor
 	wait_times[wait_key] = float(wait_times.get(wait_key, 0)) + delta
 	if wait_times[wait_key] < 0.9:
 		return false
-	if reservations.has(intersection.key) and reservations[intersection.key].actor != actor:
-		return false
 	# Сломанный узел пропускает машины по очереди после паузы.
-	reservations[intersection.key] = {"actor": actor, "remaining": 2.0}
+	reservations[intersection.key] = {"actor": actor, "remaining": 2.5}
 	return true
 
 func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
@@ -345,6 +353,28 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 		for col in range(source.WIDTH):
 			if source.state_at(col, row) == "road":
 				roads.append(Vector2i(col, row))
+	var signal_positions: Array[Vector2i] = []
+	for signal: Dictionary in intersections:
+		var signal_cell := Vector2i(
+			int(round((signal.x - source.ORIGIN.x) / source.CELL_SIZE)),
+			int(round((signal.z - source.ORIGIN.z) / source.CELL_SIZE))
+		)
+		signal_positions.append(signal_cell)
+	# Corner bends are conflict points too. Add virtual (unlit) intersections so
+	# opposing cars reserve the same narrow turn space instead of meeting nose-to-nose.
+	for road_cell: Vector2i in roads:
+		var links: Array[Vector2i] = []
+		for direction: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			if source.state_at(road_cell.x + direction.x, road_cell.y + direction.y) == "road":
+				links.append(direction)
+		if links.size() != 2:
+			continue
+		var has_horizontal := links.any(func(item: Vector2i) -> bool: return item.y == 0)
+		var has_vertical := links.any(func(item: Vector2i) -> bool: return item.x == 0)
+		if not has_horizontal or not has_vertical or road_cell in signal_positions:
+			continue
+		var corner_world: Vector3 = source.cell_world(road_cell.x, road_cell.y)
+		intersections.append({"key": "grid_corner_%d_%d" % [road_cell.x, road_cell.y], "x": corner_world.x, "z": corner_world.z, "offset": 0.0, "node": null, "unsignalized": true})
 	var signature := str(roads)
 	var changed := signature != grid_signature
 	grid_signature = signature

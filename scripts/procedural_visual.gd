@@ -212,19 +212,32 @@ func cafe() -> void:
 		Art.cylinder(self, Vector3(x * 1.65, 0.4, 1.5), 0.3, 0.7, Color("a58b66"), 1.2)
 		Art.tree(self, Vector3(x * 1.65, 0.4, 1.5), 0.35, false, 1)
 
-func depot() -> void:
-	Art.box(self, Vector3(0, 1.8, -0.6), Vector3(6.5, 3.6, 4.3), Color("c58f72"))
-	Art.box(self, Vector3(0, 3.7, -0.6), Vector3(6.8, 0.3, 4.6), Color("999a88"))
-	for x in [-1.6, 1.6]:
-		Art.box(self, Vector3(x, 1.3, 1.6), Vector3(2.45, 2.65, 0.08), Color("56666a"))
-		for y in [0.3, 0.7, 1.1, 1.5, 1.9, 2.3]:
-			Art.box(self, Vector3(x, y, 1.66), Vector3(2.4, 0.04, 0.04), Color("758483"))
-	Art.box(self, Vector3(0, 3.25, 1.68), Vector3(6.2, 0.8, 0.12), Color("9c5d49"))
+func service_building_shell(wall: Color, roof: Color, foundation: Color) -> void:
+	# L-shaped plan leaves the front-right corner open as a real vehicle court.
+	Art.box(self, Vector3(-0.9, 0.16, -0.7), Vector3(5.4, 0.24, 6.0), foundation)
+	Art.box(self, Vector3(2.7, 0.16, -1.7), Vector3(1.8, 0.24, 4.0), foundation)
+	Art.box(self, Vector3(-0.9, 1.8, -0.7), Vector3(5.4, 3.6, 6.0), wall)
+	Art.box(self, Vector3(2.7, 1.8, -1.7), Vector3(1.8, 3.6, 4.0), wall)
+	Art.box(self, Vector3(-0.9, 3.7, -0.7), Vector3(5.65, 0.3, 6.25), roof)
+	Art.box(self, Vector3(2.7, 3.7, -1.7), Vector3(2.05, 0.3, 4.25), roof)
+	var corner := Node3D.new()
+	corner.name = "ServiceVehicleCornerCutout"
+	corner.set_meta("vehicle_court_open", true)
+	add_child(corner)
+	Art.box(corner, Vector3(2.0, 0.13, 0.52), Vector3(1.1, 0.12, 0.12), Color("d7c6a2"))
+	corner.rotation.y = -0.55
 
-	for x in [-2.8, 0, 2.8]:
-		Art.box(self, Vector3(x, 0.03, 3), Vector3(0.06, 0.025, 2.2), Color("e5dfc9"))
-	Art.box(self, Vector3(2.3, 5, -1.5), Vector3(1.3, 3.3, 1.5), Color("b7896e"))
-	Art.box(self, Vector3(2.3, 6.7, -1.5), Vector3(1.6, 0.2, 1.8), Color("e3d0ae"))
+func depot() -> void:
+	service_building_shell(Color("c58f72"), Color("999a88"), Color("8f8170"))
+	for x in [-2.45, -0.15]:
+		Art.box(self, Vector3(x, 1.3, 2.34), Vector3(2.0, 2.65, 0.08), Color("56666a"))
+		for y in [0.3, 0.7, 1.1, 1.5, 1.9, 2.3]:
+			Art.box(self, Vector3(x, y, 2.40), Vector3(1.94, 0.04, 0.04), Color("758483"))
+	Art.box(self, Vector3(-1.3, 3.25, 2.42), Vector3(4.6, 0.8, 0.12), Color("9c5d49"))
+	for x in [-2.8, -0.9, 1.0]:
+		Art.box(self, Vector3(x, 0.03, 3.0), Vector3(0.06, 0.025, 2.2), Color("e5dfc9"))
+	Art.box(self, Vector3(2.7, 5, -1.8), Vector3(1.3, 3.3, 1.3), Color("b7896e"))
+	Art.box(self, Vector3(2.7, 6.7, -1.8), Vector3(1.6, 0.2, 1.6), Color("e3d0ae"))
 
 func logistics_center() -> void:
 	# Keep the campus model inside the shared 2x2 building footprint.
@@ -273,15 +286,13 @@ func warehouse() -> void:
 		Art.cylinder(self, Vector3(2.55, 4.25, -2.1), 1.12, 0.72, Color("718b91"), 0.08, 12)
 
 func fire_station() -> void:
-	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), Color("c96b52"))
-	Art.box(self, Vector3(0, 3.7, -0.5), Vector3(7.5, 0.35, 6.5), Color("6d7070"))
-	Art.box(self, Vector3(0, 1.3, 2.65), Vector3(3.5, 2.6, 0.08), Color("48565a"))
+	service_building_shell(Color("c96b52"), Color("6d7070"), Color("8f8170"))
+	Art.box(self, Vector3(-0.9, 1.3, 2.34), Vector3(3.5, 2.6, 0.08), Color("48565a"))
 	for y in [0.35, 0.75, 1.15, 1.55, 1.95, 2.35]:
-		Art.box(self, Vector3(0, y, 2.71), Vector3(3.42, 0.045, 0.04), Color("99a5a0"))
-	Art.box(self, Vector3(0, 3.15, 2.72), Vector3(5.8, 0.75, 0.13), Color("a9503e"))
-
-	for x in [-2.55, 2.55]:
-		Art.box(self, Vector3(x, 1.15, 2.78), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
+		Art.box(self, Vector3(-0.9, y, 2.40), Vector3(3.42, 0.045, 0.04), Color("99a5a0"))
+	Art.box(self, Vector3(-0.9, 3.15, 2.42), Vector3(4.6, 0.75, 0.13), Color("a9503e"))
+	for x in [-2.55, 0.75]:
+		Art.box(self, Vector3(x, 1.15, 2.48), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
 
 func add_vehicle_lights(half_width: float, front_z: float, y: float, rear_z: float) -> void:
 	for side in [-1.0, 1.0]:
@@ -340,13 +351,11 @@ func set_parked_service_vehicle_visible(value: bool) -> void:
 		vehicle.visible = value
 
 func service_station(wall: Color, accent: Color, sign_text: String) -> void:
-	Art.box(self, Vector3(0, 1.8, -0.5), Vector3(7.2, 3.6, 6.2), wall)
-	Art.box(self, Vector3(0, 3.7, -0.5), Vector3(7.5, 0.35, 6.5), Color("70787a"))
-	Art.box(self, Vector3(0, 1.25, 2.65), Vector3(3.6, 2.5, 0.08), Color("56666a"))
-	Art.box(self, Vector3(0, 3.1, 2.72), Vector3(5.9, 0.72, 0.13), accent)
-
-	for x in [-2.6, 2.6]:
-		Art.box(self, Vector3(x, 1.6, 2.7), Vector3(0.8, 1.0, 0.08), Color("9bc7d0"))
+	service_building_shell(wall, Color("70787a"), Color("8f8170"))
+	Art.box(self, Vector3(-0.9, 1.25, 2.34), Vector3(3.2, 2.5, 0.08), Color("56666a"))
+	Art.box(self, Vector3(-0.9, 3.1, 2.42), Vector3(4.5, 0.72, 0.13), accent)
+	for x in [-2.4, -0.9, 0.6]:
+		Art.box(self, Vector3(x, 1.6, 2.40), Vector3(0.72, 1.0, 0.08), Color("9bc7d0"))
 
 func fire_engine() -> void:
 	Art.box(self, Vector3(0, 0.72, -0.35), Vector3(1.9, 1.15, 2.8), Color("d64f3e"))
@@ -590,9 +599,11 @@ func elite_residence(arch_axis: String = "", lane_offset: int = 0) -> void:
 	for x in [-1.48, 1.48]:
 		Art.box(self, Vector3(x, 1.72, 5.95), Vector3(0.2, 2.1, 0.2), stone)
 	Art.box(self, Vector3(0, 0.50, 6.28), Vector3(4.3, 0.18, 2.5), Color("c8baa0"))
-	# Keep the pool beside the entrance path so it never blocks the front door.
-	Art.box(self, Vector3(7.0, 0.72, 2.5), Vector3(5.0, 0.18, 2.2), Color("72b5c4"))
-	Art.box(self, Vector3(7.0, 0.83, 2.5), Vector3(4.6, 0.05, 1.8), Color("57a7bb"))
+	# Formal Roman cypress allee beside the entrance; the arrival path stays clear.
+	for index in range(4):
+		var tree_x := -5.8 + index * 1.45 if index < 2 else 4.35 + (index - 2) * 1.45
+		Art.cylinder(self, Vector3(tree_x, 3.05, 5.7), 0.58, 6.1, Color("315743"), 0.055, 8)
+		Art.cylinder(self, Vector3(tree_x, 0.62, 5.7), 0.14, 1.15, Color("78634b"), 0.10, 8)
 	for x in [-3.2, 3.2]:
 		Art.box(self, Vector3(x, 3.05, 5.18), Vector3(3.25, 0.16, 1.32), Color("cfc5b4"))
 		Art.box(self, Vector3(x, 3.48, 5.78), Vector3(3.25, 0.08, 0.07), glass)

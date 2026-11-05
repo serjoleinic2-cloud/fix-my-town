@@ -354,10 +354,10 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			if source.state_at(col, row) == "road":
 				roads.append(Vector2i(col, row))
 	var signal_positions: Array[Vector2i] = []
-	for signal: Dictionary in intersections:
+	for signal_data: Dictionary in intersections:
 		var signal_cell := Vector2i(
-			int(round((signal.x - source.ORIGIN.x) / source.CELL_SIZE)),
-			int(round((signal.z - source.ORIGIN.z) / source.CELL_SIZE))
+			int(round((signal_data.x - source.ORIGIN.x) / source.CELL_SIZE)),
+			int(round((signal_data.z - source.ORIGIN.z) / source.CELL_SIZE))
 		)
 		signal_positions.append(signal_cell)
 	# Corner bends are conflict points too. Add virtual (unlit) intersections so

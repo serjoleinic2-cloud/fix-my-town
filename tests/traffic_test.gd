@@ -21,6 +21,17 @@ func run() -> void:
 	check(absf(Traffic.stop_distance_for("civilian_car") - 5.35) < 0.001, "Legacy traffic retains its original stop-line offset")
 	check(absf(Traffic.stop_distance_for("city_bus", true) - 4.83) < 0.001, "Grid bus uses its longer front overhang at the new stop line")
 	check(traffic.grid_half_extents(traffic.vehicles[0]).y <= 0.56, "Civilian cars fit within their road lane instead of clipping opposing turns")
+	var probe_car: Dictionary = traffic.vehicles[0]
+	var original_probe_position: Vector3 = probe_car.node.position
+	var original_probe_visibility: bool = probe_car.node.visible
+	probe_car.node.visible = true
+	probe_car.node.position = Vector3(1001, 0.22, 0)
+	traffic.grid = RefCounted.new()
+	traffic.blocking_positions.clear()
+	check(not traffic.external_vehicle_step_is_clear(Vector3(1000, 0.22, 0), Vector3(1001, 0.22, 0), 0.78, 0.52, "delivery_probe"), "A delivery truck yields instead of driving through a road vehicle")
+	probe_car.node.position = original_probe_position
+	probe_car.node.visible = original_probe_visibility
+	traffic.grid = null
 	for i in range(380):
 		var time := i * 0.05
 		check(not (Traffic.phase("H", time) == "green" and Traffic.phase("V", time) == "green"), "Conflicting greens")

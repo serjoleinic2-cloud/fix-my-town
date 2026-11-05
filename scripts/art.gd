@@ -165,8 +165,11 @@ static func batch(parent: Node3D) -> void:
 			continue
 		var key := str(child.mesh.get_instance_id()) + ":" + str(child.material_override.get_instance_id())
 		if not groups.has(key):
-			groups[key] = {"mesh": child.mesh, "material": child.material_override, "transforms": []}
+			groups[key] = {"mesh": child.mesh, "material": child.material_override, "transforms": [], "features": {}}
 		groups[key].transforms.append(parent.global_transform.affine_inverse() * child.global_transform)
+		var feature: String = str(child.get_meta("batch_feature", ""))
+		if feature != "":
+			groups[key].features[feature] = true
 		child.get_parent().remove_child(child)
 		child.free()
 	for group in groups.values():
@@ -179,4 +182,6 @@ static func batch(parent: Node3D) -> void:
 			multi.set_instance_transform(i, group.transforms[i])
 		instance.multimesh = multi
 		instance.material_override = group.material
+		for feature: String in group.features:
+			instance.set_meta(feature, true)
 		parent.add_child(instance)

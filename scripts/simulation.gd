@@ -527,7 +527,14 @@ func record_destination_level(entry: Dictionary) -> int:
 	return best
 
 func valid_stop_cell(cell: Vector2i, ignore_index: int = -1) -> bool:
-	if territory.state_at(cell.x, cell.y) != "road" or territory.road_orientation(cell.x, cell.y) == "" or territory.path_to_city(cell.x, cell.y).is_empty():
+	if territory.state_at(cell.x, cell.y) != "road":
+		return false
+	var links := 0
+	for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		if territory.state_at(cell.x + offset.x, cell.y + offset.y) == "road":
+			links += 1
+	# Т- и Х-перекрёстки не являются остановочными площадками.
+	if links == 0 or links >= 3 or territory.path_to_city(cell.x, cell.y).is_empty():
 		return false
 	for index in range(transit.stops.size()):
 		if index != ignore_index and transit.stop_cell(transit.stops[index], territory) == cell:

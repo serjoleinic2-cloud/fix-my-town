@@ -134,8 +134,7 @@ func capture() -> void:
 		scene.game.place_stop(0)
 		scene.selection_kind = "transit"
 		if mode == "stop":
-			scene.placing_stop = true
-			scene.stop_candidate = 4
+			scene.begin_stop_placement()
 		elif mode == "stop_move":
 			scene.game.place_stop(4)
 			scene.open_stop_card(1)

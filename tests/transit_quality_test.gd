@@ -45,6 +45,10 @@ func run() -> void:
 	var cafe_point: Vector3 = game.building_world(9)
 	var first: Vector2i = game.territory.nearest_road(house_point)
 	var second: Vector2i = game.territory.nearest_road(cafe_point)
+	var cross := Vector2i(12, 6)
+	var tee := Vector2i(18, 0)
+	var stop_budget: int = game.budget
+	check(not game.place_stop(cross) and not game.place_stop(tee) and game.budget == stop_budget, "Four-way and T junctions reject stop placement without charging")
 	check(game.place_stop(first) and not game.place_stop(first), "Stops require a unique connected road cell")
 	check(game.place_stop(second), "Second stop can be placed on another street")
 	check(game.stop_orientation(game.transit.stops[0]) in ["horizontal", "vertical"] and game.stop_orientation(game.transit.stops[1]) in ["horizontal", "vertical"], "Every placed stop receives an along-road orientation")
@@ -63,7 +67,8 @@ func run() -> void:
 	check(not game.start_transit(), "No duplicate buses or charge")
 	var current_path: Array[Vector3] = game.transit.route_points.duplicate()
 	var current_target: int = game.transit.current_target
-	var alternate := Vector2i(12, 6)
+	check(not game.move_stop(1, cross) and not game.move_stop(1, tee), "Moving a stop to either type of junction is rejected")
+	var alternate := Vector2i(11, 6)
 	check(game.move_stop(1, alternate), "A stop can move to a connected road on another street")
 	check(game.transit.route_dirty and game.transit.current_target == current_target and game.transit.route_points == current_path, "An active bus safely finishes its current leg before retargeting")
 	check(game.transit_metrics().covered > 0, "Route endpoints provide walking coverage")
@@ -146,13 +151,17 @@ func run() -> void:
 				else:
 					scene.selection_kind = "transit"
 					scene.selected = -1
-					scene.placing_stop = mode == "placement"
+					if mode == "placement":
+						scene.begin_stop_placement()
 				scene.refresh()
 				for i in range(15):
 					await process_frame
 				check(scene.sheet.position.y >= scene.hud.get_global_rect().end.y, "Panel leaves map and HUD accessible: " + mode)
 				check(scene.sheet.get_global_rect().end.x <= scene.screen.size.x, "Panel width fits: " + mode)
 				check(scene.sheet.get_global_rect().end.y <= scene.navbar.position.y, "Panel above navigation: " + mode)
+				if mode == "placement":
+					var confirm: Button = scene.sheet.find_child("ConfirmStopPlacement", true, false)
+					check(confirm != null and scene.sheet.get_global_rect().encloses(confirm.get_global_rect()), "Placement confirmation fits inside the panel")
 				check(scene.screen.get_node("MapTools").get_global_rect().end.x <= scene.screen.size.x - 15, "Map buttons inside safe area")
 			scene.selected = 16
 			scene.selection_kind = "plot"

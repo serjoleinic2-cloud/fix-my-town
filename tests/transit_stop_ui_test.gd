@@ -70,10 +70,11 @@ func run() -> void:
 	scene.sheet.find_child("MoveStopButton", true, false).pressed.emit()
 	await process_frame
 	check(scene.placing_stop and scene.selection_kind == "stop_place", "Move enters an explicit location-picking mode")
-	check(scene.sheet.find_child("MoveStopInstruction", true, false).text == "Выберите новое место у дороги", "Move prompt explains the next action")
+	check(scene.moving_stop_index == 1 and scene.sheet.find_child("MoveStopInstruction", true, false).text.contains("жёлтым"), "Move prompt explains how to identify the selected stop")
+	check(scene.sheet.find_child("ConfirmStopPlacement", true, false).disabled, "Move requires a destination before confirmation")
 	check(scene.game.transit.stops == old_stops and scene.game.transit_metrics() == old_coverage and scene.game.transit.target_z == old_target, "Before selection, stop, route and resident coverage do not change")
 	check(FileAccess.get_file_as_string(scene.game.save_path) == old_save, "Entering move mode does not rewrite the save")
-	check(scene.stop_candidate_visuals.get_child_count() > 0 and scene.stop_candidate_visuals.get_child_count() <= 12 and scene.highlights.get_child_count() == 0, "Nearby suitable road cells are shown with bus-stop markers; no unlabeled square outlines")
+	check(scene.stop_candidate_visuals.get_child_count() > 0 and scene.stop_candidate_visuals.get_child_count() <= 12 and scene.highlights.get_child_count() == 4, "Nearby suitable road cells get markers; only the source has an outline")
 	var old_stop_tap := InputEventMouseButton.new()
 	old_stop_tap.button_index = MOUSE_BUTTON_LEFT
 	old_stop_tap.position = scene.camera.unproject_position(scene.game.transit.stop_position(4, scene.game.territory) + Vector3(0, 1.6, 0)) * scene.viewport_container.stretch_shrink
@@ -81,19 +82,24 @@ func run() -> void:
 	check(scene.placing_stop and scene.game.transit.stops == old_stops, "Tapping the old stop leaves it in place while choosing")
 	var candidate_tap := InputEventMouseButton.new()
 	candidate_tap.button_index = MOUSE_BUTTON_LEFT
-	var moved_cell := Vector2i(18, 12)
+	var moved_cell := Vector2i(17, 12)
 	scene.set_camera_focus(scene.game.territory.cell_world(moved_cell.x, moved_cell.y) + Vector3(7, 0, 7))
 	scene.refresh()
 	await process_frame
-	check(scene.stop_candidate_visuals.get_node_or_null("stop_candidate_18_12") != null, "New street is highlighted as a valid stop site")
-	candidate_tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(moved_cell.x, moved_cell.y) + Vector3(0, 1.6, 0)) * scene.viewport_container.stretch_shrink
+	check(scene.stop_candidate_visuals.get_node_or_null("stop_candidate_17_12") != null, "New street is highlighted as a valid stop site")
+	check(scene.stop_candidate_visuals.get_node_or_null("stop_candidate_18_12") == null, "A nearby junction has no candidate marker")
+	candidate_tap.position = scene.camera.unproject_position(scene.game.territory.cell_world(moved_cell.x, moved_cell.y) + Vector3(0, 2.4, 0)) * scene.viewport_container.stretch_shrink
 	scene.map_input(candidate_tap)
-	check(not scene.placing_stop and scene.game.transit.stops[0] == 0 and scene.game.transit.stops[1] == {"col": 18, "row": 12}, "Tapping a marked valid road location commits the move")
+	check(scene.placing_stop and scene.stop_preview_cell == moved_cell and scene.game.transit.stops == old_stops, "Tapping a marker only previews the new stop")
+	check(FileAccess.get_file_as_string(scene.game.save_path) == old_save, "Preview does not rewrite the save")
+	scene.sheet.find_child("ConfirmStopPlacement", true, false).pressed.emit()
+	await process_frame
+	check(not scene.placing_stop and scene.game.transit.stops[0] == 0 and scene.game.transit.stops[1] == {"col": 17, "row": 12}, "Explicit confirmation moves only the chosen endpoint")
 	check(scene.game.stop_orientation(scene.game.transit.stops[1]) == "horizontal" and is_equal_approx(absf(scene.transit_visuals.get_node("bus_stop_1").rotation.y), PI / 2.0), "Moved stop follows the horizontal road instead of standing across it")
 	check(scene.game.transit_metrics() != old_coverage and scene.game.transit.target_z == old_target, "Coverage refreshes and the active bus safely finishes its current leg")
 	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(scene.game.save_path))
 	var saved_stops: Array = saved.get("transit", {}).get("stops", [])
-	check(saved_stops.size() == 2 and int(saved_stops[0]) == 0 and saved_stops[1].get("col", -1) == 18 and saved_stops[1].get("row", -1) == 12, "The new route endpoint is saved immediately")
+	check(saved_stops.size() == 2 and int(saved_stops[0]) == 0 and saved_stops[1] is Dictionary and saved_stops[1].get("col", -1) == 17 and saved_stops[1].get("row", -1) == 12, "The new route endpoint is saved immediately")
 	scene.open_stop_card(1)
 	scene.sheet.find_child("MoveStopButton", true, false).pressed.emit()
 	await process_frame
@@ -102,7 +108,7 @@ func run() -> void:
 	scene.sheet.find_child("MoveStopButton", true, false).pressed.emit()
 	await process_frame
 	scene.cancel_stop_placement()
-	check(not scene.placing_stop and scene.game.transit.stops[1] == {"col": 18, "row": 12}, "Cancel preserves the existing route without changing it")
+	check(not scene.placing_stop and scene.game.transit.stops[1] == {"col": 17, "row": 12}, "Cancel preserves the existing route without changing it")
 	scene.audio.shutdown()
 	var save_path: String = scene.game.save_path
 	viewport.queue_free()

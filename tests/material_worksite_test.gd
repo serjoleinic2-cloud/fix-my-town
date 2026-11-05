@@ -141,7 +141,9 @@ func run() -> void:
 		await test_upgrade(str(scene.game.territory.building_at(item.cell.x, item.cell.y).instance_id), item.type_id)
 	for type_id in ["city_hall", "house", "cafe", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "bus_stop"]:
 		var object: Node = scene.create_object(scene.world, type_id, "label_test_" + type_id, Vector3(0, -100, 0))
-		check(object.visual_root.find_children("*", "Label3D", true, false).is_empty(), "No text names on model: " + type_id)
+		var labels: Array = object.visual_root.find_children("*", "Label3D", true, false)
+		var has_no_name: bool = labels.is_empty() or (type_id == "fire_station" and labels.size() == 1 and labels[0].name == "FireStation911" and labels[0].text == "911")
+		check(has_no_name, "No text names on model (911 roof emblem is allowed): " + type_id)
 		object.queue_free()
 	scene.game = Simulation.new(true)
 	scene.game.save_path = "user://material_worksite_test.json"

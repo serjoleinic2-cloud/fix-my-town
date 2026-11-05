@@ -102,7 +102,9 @@ var stop_candidate_visuals: Node3D
 var transit_signature: String = ""
 var transit_stats: Label
 var citizen_pool: Node3D
-var stop_candidate: int = 0
+var stop_preview_cell := Vector2i(-1, -1)
+var stop_marker_cells: Array[Vector2i] = []
+var transit_stats_clock: float = 0.0
 var placing_stop: bool = false
 var moving_stop_index: int = -1
 var selected_stop_index: int = -1
@@ -1161,6 +1163,8 @@ func focus_problem() -> void:
 
 func change_zoom(amount: float) -> void:
 	camera.size = clampf(camera.size + amount, 45, 110)
+	if placing_stop:
+		update_preview()
 
 func handle_map_gesture(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -1185,9 +1189,13 @@ func handle_map_gesture(event: InputEvent) -> void:
 					dragging = false
 					drag_moved = true
 					pinch_distance = 0.0
+					if placing_stop:
+						update_preview()
 				return
 			if event.index == 0 and dragging and not drag_moved:
 				map_input(event)
+			elif event.index == 0 and dragging and placing_stop:
+				update_preview()
 			if event.index == 0:
 				dragging = false
 		return
@@ -1242,6 +1250,8 @@ func _handle_mouse_gesture(event: InputEvent) -> void:
 		drag_previous = event.position
 	elif event is InputEventMagnifyGesture:
 		camera.size = clampf(camera.size / event.factor, 45, 110)
+		if placing_stop:
+			update_preview()
 
 func forest_cell_near_tap(point: Vector2, around: Vector2i) -> Vector2i:
 	var closest_cell := Vector2i(-1, -1)
@@ -1288,12 +1298,10 @@ func map_input(event: InputEvent) -> void:
 		return
 	var point: Vector2 = event.position / viewport_container.stretch_shrink
 	if placing_stop:
-		var old_stop_index := tapped_existing_stop(point)
-		if old_stop_index >= 0:
-			return # The existing stop stays until a different road point is chosen.
 		var candidate_row := tapped_stop_candidate(point)
 		if candidate_row >= 0:
-			confirm_stop(candidate_row)
+			stop_preview_cell = stop_marker_cells[candidate_row]
+			refresh()
 		return
 	if selection_kind not in ["territory", "stop_place"]:
 		var tapped_stop := tapped_existing_stop(point)
@@ -1349,20 +1357,6 @@ func map_input(event: InputEvent) -> void:
 				selectable = cell_state in ["forest", "free", "road"]
 			if selectable:
 				select_territory_cell(selected_cell)
-		return
-	if placing_stop:
-		var nearest := INF
-		var candidates := valid_stop_cells()
-		for index in range(candidates.size()):
-			var cell: Vector2i = candidates[index]
-			var distance: float = game.territory.cell_world(cell.x, cell.y).distance_to(hit)
-			if distance < nearest:
-				stop_candidate = index
-				nearest = distance
-		if nearest <= TerritoryGrid.CELL_SIZE * 0.65:
-			confirm_stop(stop_candidate)
-		else:
-			refresh()
 		return
 	var picked_col := roundi((hit.x - TerritoryGrid.ORIGIN.x) / TerritoryGrid.CELL_SIZE)
 	var picked_row := roundi((hit.z - TerritoryGrid.ORIGIN.z) / TerritoryGrid.CELL_SIZE)
@@ -2696,6 +2690,7 @@ func influence_targets(index: int, kind: String) -> Array[Dictionary]:
 
 func update_preview() -> void:
 	clear_children(stop_candidate_visuals)
+	stop_marker_cells.clear()
 	# Любой выход из предпросмотра восстанавливает реальную модель.
 	for object in territory_visuals.get_children():
 		if object.has_meta("grid_instance_id"):
@@ -2757,7 +2752,11 @@ func update_preview() -> void:
 				edge.rotation.y = atan2(second.x - first.x, second.z - first.z)
 		return
 	if placing_stop:
-		for cell: Vector2i in displayed_stop_cells():
+		if moving_stop_index >= 0 and moving_stop_index < game.transit.stops.size():
+			var source: Vector3 = game.transit.stop_position(game.transit.stops[moving_stop_index], game.territory)
+			outline_land_cell(source, Color("ffc164"))
+		stop_marker_cells = displayed_stop_cells()
+		for cell: Vector2i in stop_marker_cells:
 			var point: Vector3 = game.territory.cell_world(cell.x, cell.y)
 			var candidate := Sprite3D.new()
 			candidate.name = "stop_candidate_%d_%d" % [cell.x, cell.y]
@@ -2766,6 +2765,9 @@ func update_preview() -> void:
 			candidate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			candidate.no_depth_test = true
 			candidate.position = point + Vector3(0, 2.4, 0)
+			if cell == stop_preview_cell:
+				candidate.modulate = Color("a7f384")
+				candidate.scale = Vector3.ONE * 1.25
 			stop_candidate_visuals.add_child(candidate)
 		return
 	if selection_kind == "upgrade" and selected >= 0:
@@ -2805,7 +2807,7 @@ func format_budget_display(value: int) -> String:
 		return str(value)
 	if magnitude < 1000000:
 		return sign_prefix + ("%.1fK" % (float(magnitude) / 1000.0))
-	return sign_prefix + ("%.1fM" % (float(magnitude) / 1000000.0))
+	return sign_prefix + ("%.1fM" % (roundf(float(magnitude) / 100000.0) / 10.0))
 
 func draw_buildable_hints(type_id: String) -> void:
 	if type_id == "" or highlights == null:
@@ -3147,7 +3149,11 @@ func _process(delta: float) -> void:
 	game.transit.tick(delta, scenery.traffic_controller, game.territory)
 	if citizen_pool != null and is_instance_valid(citizen_pool):
 		citizen_pool.tick(delta)
-	update_transit_stats()
+	if transit_stats != null and is_instance_valid(transit_stats) and transit_stats.visible:
+		transit_stats_clock += delta
+		if transit_stats_clock >= 0.5:
+			transit_stats_clock = 0.0
+			update_transit_stats()
 	var movement_fraction := 1.0
 	if game.job != "" and game.route_index < game.route.size():
 		var current := map_position(game.vehicle)
@@ -3858,39 +3864,38 @@ func tapped_existing_stop(point: Vector2) -> int:
 	return -1
 
 func tapped_stop_candidate(point: Vector2) -> int:
-	var candidates := displayed_stop_cells()
-	for index in range(candidates.size()):
-		var cell: Vector2i = candidates[index]
-		var marker := camera.unproject_position(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 1.6, 0))
-		if marker.distance_to(point) <= stop_tap_radius():
-			return index
-	return -1
+	var best := -1
+	var best_distance := stop_tap_radius()
+	for stop: Variant in game.transit.stops:
+		var existing: Vector3 = game.transit.stop_position(stop, game.territory)
+		best_distance = minf(best_distance, camera.unproject_position(existing + Vector3(0, 1.2, 0)).distance_to(point))
+	for index in range(stop_marker_cells.size()):
+		var cell := stop_marker_cells[index]
+		var marker := camera.unproject_position(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 2.4, 0))
+		var distance := marker.distance_to(point)
+		if distance < best_distance:
+			best = index
+			best_distance = distance
+	return best
 
 func stop_tap_radius() -> float:
 	return 46.0 * render_scale / viewport_container.stretch_shrink
 
-func valid_stop_cells() -> Array[Vector2i]:
-	var result: Array[Vector2i] = []
-	for row in range(TerritoryGrid.HEIGHT):
-		for col in range(TerritoryGrid.WIDTH):
-			var cell := Vector2i(col, row)
-			if game.valid_stop_cell(cell, moving_stop_index if placing_stop else -1):
-				if placing_stop and moving_stop_index >= 0 and game.transit.stop_cell(game.transit.stops[moving_stop_index], game.territory) == cell:
-					continue
-				result.append(cell)
-	return result
-
 func displayed_stop_cells() -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	var visible_rect := Rect2(Vector2.ZERO, screen.size / viewport_container.stretch_shrink)
-	for cell: Vector2i in valid_stop_cells():
-		var point: Vector3 = game.territory.cell_world(cell.x, cell.y)
-		var projected := camera.unproject_position(point + Vector3(0, 1.6, 0))
-		if point.distance_to(focus_point) > 14.4 or not visible_rect.has_point(projected):
-			continue
-		result.append(cell)
-		if result.size() >= 12:
-			break
+	var center := (focus_point - TerritoryGrid.ORIGIN) / TerritoryGrid.CELL_SIZE
+	# Сначала ограничиваем область и видимость, затем проверяем связность.
+	for row in range(maxi(0, floori(center.z - 3)), mini(TerritoryGrid.HEIGHT, ceili(center.z + 3) + 1)):
+		for col in range(maxi(0, floori(center.x - 3)), mini(TerritoryGrid.WIDTH, ceili(center.x + 3) + 1)):
+			var point: Vector3 = game.territory.cell_world(col, row)
+			if point.distance_to(focus_point) > 14.4 or not visible_rect.has_point(camera.unproject_position(point + Vector3(0, 2.4, 0))):
+				continue
+			var cell := Vector2i(col, row)
+			if game.valid_stop_cell(cell):
+				result.append(cell)
+				if result.size() >= 12:
+					return result
 	return result
 
 func stop_label(stop: Variant) -> String:
@@ -3910,11 +3915,9 @@ func build_transit_sheet() -> void:
 		return
 	if game.transit.stops.size() < 2:
 		button(sheet_column, tr_text("Разместить остановку · 40", "Place a stop · 40"), begin_stop_placement, true)
-	else:
-		for index in range(game.transit.stops.size()):
-			var stop_row := hbox(sheet_column)
-			label(19, stop_row, tr_text("Остановка %d · дорога %s" % [index + 1, stop_label(game.transit.stops[index])], "Stop %d · road %s" % [index + 1, stop_label(game.transit.stops[index])]))
-			button(stop_row, tr_text("Перенести", "Move"), begin_move_stop.bind(index))
+	for index in range(game.transit.stops.size()):
+		button(sheet_column, tr_text("Перенести остановку №%d", "Move stop %d") % (index + 1), begin_move_stop.bind(index))
+	if game.transit.stops.size() == 2:
 		var launch := button(sheet_column, tr_text("Маршрут работает", "Route running") if game.transit.active else tr_text("Запустить автобус · 60", "Start bus · 60"), launch_transit, true)
 		launch.disabled = game.transit.active or game.budget < 60
 	var note := label(20, sheet_column, tr_text("Остановки связаны по дорожной сети, включая повороты. Полезна связь жилья с рабочими местами или кафе.", "Stops are connected through the road network, including turns. Routes are useful when they link homes to jobs or cafés."))
@@ -3941,12 +3944,15 @@ func build_stop_sheet() -> void:
 	button(sheet_column, t("cancel"), open_transit).name = "CloseStopButton"
 
 func build_stop_placement_sheet() -> void:
-	action_height = 265
-	header(tr_text("Перенос остановки", "Move bus stop"), "pin")
-	var instruction := label(23, sheet_column, tr_text("Выберите новое место у дороги", "Choose a new place by the road"), true)
+	action_height = 325
+	var moving := moving_stop_index >= 0
+	header(tr_text("Перенос №%d", "Move stop %d") % (moving_stop_index + 1) if moving else tr_text("Новая остановка", "New bus stop"), "pin")
+	var instruction := label(21, sheet_column, tr_text("Старая точка отмечена жёлтым. Выберите значок у дороги вне перекрёстка.", "Old stop in yellow. Pick a road marker outside a junction.") if moving else tr_text("Выберите значок у дороги вне перекрёстка.", "Pick a road marker outside a junction."))
 	instruction.name = "MoveStopInstruction"
 	instruction.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label(19, sheet_column, tr_text("Старая остановка и маршрут останутся до выбора места.", "The old stop and route stay in place until you choose a location."))
+	var confirm := button(sheet_column, tr_text("Подтвердить перенос", "Confirm move") if moving else tr_text("Поставить · 40", "Place · 40"), confirm_stop, true)
+	confirm.name = "ConfirmStopPlacement"
+	confirm.disabled = stop_preview_cell.x < 0
 	button(sheet_column, tr_text("Отмена", "Cancel"), cancel_stop_placement).name = "CancelStopPlacement"
 
 func begin_stop_placement() -> void:
@@ -3954,9 +3960,7 @@ func begin_stop_placement() -> void:
 	moving_stop_index = -1
 	selected_stop_index = -1
 	selection_kind = "stop_place"
-	var candidates := valid_stop_cells()
-	stop_candidate = 0
-	set_camera_focus(Vector3(-14.4, 0, 0))
+	stop_preview_cell = Vector2i(-1, -1)
 	refresh()
 
 func begin_move_stop(index: int) -> void:
@@ -3966,27 +3970,13 @@ func begin_move_stop(index: int) -> void:
 	moving_stop_index = index
 	selected_stop_index = index
 	selection_kind = "stop_place"
+	stop_preview_cell = Vector2i(-1, -1)
 	var target_point: Vector3 = game.transit.stop_position(game.transit.stops[index], game.territory)
 	set_camera_focus(target_point + Vector3(7, 0, 7))
 	refresh()
 
-func change_stop_candidate(delta: int) -> void:
-	var candidates := displayed_stop_cells()
-	if candidates.is_empty():
-		return
-	stop_candidate = posmod(stop_candidate + delta, candidates.size())
-	var cell: Vector2i = candidates[stop_candidate]
-	set_camera_focus(game.territory.cell_world(cell.x, cell.y) + Vector3(7, 0, 7))
-	refresh()
-
-func confirm_stop(candidate_index: int = -1) -> void:
-	var candidates := displayed_stop_cells()
-	if candidate_index < 0:
-		candidate_index = stop_candidate
-	if candidate_index < 0 or candidate_index >= candidates.size():
-		audio.play_ui("deny")
-		return
-	var success: bool = game.move_stop(moving_stop_index, candidates[candidate_index]) if moving_stop_index >= 0 else game.place_stop(candidates[candidate_index])
+func confirm_stop() -> void:
+	var success: bool = game.move_stop(moving_stop_index, stop_preview_cell) if moving_stop_index >= 0 else game.place_stop(stop_preview_cell)
 	if success:
 		placing_stop = false
 		moving_stop_index = -1
@@ -3996,11 +3986,13 @@ func confirm_stop(candidate_index: int = -1) -> void:
 		audio.play_ui("success")
 	else:
 		audio.play_ui("deny")
+	stop_preview_cell = Vector2i(-1, -1)
 	refresh()
 
 func cancel_stop_placement() -> void:
 	placing_stop = false
 	moving_stop_index = -1
+	stop_preview_cell = Vector2i(-1, -1)
 	selection_kind = "stop" if selected_stop_index >= 0 else "transit"
 	refresh()
 

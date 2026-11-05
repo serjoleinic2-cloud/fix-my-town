@@ -132,7 +132,7 @@ func _process(delta: float) -> void:
 			helicopter_timer -= delta
 			if helicopter_timer <= 0.0:
 				var angle := helicopter_rng.randf_range(0.0, TAU)
-				var flight_direction := Vector3(sinf(angle), 0, cosf(angle))
+				var flight_direction := Vector3(sin(angle), 0, cos(angle))
 				police_helicopter.rotation.y = angle
 				helicopter_departure_target = helicopter_pad + flight_direction * 18.0 + Vector3(0, 12.0, 0)
 				helicopter_state = "departing"
@@ -287,7 +287,7 @@ func depot() -> void:
 	Art.box(self, Vector3(2.7, 5, -1.8), Vector3(1.3, 3.3, 1.3), Color("b7896e"))
 	Art.box(self, Vector3(2.7, 6.7, -1.8), Vector3(1.6, 0.2, 1.6), Color("e3d0ae"))
 	var repair_roof_badge := Art.cylinder(self, Vector3(2.7, 6.86, -1.8), 0.62, 0.08, Color("f5f2e9"), 1.0, 16)
-	repair_roof_badge.name = "RepairServiceRoofBadge"
+	repair_roof_badge.set_meta("batch_feature", "RepairServiceRoofBadge")
 	Art.box(self, Vector3(2.7, 6.92, -1.8), Vector3(0.13, 0.035, 0.68), Color("d99c34"))
 	Art.box(self, Vector3(2.7, 6.92, -1.8), Vector3(0.5, 0.035, 0.13), Color("d99c34"))
 	var wrench_grip := Art.box(self, Vector3(2.7, 6.92, -1.8), Vector3(0.13, 0.035, 0.28), Color("54768c"))
@@ -348,7 +348,7 @@ func fire_station() -> void:
 	for x in [-2.55, 0.75]:
 		Art.box(self, Vector3(x, 1.15, 2.48), Vector3(0.12, 2.3, 0.12), Color("d7c6a2"))
 	var fire_badge := Art.cylinder(self, Vector3(-0.9, 3.99, -0.7), 0.82, 0.08, Color("f7f5ef"), 1.0, 20)
-	fire_badge.name = "FireStation911Badge"
+	fire_badge.set_meta("batch_feature", "FireStation911Badge")
 	var emergency_911 := Label3D.new()
 	emergency_911.name = "FireStation911"
 	emergency_911.text = "911"
@@ -356,12 +356,13 @@ func fire_station() -> void:
 	emergency_911.modulate = Color("d83b34")
 	emergency_911.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	emergency_911.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	emergency_911.position = Vector3(-0.9, 4.15, 0.12)
+	emergency_911.position = Vector3(-0.9, 4.045, -0.7)
+	emergency_911.rotation.x = -PI / 2.0
 	add_child(emergency_911)
 
 func medical_roof_emblem() -> void:
 	var medical_badge := Art.cylinder(self, Vector3(-0.9, 3.99, -0.7), 0.76, 0.08, Color("fbfaf6"), 1.0, 20)
-	medical_badge.name = "HospitalRoofBadge"
+	medical_badge.set_meta("batch_feature", "HospitalRoofBadge")
 	Art.box(self, Vector3(-0.9, 4.07, -0.7), Vector3(0.18, 0.045, 0.68), Color("d44343"))
 	Art.box(self, Vector3(-0.9, 4.07, -0.7), Vector3(0.56, 0.045, 0.18), Color("d44343"))
 
@@ -393,12 +394,12 @@ func parked_service_vehicle(kind: String) -> void:
 		Art.box(vehicle, Vector3(0, 1.0, -0.18), Vector3(0.52, 0.16, 0.06), Color("d95046"))
 		Art.box(vehicle, Vector3(0, 0.7, 0), Vector3(1.9, 0.12, 2.5), Color("4aa4a0"))
 		var ambulance_roof_badge := Art.cylinder(vehicle, Vector3(0, 2.20, -0.28), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
-		ambulance_roof_badge.name = "AmbulanceRoofBadge"
+		ambulance_roof_badge.set_meta("batch_feature", "AmbulanceRoofBadge")
 		Art.box(vehicle, Vector3(0, 2.25, -0.28), Vector3(0.13, 0.04, 0.46), Color("d44343"))
 		Art.box(vehicle, Vector3(0, 2.25, -0.28), Vector3(0.40, 0.04, 0.13), Color("d44343"))
 		for side in [-1.0, 1.0]:
 			var side_disc := Art.cylinder(vehicle, Vector3(side * 0.99, 1.08, -0.2), 0.31, 0.06, Color("fffdf8"), 1.0, 16)
-			side_disc.name = "AmbulanceSideBadge"
+			side_disc.set_meta("batch_feature", "AmbulanceSideBadge")
 			side_disc.rotation.z = PI / 2
 			Art.box(vehicle, Vector3(side * 1.03, 1.08, -0.2), Vector3(0.04, 0.10, 0.42), Color("d44343"))
 			Art.box(vehicle, Vector3(side * 1.03, 1.08, -0.2), Vector3(0.04, 0.36, 0.10), Color("d44343"))
@@ -411,14 +412,14 @@ func parked_service_vehicle(kind: String) -> void:
 	elif kind == "fire_engine":
 		Art.box(vehicle, Vector3(0, 0.96, -0.3), Vector3(0.16, 0.18, 1.6), Color("f3d463"))
 		var fire_vehicle_badge := Art.cylinder(vehicle, Vector3(0, 1.94, -0.58), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
-		fire_vehicle_badge.name = "FireEngineRoofBadge"
+		fire_vehicle_badge.set_meta("batch_feature", "FireEngineRoofBadge")
 		for side in [-1.0, 1.0]:
 			Art.box(vehicle, Vector3(side * 0.18, 1.99, -0.58), Vector3(0.12, 0.04, 0.44), Color("d44343"))
 			Art.box(vehicle, Vector3(0, 1.99, -0.58), Vector3(0.38, 0.04, 0.12), Color("d44343"))
 	else:
 		Art.box(vehicle, Vector3(0, 1.18, -0.64), Vector3(1.35, 0.42, 1.15), Color("d79626"))
 		var repair_vehicle_badge := Art.cylinder(vehicle, Vector3(0, 1.48, -0.64), 0.31, 0.06, Color("fffdf8"), 1.0, 16)
-		repair_vehicle_badge.name = "RepairVehicleRoofBadge"
+		repair_vehicle_badge.set_meta("batch_feature", "RepairVehicleRoofBadge")
 		Art.box(vehicle, Vector3(0, 1.53, -0.64), Vector3(0.10, 0.04, 0.38), Color("d99c34"))
 		Art.box(vehicle, Vector3(0, 1.53, -0.64), Vector3(0.34, 0.04, 0.10), Color("d99c34"))
 	for side in [-1.0, 1.0]:
@@ -460,9 +461,9 @@ func police_helipad() -> void:
 		cross_rim.rotation.y = 0.5
 	for x in [-0.28, 0.28]:
 		var stem := Art.box(self, helicopter_pad + Vector3(x, 0.075, 0), Vector3(0.16, 0.035, 0.9), Color("fff4d8"))
-		stem.name = "HelipadH"
+		stem.set_meta("batch_feature", "HelipadH")
 	var bar := Art.box(self, helicopter_pad + Vector3(0, 0.075, 0), Vector3(0.56, 0.035, 0.16), Color("fff4d8"))
-	bar.name = "HelipadH"
+	bar.set_meta("batch_feature", "HelipadH")
 
 	police_helicopter = Node3D.new()
 	police_helicopter.name = "PoliceHelicopter"

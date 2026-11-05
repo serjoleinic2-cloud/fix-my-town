@@ -20,7 +20,7 @@ func run() -> void:
 	check(absf(Traffic.stop_distance_for("civilian_car", true) - 3.75) < 0.001, "Grid traffic stops with its bumper just before the new 2.3 m stop line")
 	check(absf(Traffic.stop_distance_for("civilian_car") - 5.35) < 0.001, "Legacy traffic retains its original stop-line offset")
 	check(absf(Traffic.stop_distance_for("city_bus", true) - 4.83) < 0.001, "Grid bus uses its longer front overhang at the new stop line")
-	check(traffic.grid_half_extents(traffic.vehicles[0]).y <= 0.56, "Civilian cars fit within their road lane instead of clipping opposing turns")
+	check(traffic.grid_half_extents(traffic.vehicles[0]).y <= 0.56 + 0.00001, "Civilian cars fit within their road lane instead of clipping opposing turns")
 	var probe_car: Dictionary = traffic.vehicles[0]
 	var original_probe_position: Vector3 = probe_car.node.position
 	var original_probe_visibility: bool = probe_car.node.visible

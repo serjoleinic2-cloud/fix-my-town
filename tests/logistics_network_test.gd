@@ -3,6 +3,7 @@ extends SceneTree
 const Simulation = preload("res://scripts/simulation.gd")
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const GameObjectScene = preload("res://scenes/objects/game_object.tscn")
+const MainScript = preload("res://scripts/main.gd")
 
 var failures := 0
 
@@ -27,6 +28,21 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	var motion_routes: Array = [
+		[Vector3.ZERO, Vector3(10, 0, 0)],
+		[Vector3(10, 0, 0), Vector3(20, 0, 0)]
+	]
+	var halted_progress := MainScript.logistics_progress_after_motion(motion_routes, 0, 3.0, 2.0, 0.0)
+	check(int(halted_progress.route_index) == 0 and is_equal_approx(float(halted_progress.progress), 3.0), "A logistics vehicle stopped at a signal does not consume route progress")
+	var partial_progress := MainScript.logistics_progress_after_motion(motion_routes, 0, 3.0, 2.0, 0.5)
+	check(int(partial_progress.route_index) == 0 and is_equal_approx(float(partial_progress.progress), 4.0), "A logistics vehicle commits only its allowed movement distance")
+	var resumed_progress := MainScript.logistics_progress_after_motion(motion_routes, 0, 9.5, 1.0, 1.0)
+	check(int(resumed_progress.route_index) == 1 and is_equal_approx(float(resumed_progress.progress), 0.5), "A logistics vehicle advances to the next delivery leg only after reaching the route end")
+	var turn_route: Array = MainScript.logistics_driving_route([Vector3.ZERO, Vector3(6, 0, 0), Vector3(6, 0, 6)])
+	var shortest_turn_segment := INF
+	for turn_index in range(1, turn_route.size()):
+		shortest_turn_segment = minf(shortest_turn_segment, (turn_route[turn_index] as Vector3).distance_to(turn_route[turn_index - 1]))
+	check(turn_route.size() == 5 and shortest_turn_segment < 0.7, "A logistics truck transitions between lane offsets through the junction center rather than jumping across the corner")
 	var game := Simulation.new(false)
 	game.save_path = "user://logistics_network_test.json"
 	game.start_empty_city()

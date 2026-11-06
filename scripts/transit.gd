@@ -236,3 +236,7 @@ func place_bus(bus: Dictionary, traffic: Node3D) -> void:
 	bus.coordinate = bus_position.x if bus.axis == "H" else bus_position.z
 	bus.direction = 1 if (tangent.x if bus.axis == "H" else tangent.z) > 0 else -1
 	traffic.place_vehicle(bus)
+	# Transit updates a managed vehicle outside TrafficSystem.step_grid(). Keep
+	# its intersection lease lifecycle in sync here too, or the bus can reserve a
+	# crossing forever and gridlock every vehicle near the stop.
+	traffic.release_grid_reservations_for_vehicle(bus)

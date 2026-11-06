@@ -1470,6 +1470,7 @@ func select_vehicle_at(point: Vector2) -> bool:
 	if best == null:
 		return false
 	selected_vehicle_type = best.type_id
+	audio.play_vehicle_select(str(best.type_id))
 	if best.type_id == "fire_engine":
 		for assignment: Dictionary in game.fire_assignments():
 			if assignment.vehicle_id == best.instance_id and assignment.phase == "repair" and not bool(assignment.get("jam_cleared", false)):
@@ -2290,7 +2291,7 @@ func apply_territory_tool() -> void:
 	var success := game.start_grid_clear(territory_cell.x, territory_cell.y) if territory_tool == "clear" else game.start_grid_road(territory_cell.x, territory_cell.y) if territory_tool == "road" else game.start_grid_construction(territory_cell.x, territory_cell.y, selected_type)
 	if success:
 		selection_kind = "construction_job"
-		audio.play_construction(DistrictWorld.logical_position(game.territory.cell_world(territory_cell.x, territory_cell.y)))
+		audio.play_construction(DistrictWorld.logical_position(game.territory.cell_world(territory_cell.x, territory_cell.y)), selected_type)
 		refresh()
 	else:
 		audio.play_ui("deny")
@@ -3080,7 +3081,7 @@ func open_fire_station_build() -> void:
 
 func construct(kind: String) -> void:
 	if game.start_legacy_construction(selected, kind):
-		audio.play_construction(game.plot_position(selected), kind == "park")
+		audio.play_construction(game.plot_position(selected), kind)
 		selection_kind = "construction_job"
 		refresh()
 	else:
@@ -3172,6 +3173,8 @@ func _process(delta: float) -> void:
 			refresh()
 	sync_construction_site()
 	audio.sync(game, camera.size / 2.2, delta)
+	audio.sync_traffic_ambience(scenery.traffic_controller.vehicles, camera.global_position)
+	audio.sync_building_sounds(game.all_buildings(), camera.global_position, delta)
 	update_crew_status()
 	if car != null and is_instance_valid(car):
 		car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
@@ -3712,7 +3715,7 @@ func build_grid_upgrade_sheet() -> void:
 	var price: int = Catalog.level_data(entry.type_id, entry.level).upgrade_cost
 	var confirm := button(sheet_column, tr_text("Улучшить · %d", "Upgrade · %d") % price, func():
 		if game.start_grid_upgrade(grid_selected_id):
-			audio.play_construction(DistrictWorld.logical_position(entry.position))
+			audio.play_construction(DistrictWorld.logical_position(entry.position), entry.type_id)
 			selection_kind = "construction_job"
 		else:
 			selection_kind = "grid_house"
@@ -4059,10 +4062,36 @@ func redraw_logistics_vehicles() -> void:
 		if not local_routes.is_empty():
 			create_logistics_vehicle(str(warehouse.instance_id), 0, local_routes)
 
-func logistics_lane_offset(direction: Vector3) -> Vector3:
+static func logistics_lane_offset(direction: Vector3) -> Vector3:
 	if absf(direction.x) >= absf(direction.z):
 		return Vector3(0, 0, signf(direction.x) * 0.68)
 	return Vector3(-signf(direction.z) * 0.68, 0, 0)
+
+static func logistics_driving_route(road_route: Array) -> Array:
+	# Road routes contain cell centres. Convert them to lane positions and insert
+	# short centre connectors at bends so the truck changes lanes gradually
+	# inside the junction instead of teleporting sideways between two offsets.
+	var driving_route: Array = []
+	if road_route.size() < 2:
+		return driving_route
+	for segment in range(1, road_route.size()):
+		var first: Vector3 = road_route[segment - 1]
+		var second: Vector3 = road_route[segment]
+		var direction := (second - first).normalized()
+		if direction.length_squared() < 0.0001:
+			continue
+		var lane_start := first + logistics_lane_offset(direction) + Vector3(0, 0.32, 0)
+		var lane_end := second + logistics_lane_offset(direction) + Vector3(0, 0.32, 0)
+		if driving_route.is_empty():
+			driving_route.append(lane_start)
+		driving_route.append(lane_end)
+		if segment < road_route.size() - 1:
+			var next: Vector3 = road_route[segment + 1]
+			var next_direction := (next - second).normalized()
+			if direction.dot(next_direction) < 0.999:
+				driving_route.append(second + Vector3(0, 0.32, 0))
+				driving_route.append(second + logistics_lane_offset(next_direction) + Vector3(0, 0.32, 0))
+	return driving_route
 
 func logistics_vehicle_half_extents(direction: Vector3) -> Vector2:
 	return Vector2(0.78, 0.52) if absf(direction.x) >= absf(direction.z) else Vector2(0.52, 0.78)
@@ -4080,7 +4109,14 @@ func set_logistics_traffic_blocker(identifier: String, position_value: Vector3, 
 	blockers.append({"id": identifier, "position": position_value, "half_extents": half_extents, "moving_vehicle": true})
 
 func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> void:
-	var first_route: Array = routes[0]
+	var driving_routes: Array = []
+	for road_route: Array in routes:
+		var driving_route := logistics_driving_route(road_route)
+		if driving_route.size() >= 2:
+			driving_routes.append(driving_route)
+	if driving_routes.is_empty():
+		return
+	var first_route: Array = driving_routes[0]
 	if first_route.size() < 2:
 		return
 	# Dispatch trucks from staggered positions on their assigned tour. Starting
@@ -4098,11 +4134,11 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 	truck.set_language(game.language)
 	truck.visual_root.scale = Vector3.ONE * 0.68
 	var first_direction: Vector3 = initial_pose.direction
-	truck.position = initial_pose.position + logistics_lane_offset(first_direction) + Vector3(0, 0.22, 0)
+	truck.position = initial_pose.position + Vector3(0, -0.10, 0)
 	truck.rotation.y = atan2(first_direction.x, first_direction.z)
 	var speed_slot := posmod(identifier.hash(), 6)
 	var delivery_speed := 4.0 + float(speed_slot) * 0.36
-	logistics_vehicles.append({"id": identifier, "object": truck, "routes": routes, "route_index": 0, "progress": initial_progress, "speed": delivery_speed})
+	logistics_vehicles.append({"id": identifier, "object": truck, "routes": driving_routes, "route_index": 0, "progress": initial_progress, "speed": delivery_speed})
 
 func logistics_route_pose(route: Array, progress_value: float) -> Dictionary:
 	var remaining := progress_value
@@ -4114,6 +4150,27 @@ func logistics_route_pose(route: Array, progress_value: float) -> Dictionary:
 			return {"position": first.lerp(second, clampf(remaining / maxf(length_value, 0.001), 0.0, 1.0)), "direction": (second - first).normalized()}
 		remaining -= length_value
 	return {"position": route[0], "direction": (route[1] - route[0]).normalized()}
+
+static func logistics_route_length(route: Array) -> float:
+	var total := 0.0
+	for segment in range(1, route.size()):
+		total += route[segment - 1].distance_to(route[segment])
+	return total
+
+static func logistics_progress_after_motion(routes: Array, start_route_index: int, start_progress: float, requested_advance: float, moved_fraction: float) -> Dictionary:
+	if routes.is_empty():
+		return {"route_index": 0, "progress": 0.0}
+	var route_index := posmod(start_route_index, routes.size())
+	var progress := start_progress + requested_advance * clampf(moved_fraction, 0.0, 1.0)
+	var route_guard := 0
+	while route_guard < routes.size():
+		var route_length := logistics_route_length(routes[route_index])
+		if route_length <= 0.01 or progress < route_length:
+			break
+		progress -= route_length
+		route_index = (route_index + 1) % routes.size()
+		route_guard += 1
+	return {"route_index": route_index, "progress": progress}
 
 func tick_logistics_vehicles(delta: float) -> void:
 	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
@@ -4131,19 +4188,21 @@ func tick_logistics_vehicles(delta: float) -> void:
 		var routes: Array = vehicle.routes
 		if routes.is_empty():
 			continue
-		var route_index: int = int(vehicle.route_index)
+		var previous_route_index: int = int(vehicle.route_index)
+		var previous_progress: float = float(vehicle.progress)
+		var requested_advance: float = delta * float(vehicle.speed)
+		var route_index := previous_route_index
 		var route: Array = routes[route_index]
 		if route.size() < 2:
 			continue
+		var original_route_length := logistics_route_length(route)
 		var lengths: Array[float] = []
-		var total_length := 0.0
+		var total_length := original_route_length
 		for segment in range(1, route.size()):
-			var segment_length: float = route[segment - 1].distance_to(route[segment])
-			lengths.append(segment_length)
-			total_length += segment_length
+			lengths.append(route[segment - 1].distance_to(route[segment]))
 		if total_length <= 0.01:
 			continue
-		var progress: float = float(vehicle.progress) + delta * float(vehicle.speed)
+		var progress := previous_progress + requested_advance
 		while progress >= total_length:
 			progress -= total_length
 			route_index = (route_index + 1) % routes.size()
@@ -4168,20 +4227,25 @@ func tick_logistics_vehicles(delta: float) -> void:
 			var second: Vector3 = route[segment + 1]
 			var direction := second - first
 			var center_position: Vector3 = first.lerp(second, clampf(remaining / maxf(segment_length, 0.001), 0.0, 1.0))
-			var proposed_position: Vector3 = center_position + logistics_lane_offset(direction) + Vector3(0, 0.22, 0)
+			var proposed_position: Vector3 = center_position + Vector3(0, -0.10, 0)
 			var current_position: Vector3 = truck.position
+			var intended_distance := current_position.distance_to(proposed_position)
+			var allowed_distance := intended_distance
 			if traffic_controller != null:
-				var intended_distance: float = current_position.distance_to(proposed_position)
 				if intended_distance > 0.0001:
-					var allowed_distance: float = traffic_controller.service_travel_distance(
+					allowed_distance = traffic_controller.service_travel_distance(
 						current_position, proposed_position, delta, str(vehicle.get("id", "")), false, "", "delivery_truck"
 					)
-					proposed_position = current_position.move_toward(proposed_position, allowed_distance)
-			if traffic_controller != null and not traffic_controller.external_vehicle_step_is_clear(truck.position, proposed_position, 0.78, 0.52, str(vehicle.get("id", ""))):
-				break
-			vehicle.route_index = route_index
-			vehicle.progress = progress
-			truck.position = proposed_position
+			if traffic_controller != null and not traffic_controller.external_vehicle_step_is_clear(current_position, current_position.move_toward(proposed_position, allowed_distance), 0.78, 0.52, str(vehicle.get("id", ""))):
+				allowed_distance = 0.0
+			var moved_fraction := clampf(allowed_distance / intended_distance, 0.0, 1.0) if intended_distance > 0.0001 else 0.0
+			# Commit only the part that physically moved. Previously `progress`
+			# advanced to its full desired value even when a red light or another
+			# vehicle held the truck still, causing it to jump ahead on later frames.
+			var committed := logistics_progress_after_motion(routes, previous_route_index, previous_progress, requested_advance, moved_fraction)
+			vehicle.route_index = int(committed.route_index)
+			vehicle.progress = float(committed.progress)
+			truck.position = current_position.move_toward(proposed_position, allowed_distance)
 			truck.rotation.y = atan2(direction.x, direction.z)
 			set_logistics_traffic_blocker(str(vehicle.get("id", "")), truck.position, logistics_vehicle_half_extents(direction))
 			break
@@ -4224,7 +4288,7 @@ func build_upgrade_sheet() -> void:
 
 func confirm_upgrade(index: int, kind: String, expected_level: int) -> void:
 	if game.buildings[index] == kind and game.building_level(index) == expected_level and game.start_legacy_upgrade(index):
-		audio.play_construction(game.plot_position(index), kind == "park")
+		audio.play_construction(game.plot_position(index), kind)
 		selection_kind = "construction_job"
 	else:
 		audio.play_ui("deny")

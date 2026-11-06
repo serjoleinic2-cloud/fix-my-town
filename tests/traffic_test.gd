@@ -2,6 +2,7 @@ extends SceneTree
 
 const Traffic = preload("res://scripts/traffic_system.gd")
 const Simulation = preload("res://scripts/simulation.gd")
+const Transit = preload("res://scripts/transit.gd")
 var failures: int = 0
 
 func check(condition: bool, message: String) -> void:
@@ -29,8 +30,24 @@ func run() -> void:
 	var logistics_probe := {"key": "logistics_signal", "x": 0.0, "z": 0.0, "offset": 0.0, "node": null}
 	traffic.intersections = [logistics_probe]
 	traffic.clock = 10.0
-	var logistics_current := Vector3(-8, 0.22, -0.68)
-	var logistics_target := Vector3(-2, 0.22, -0.68)
+	var logistics_current := Vector3(-8, 0.22, 0.68)
+	var logistics_target := Vector3(-2, 0.22, 0.68)
+	var follow_probe: Dictionary = traffic.vehicles[0]
+	var saved_follow_state := {"axis": follow_probe.axis, "direction": follow_probe.direction, "road": follow_probe.road, "coordinate": follow_probe.coordinate, "spacing": follow_probe.spacing}
+	follow_probe.node.visible = true
+	follow_probe.axis = "H"
+	follow_probe.direction = 1
+	follow_probe.road = 0.0
+	follow_probe.coordinate = -3.0
+	follow_probe.spacing = 3.6
+	var logistics_follow_distance: float = traffic.service_travel_distance(logistics_current, logistics_target, 0.05, "logistics_probe", false, "", "delivery_truck")
+	check(logistics_follow_distance <= 1.41, "Logistics truck keeps following distance to a car in its rendered lane")
+	follow_probe.node.visible = false
+	follow_probe.axis = saved_follow_state.axis
+	follow_probe.direction = saved_follow_state.direction
+	follow_probe.road = saved_follow_state.road
+	follow_probe.coordinate = saved_follow_state.coordinate
+	follow_probe.spacing = saved_follow_state.spacing
 	var logistics_red_distance: float = traffic.service_travel_distance(logistics_current, logistics_target, 0.05, "logistics_probe", false, "", "delivery_truck")
 	check(logistics_red_distance < logistics_current.distance_to(logistics_target), "Logistics truck obeys red light from its offset road lane")
 	traffic.clock = 0.0
@@ -72,6 +89,54 @@ func run() -> void:
 	check(traffic.reservations.has("synthetic_turn_lock"), "Grid turn lease does not expire while a car still occupies the intersection")
 	traffic.reservations.erase("synthetic_turn_lock")
 	traffic.vehicles = saved_vehicles
+	var transit_bus: Dictionary = traffic.vehicles[2]
+	var transit_bus_id: String = str(transit_bus.id)
+	var transit_bus_managed: bool = bool(transit_bus.get("managed", false))
+	var transit_bus_axis: String = str(transit_bus.axis)
+	var transit_bus_direction: int = int(transit_bus.direction)
+	var transit_bus_road: float = float(transit_bus.road)
+	var transit_bus_coordinate: float = float(transit_bus.coordinate)
+	var transit_bus_position: Vector3 = transit_bus.node.position
+	var transit := Transit.new()
+	traffic.grid = RefCounted.new()
+	transit_bus.id = "grid_vehicle_2"
+	transit_bus.managed = true
+	transit_bus.axis = "V"
+	transit_bus.direction = -1
+	transit_bus.road = 0.0
+	transit_bus.coordinate = 0.0
+	transit_bus.node.visible = true
+	transit_bus.node.position = Vector3(-0.76, 0.22, 0.0)
+	var cross_probe: Dictionary = traffic.vehicles[0]
+	var saved_cross_state := {"visible": cross_probe.node.visible, "position": cross_probe.node.position, "axis": cross_probe.axis, "direction": cross_probe.direction, "road": cross_probe.road, "coordinate": cross_probe.coordinate}
+	cross_probe.axis = "H"
+	cross_probe.direction = 1
+	cross_probe.road = -3.75
+	cross_probe.coordinate = 0.0
+	cross_probe.node.visible = true
+	cross_probe.node.position = Vector3(0.0, 0.22, -3.75)
+	check(traffic.cross_traffic_clear({"x": 0.0, "z": 0.0}, "V", "grid_vehicle_2"), "A bus can clear an intersection when perpendicular traffic is held at its stop line")
+	cross_probe.node.position = Vector3(0.0, 0.22, -1.5)
+	check(not traffic.cross_traffic_clear({"x": 0.0, "z": 0.0}, "V", "grid_vehicle_2"), "A bus still yields to cross traffic physically inside the junction")
+	cross_probe.node.visible = saved_cross_state.visible
+	cross_probe.node.position = saved_cross_state.position
+	cross_probe.axis = saved_cross_state.axis
+	cross_probe.direction = saved_cross_state.direction
+	cross_probe.road = saved_cross_state.road
+	cross_probe.coordinate = saved_cross_state.coordinate
+	transit_bus.node.position = Vector3(1000, 0.22, 1000)
+	transit.bus_position = Vector3(1000, 0.18, 1000)
+	traffic.reservations["bus_test_junction"] = {"actor": "grid_vehicle_2", "remaining": 8.0, "grid_lock": true, "entered": true, "x": 0.0, "z": 0.0}
+	transit.place_bus(transit_bus, traffic)
+	check(not traffic.reservations.has("bus_test_junction"), "Managed transit bus releases a crossing after its rear clears, preventing permanent gridlock")
+	transit_bus.id = transit_bus_id
+	transit_bus.managed = transit_bus_managed
+	transit_bus.axis = transit_bus_axis
+	transit_bus.direction = transit_bus_direction
+	transit_bus.road = transit_bus_road
+	transit_bus.coordinate = transit_bus_coordinate
+	transit_bus.node.position = transit_bus_position
+	transit_bus.node.visible = prior_visibility[2]
 	traffic.grid = null
 	check(traffic.vehicles.filter(func(v): return v.node.type_id == "city_bus").size() == 1, "One replaceable bus")
 	var speed_factors: Array = traffic.vehicles.filter(func(v): return bool(v.get("randomized", false))).map(func(v): return float(v.get("speed_factor", 1.0)))

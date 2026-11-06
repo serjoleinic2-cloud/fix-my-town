@@ -12,6 +12,7 @@ const SERVICE_STOP_DISTANCE = 5.5
 const FOLLOW_DISTANCE = 3.6
 const SPEED = 5.2
 const CYCLE = 19.0
+const GRID_LANE_OFFSET = 0.76
 var cars: Array[Node3D] = []
 var vehicles: Array = []
 var intersections: Array = []
@@ -288,12 +289,22 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 
 func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
 	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
+	var actor_vehicle: Dictionary = {}
+	for vehicle: Dictionary in vehicles:
+		if str(vehicle.get("id", "")) == actor:
+			actor_vehicle = vehicle
+			break
+	var actor_half := grid_half_extents(actor_vehicle) if grid != null and not actor_vehicle.is_empty() else Vector2(2.3, 2.3)
 	for other: Dictionary in vehicles:
 		if not other.node.visible or other.id == actor or other.axis == axis:
 			continue
-		var point := lane_position(other)
-		var clearance: float = 4.6 if other.node.type_id == "city_bus" else 3.5
-		if absf(point.x - intersection.x) < clearance and absf(point.z - intersection.z) < clearance:
+		var point: Vector3 = lane_position(other)
+		var other_half := grid_half_extents(other) if grid != null else Vector2(2.3, 2.3)
+		var clearance := actor_half + other_half + Vector2(0.12, 0.12)
+		# Only a vehicle physically inside the conflict area blocks entry. The
+		# previous fixed 3.5–4.6 m square included cars waiting at their stop lines,
+		# so a continuous queue could hold a managed bus at the junction forever.
+		if absf(point.x - intersection.x) < clearance.x and absf(point.z - intersection.z) < clearance.y:
 			return false
 	return true
 
@@ -304,9 +315,33 @@ func lane_position(vehicle: Dictionary) -> Vector3:
 		return Vector3(vehicle.coordinate, 0.18, vehicle.road + vehicle.direction)
 	return Vector3(vehicle.road - vehicle.direction, 0.18, vehicle.coordinate)
 
+static func grid_lane_offset(axis: String, direction: int) -> Vector3:
+	# Keep the whole vehicle body on its side of the longitudinal centre dash.
+	# Positive-X traffic uses the +Z lane; positive-Z traffic uses the -X lane.
+	return Vector3(0, 0.22, float(direction) * GRID_LANE_OFFSET) if axis == "H" else Vector3(-float(direction) * GRID_LANE_OFFSET, 0.22, 0)
+
+static func grid_lane_position(center: Vector3, axis: String, direction: int) -> Vector3:
+	return center + grid_lane_offset(axis, direction)
+
+func grid_spawn_heading(source: RefCounted, cell: Vector2i, preferred_axis: String, preferred_direction: int) -> Dictionary:
+	var horizontal: Array[int] = []
+	var vertical: Array[int] = []
+	if source.state_at(cell.x - 1, cell.y) == "road": horizontal.append(-1)
+	if source.state_at(cell.x + 1, cell.y) == "road": horizontal.append(1)
+	if source.state_at(cell.x, cell.y - 1) == "road": vertical.append(-1)
+	if source.state_at(cell.x, cell.y + 1) == "road": vertical.append(1)
+	var axis := preferred_axis
+	if axis == "H" and horizontal.is_empty(): axis = "V"
+	if axis == "V" and vertical.is_empty(): axis = "H"
+	var directions: Array[int] = horizontal if axis == "H" else vertical
+	if directions.is_empty():
+		return {"axis": "H", "direction": 1}
+	var direction := preferred_direction if preferred_direction in directions else directions[0]
+	return {"axis": axis, "direction": direction}
+
 func place_vehicle(vehicle: Dictionary) -> void:
 	if grid != null and vehicle.get("managed", false):
-		vehicle.node.position = Vector3(vehicle.coordinate, 0.22, vehicle.road + vehicle.direction * 0.68) if vehicle.axis == "H" else Vector3(vehicle.road - vehicle.direction * 0.68, 0.22, vehicle.coordinate)
+		vehicle.node.position = grid_lane_position(Vector3(vehicle.coordinate, 0, vehicle.road) if vehicle.axis == "H" else Vector3(vehicle.road, 0, vehicle.coordinate), str(vehicle.axis), int(vehicle.direction))
 	else:
 		vehicle.node.position = lane_position(vehicle)
 	vehicle.node.rotation.y = (PI / 2 * vehicle.direction) if vehicle.axis == "H" else (0.0 if vehicle.direction == 1 else PI)
@@ -332,7 +367,18 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		if other.id == actor_id or not other.node.visible or other.axis != axis or other.direction != direction:
 			continue
 		var road: float = current.z if axis == "H" else current.x
-		if absf(road - other.road) > 0.15:
+		var other_road: float = float(other.road)
+		var road_tolerance := 0.15
+		if vehicle_type == "delivery_truck":
+			# Delivery trucks are rendered inside the lane, while traffic records
+			# the lane centre. Compare the actual lane for legacy streets and
+			# normalized road centres for the cell grid.
+			if grid != null:
+				road += direction * GRID_LANE_OFFSET if axis == "V" else -direction * GRID_LANE_OFFSET
+			else:
+				other_road += float(other.direction) if axis == "H" else -float(other.direction)
+				road_tolerance = 0.4
+		if absf(road - other_road) > road_tolerance:
 			continue
 		var gap: float = (other.coordinate - (current.x if axis == "H" else current.z)) * direction
 		if gap > 0:
@@ -341,6 +387,11 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 	if service_active:
 		blockers.append({"id": "primary_service", "position": service_position})
 	for blocker: Dictionary in blockers:
+		# Logistics trucks perform a full oriented-footprint collision check just
+		# after this route/signal check. The coarse service clearance here would
+		# make two trucks in opposite lanes deadlock at a shared depot road.
+		if vehicle_type == "delivery_truck" and blocker.get("moving_vehicle", false):
+			continue
 		if ignore_incident_id != "" and str(blocker.get("incident_id", "")) == ignore_incident_id:
 			continue
 		if str(blocker.get("id", "")) == "primary_service" and actor_id in ["crew_0", "fire_engine_1", "fire_engine_2"]:
@@ -441,10 +492,18 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			# Spread cars across all roads; taking every sixth row-major cell clustered them in one corner.
 			var road_index := int(floor((float(enabled) + 0.5) * float(roads.size()) / float(maxi(1, limit))))
 			var cell := roads[mini(road_index, roads.size() - 1)]
+			var spawn_axis := "H" if enabled % 2 == 0 else "V"
+			var spawn_direction := 1 if enabled % 4 < 2 else -1
+			var heading := grid_spawn_heading(source, cell, spawn_axis, spawn_direction)
+			vehicle.axis = str(heading.axis)
+			vehicle.direction = int(heading.direction)
 			vehicle.cell = cell
 			vehicle.previous = Vector2i(-1, -1)
 			vehicle.erase("waiting_next")
-			vehicle.target = grid.cell_world(cell.x, cell.y) + Vector3(0, 0.22, 0)
+			vehicle.erase("turn_exit_cell")
+			vehicle.road = grid.cell_world(cell.x, cell.y).z if vehicle.axis == "H" else grid.cell_world(cell.x, cell.y).x
+			vehicle.coordinate = grid.cell_world(cell.x, cell.y).x if vehicle.axis == "H" else grid.cell_world(cell.x, cell.y).z
+			vehicle.target = grid_lane_position(grid.cell_world(cell.x, cell.y), vehicle.axis, vehicle.direction)
 			vehicle.node.position = vehicle.target
 		vehicle.node.visible = active
 		enabled += 1
@@ -470,48 +529,71 @@ func step_grid(delta: float) -> void:
 				vehicle.previous = vehicle.waiting_next
 				vehicle.erase("waiting_next")
 			var recovery_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
-			var recovery_lane := Vector3(0, 0.22, float(vehicle.direction) * 0.68) if str(vehicle.axis) == "H" else Vector3(-float(vehicle.direction) * 0.68, 0.22, 0)
+			var recovery_lane := grid_lane_offset(str(vehicle.axis), int(vehicle.direction))
 			vehicle.target = recovery_center + recovery_lane
 			vehicle.stalled_time = 0.0
 			target = vehicle.target
 		if current.distance_to(target) < 0.08:
-			var options: Array[Vector2i] = []
-			for neighbour: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var candidate: Vector2i = vehicle.cell + neighbour
-				if grid.state_at(candidate.x, candidate.y) == "road":
-					options.append(candidate)
-			if options.size() > 1:
-				options.erase(vehicle.previous)
-			if options.is_empty():
-				continue
-			var forward := Vector2i(int(vehicle.direction), 0) if str(vehicle.axis) == "H" else Vector2i(0, int(vehicle.direction))
-			var forward_cell: Vector2i = vehicle.cell + forward
-			var next: Vector2i
-			if vehicle.has("waiting_next"):
-				next = vehicle["waiting_next"]
+			if vehicle.has("turn_exit_cell"):
+				var exit_cell: Vector2i = vehicle.turn_exit_cell
+				vehicle.cell = exit_cell
+				vehicle.erase("turn_exit_cell")
+				var exit_center: Vector3 = grid.cell_world(exit_cell.x, exit_cell.y)
+				vehicle.target = grid_lane_position(exit_center, str(vehicle.axis), int(vehicle.direction))
+				target = vehicle.target
 			else:
-				next = options[route_rng.randi_range(0, options.size() - 1)]
-				if forward_cell in options and options.size() > 1 and route_rng.randf() < 0.86:
-					next = forward_cell
-			var next_center: Vector3 = grid.cell_world(next.x, next.y)
-			var crossing := find_intersection(next_center.x, next_center.z)
-			var incoming_axis := "H" if next.x != vehicle.cell.x else "V"
-			if not crossing.is_empty() and not permission(crossing, incoming_axis, str(vehicle.id), delta):
-				vehicle.waiting_next = next
-				var current_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
-				var lane_shift := Vector3(0, 0.22, float(vehicle.direction) * 0.68) if str(vehicle.axis) == "H" else Vector3(-float(vehicle.direction) * 0.68, 0.22, 0)
-				vehicle.target = current_center + lane_shift + Vector3(float(forward.x), 0, float(forward.y)) * (TerritoryGrid.CELL_SIZE * 0.5 - 1.45)
-				continue
-			vehicle.erase("waiting_next")
-			var offset: Vector2i = next - vehicle.cell
-			vehicle.previous = vehicle.cell
-			vehicle.cell = next
-			vehicle.axis = "H" if offset.x != 0 else "V"
-			vehicle.direction = offset.x if offset.x != 0 else offset.y
-			var center: Vector3 = next_center
-			vehicle.road = center.z if vehicle.axis == "H" else center.x
-			target = center + (Vector3(0, 0.22, vehicle.direction * 0.68) if vehicle.axis == "H" else Vector3(-vehicle.direction * 0.68, 0.22, 0))
-			vehicle.target = target
+				var options: Array[Vector2i] = []
+				for neighbour: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+					var candidate: Vector2i = vehicle.cell + neighbour
+					if grid.state_at(candidate.x, candidate.y) == "road":
+						options.append(candidate)
+				if options.size() > 1:
+					options.erase(vehicle.previous)
+				if options.is_empty():
+					continue
+				var forward := Vector2i(int(vehicle.direction), 0) if str(vehicle.axis) == "H" else Vector2i(0, int(vehicle.direction))
+				var forward_cell: Vector2i = vehicle.cell + forward
+				var next: Vector2i
+				if vehicle.has("waiting_next"):
+					next = vehicle["waiting_next"]
+				else:
+					next = options[route_rng.randi_range(0, options.size() - 1)]
+					if forward_cell in options and options.size() > 1 and route_rng.randf() < 0.86:
+						next = forward_cell
+				var next_center: Vector3 = grid.cell_world(next.x, next.y)
+				var crossing := find_intersection(next_center.x, next_center.z)
+				var incoming_axis := "H" if next.x != vehicle.cell.x else "V"
+				if not crossing.is_empty() and not permission(crossing, incoming_axis, str(vehicle.id), delta):
+					vehicle.waiting_next = next
+					var current_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
+					var lane_shift := grid_lane_offset(str(vehicle.axis), int(vehicle.direction))
+					vehicle.target = current_center + lane_shift + Vector3(float(forward.x), 0, float(forward.y)) * (TerritoryGrid.CELL_SIZE * 0.5 - 1.45)
+					continue
+				vehicle.erase("waiting_next")
+				var offset: Vector2i = next - vehicle.cell
+				var next_axis := "H" if offset.x != 0 else "V"
+				var next_direction := offset.x if offset.x != 0 else offset.y
+				if next_axis != str(vehicle.axis):
+					# Turn within the junction footprint: leave the incoming lane, pass
+					# through the unmarked centre, then join the outgoing lane before
+					# leaving the junction. Never interpolate diagonally across a road.
+					vehicle.previous = vehicle.cell
+					vehicle.turn_exit_cell = next
+					vehicle.axis = next_axis
+					vehicle.direction = next_direction
+					var turn_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
+					vehicle.road = turn_center.z if next_axis == "H" else turn_center.x
+					var turn_forward := Vector3(float(next_direction), 0, 0) if next_axis == "H" else Vector3(0, 0, float(next_direction))
+					target = turn_center + grid_lane_offset(next_axis, next_direction) + turn_forward * 1.3
+					vehicle.target = target
+				else:
+					vehicle.previous = vehicle.cell
+					vehicle.cell = next
+					vehicle.axis = next_axis
+					vehicle.direction = next_direction
+					vehicle.road = next_center.z if vehicle.axis == "H" else next_center.x
+					target = grid_lane_position(next_center, str(vehicle.axis), int(vehicle.direction))
+					vehicle.target = target
 		vehicle.coordinate = current.x if vehicle.axis == "H" else current.z
 		var allowed := travel_distance(vehicle, delta)
 		var proposed := current.move_toward(target, allowed)

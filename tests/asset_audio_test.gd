@@ -119,6 +119,32 @@ func run() -> void:
 	check(audio.voices.size() + audio.loops.size() <= audio.MAX_VOICES, "Voice budget")
 	audio.play_ui("select")
 	check(audio.voices[-1].bus == "Interface" and audio.voices[-1].stream == audio.stream("select"), "House tap remains audible when effects occupy the voice budget")
+	check(audio.stream("select").get_length() >= 0.14, "Building taps last long enough to hear on phone speakers")
+	check(audio.stream("click").get_length() >= 0.14, "UI taps last long enough to hear on phone speakers")
+	for type_id: String in Catalog.TYPES:
+		check(audio.BUILDING_SELECT_SOUNDS.has(type_id) or audio.VEHICLE_SELECT_SOUNDS.has(type_id), "Every catalog object has an assigned sound: " + type_id)
+	check(audio.BUILDING_AMBIENCE_SOUNDS.get("police_station", "") == "warning", "Police station has a spatial warning/siren cue")
+	check(audio.BUILDING_AMBIENCE_SOUNDS.get("hospital", "") == "radio_call", "Hospital has a spatial ambulance dispatch cue")
+	check(audio.BUILDING_AMBIENCE_SOUNDS.get("depot", "") == "repair", "Workers' depot has a spatial work cue")
+	check(audio.BUILDING_AMBIENCE_SOUNDS.get("fire_station", "") == "siren", "Fire station has a spatial fire-siren cue")
+	check(audio.BUILDING_AMBIENCE_SOUNDS.get("logistics_center", "") == "engine", "Logistics center has a spatial truck-engine cue")
+	for type_id: String in audio.VEHICLE_SELECT_SOUNDS:
+		check(audio.vehicle_select_sound(type_id) != "", "Vehicle sound is assigned: " + type_id)
+	audio.play_vehicle_select("civilian_car")
+	check(audio.voices[-1].bus == "Interface" and audio.voices[-1].volume_db >= 7.9, "Quiet engine cue is boosted for vehicle selection on mobile speakers")
+	var traffic_nodes: Array = scene.scenery.traffic_controller.vehicles
+	audio.sync_traffic_ambience(traffic_nodes, scene.camera.global_position)
+	var traffic_loop_count := int(audio.loops.has("traffic_engine_0")) + int(audio.loops.has("traffic_engine_1"))
+	check(traffic_loop_count <= 2, "Traffic ambience is capped at two nearby engines")
+	audio.sync_traffic_ambience([], scene.camera.global_position)
+	check(not audio.loops.has("traffic_engine_0") and not audio.loops.has("traffic_engine_1"), "Traffic engine loops stop when vehicles disappear")
+	audio.shutdown()
+	audio.set_paused(false)
+	audio.building_sound_cooldowns["test_fire_station"] = 0.01
+	audio.sync_building_sounds([{"instance_id": "test_fire_station", "type_id": "fire_station", "position": scene.camera.global_position}], scene.camera.global_position, 0.02)
+	check(not audio.voices.is_empty() and audio.voices[-1] is AudioStreamPlayer3D and audio.voices[-1].stream == audio.stream("siren"), "Nearby fire station plays its spatial siren cue")
+	if not audio.voices.is_empty() and audio.voices[-1] is AudioStreamPlayer3D:
+		check(audio.voices[-1].global_position.distance_to(scene.camera.global_position) < 0.1, "Special-building ambience is placed at the audible world-space building position")
 	check(audio.stream("place").get_length() < 1.1, "Construction feedback is a brief original musical accent")
 	check(audio.stream("tesla").get_length() < 0.3, "Tesla-like selection feedback is a short cue")
 	for type_id: String in Catalog.TYPES:

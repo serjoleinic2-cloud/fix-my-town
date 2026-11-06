@@ -2,6 +2,7 @@ extends SceneTree
 
 const Simulation = preload("res://scripts/simulation.gd")
 const Catalog = preload("res://scripts/asset_catalog.gd")
+const ObjectScene = preload("res://scenes/objects/game_object.tscn")
 var failures: int = 0
 func check(condition: bool, message: String) -> void:
 	if not condition:
@@ -13,6 +14,18 @@ func run() -> void:
 	check(Catalog.LEVELS.has("elite_residence") and Catalog.LEVELS["elite_residence"].size() == 3, "Elite residence has three upgrade tiers")
 	for tier in [1, 2, 3]:
 		check(ResourceLoader.exists(Catalog.scene_path("elite_residence", false, tier)), "Elite residence tier scene exists: " + str(tier))
+		var elite_object = ObjectScene.instantiate()
+		root.add_child(elite_object)
+		elite_object.setup("elite_residence", "test_elite_%d" % tier)
+		elite_object.set_level(tier)
+		await process_frame
+		var elite_visual: Node3D = elite_object.visual_root.get_child(0)
+		var firs: Array = elite_visual.find_children("EliteFir_*", "Node3D", true, false)
+		check(firs.size() == 6, "Elite residence tier %d plants six firs around the green yard" % tier)
+		check(firs.all(func(fir: Node3D) -> bool: return fir.get_meta("species", "") == "fir" and absf(fir.position.x) <= 8.0 and absf(fir.position.z) <= 8.0), "Elite firs are placed on the green footprint")
+		check(elite_visual.find_children("EliteCypress*", "Node3D", true, false).is_empty(), "Elite residence has no Roman-style cypress columns")
+		elite_object.queue_free()
+		await process_frame
 	var game := Simulation.new(true)
 	game.save_path = "user://building_levels_test.json"
 	game.budget = 5000

@@ -743,11 +743,14 @@ func elite_residence(arch_axis: String = "", lane_offset: int = 0) -> void:
 	for x in [-1.48, 1.48]:
 		Art.box(self, Vector3(x, 1.72, 5.95), Vector3(0.2, 2.1, 0.2), stone)
 	Art.box(self, Vector3(0, 0.50, 6.28), Vector3(4.3, 0.18, 2.5), Color("c8baa0"))
-	# Formal Roman cypress allee beside the entrance; the arrival path stays clear.
-	for index in range(4):
-		var tree_x := -5.8 + index * 1.45 if index < 2 else 4.35 + (index - 2) * 1.45
-		Art.cylinder(self, Vector3(tree_x, 3.05, 5.7), 0.58, 6.1, Color("315743"), 0.055, 8)
-		Art.cylinder(self, Vector3(tree_x, 0.62, 5.7), 0.14, 1.15, Color("78634b"), 0.10, 8)
+	# Fir trees sit on the green perimeter, leaving the entrance and drive clear.
+	var fir_positions := [
+		Vector3(-8.0, 0.2, 5.5), Vector3(8.0, 0.2, -5.5),
+		Vector3(8.0, 0.2, 0.0), Vector3(8.0, 0.2, 5.5),
+		Vector3(-4.0, 0.2, -8.0), Vector3(4.0, 0.2, -8.0)
+	]
+	for index in range(fir_positions.size()):
+		elite_fir(fir_positions[index], index)
 	for x in [-3.2, 3.2]:
 		Art.box(self, Vector3(x, 3.05, 5.18), Vector3(3.25, 0.16, 1.32), Color("cfc5b4"))
 		Art.box(self, Vector3(x, 3.48, 5.78), Vector3(3.25, 0.08, 0.07), glass)
@@ -780,6 +783,14 @@ func elite_residence(arch_axis: String = "", lane_offset: int = 0) -> void:
 		Art.box(self, Vector3(0, 11.68, -0.7), Vector3(6.7, 0.12, 0.12), trim)
 	for x in [-8.0, 8.0]:
 		Art.tree(self, Vector3(x, 0.1, -7.7), 0.42, false, absi(roundi(x * 10)))
+
+func elite_fir(position_value: Vector3, seed_value: int) -> void:
+	var fir := Node3D.new()
+	fir.name = "EliteFir_%d" % seed_value
+	fir.set_meta("species", "fir")
+	fir.position = position_value
+	add_child(fir)
+	Art.tree(fir, Vector3.ZERO, 1.1, true, seed_value)
 
 func elite_residence_arch(axis: String, lane_offset: int) -> void:
 	# Two private halves frame a public road; the elevated connector forms a visible arch.

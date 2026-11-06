@@ -45,9 +45,11 @@ def render():
             out.writeframes((audio * 32767).astype('<i2').tobytes())
 
     for name, body in [('click', 240), ('select', 310)]:
-        t = timeline(.085)
+        # 150 ms survives small phone speakers and touch/UI latency while
+        # remaining a soft confirmation rather than a loud alert.
+        t = timeline(.15)
         tap = (air(t, 1700) * .25 + np.sin(2 * np.pi * body * t))
-        write(name, tap * (1 - np.exp(-t * 1600)) * np.exp(-t * 75), .19)
+        write(name, tap * (1 - np.exp(-t * 900)) * np.exp(-t * 23), .32)
 
     t = timeline(.95)
     # Лёгкое арпеджио и короткий воздушный акцент после размещения.

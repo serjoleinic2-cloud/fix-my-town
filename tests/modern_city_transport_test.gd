@@ -42,11 +42,19 @@ func run() -> void:
 	check(traffic.vehicles.is_empty(), "No vehicles are instantiated before population traffic is enabled")
 	traffic.configure_grid(game.territory, 5, false, [])
 	check(traffic.cars.any(func(car): return car.visible) and not traffic.vehicles[2].node.visible, "Civilians appear on current roads; unlaunched bus stays hidden")
+	var positive_lane := Traffic.grid_lane_position(Vector3.ZERO, "H", 1)
+	var negative_lane := Traffic.grid_lane_position(Vector3.ZERO, "H", -1)
+	check(positive_lane.z > 0.56 and negative_lane.z < -0.56, "Opposing horizontal cars stay entirely on their own side of the centre dash")
+	check(positive_lane.distance_to(negative_lane) >= 1.12, "Opposing lanes have enough clearance to avoid head-on contact")
+	var northbound_lane := Traffic.grid_lane_position(Vector3.ZERO, "V", 1)
+	var southbound_lane := Traffic.grid_lane_position(Vector3.ZERO, "V", -1)
+	check(northbound_lane.x < -0.56 and southbound_lane.x > 0.56, "Opposing vertical cars stay entirely on their own side of the centre dash")
 	var starting_positions: Array[Vector3] = []
 	for vehicle: Dictionary in traffic.vehicles:
 		starting_positions.append(vehicle.node.position)
 	var on_roads := true
 	var no_overlaps := true
+	var stayed_out_of_center_dash := true
 	for frame in range(800):
 		traffic.step(0.05)
 		for car in traffic.cars:
@@ -54,6 +62,12 @@ func run() -> void:
 				continue
 			var cell := Vector2i(roundi((car.position.x - Grid.ORIGIN.x) / Grid.CELL_SIZE), roundi((car.position.z - Grid.ORIGIN.z) / Grid.CELL_SIZE))
 			on_roads = on_roads and game.territory.state_at(cell.x, cell.y) == "road"
+		for vehicle: Dictionary in traffic.vehicles:
+			if not vehicle.node.visible or vehicle.get("managed", false) or vehicle.has("turn_exit_cell"):
+				continue
+			var center: Vector3 = game.territory.cell_world(vehicle.cell.x, vehicle.cell.y)
+			var side_clearance := absf(vehicle.node.position.z - center.z) if str(vehicle.axis) == "H" else absf(vehicle.node.position.x - center.x)
+			stayed_out_of_center_dash = stayed_out_of_center_dash and side_clearance >= 0.56 + 0.055
 		for first in range(traffic.vehicles.size()):
 			var one: Dictionary = traffic.vehicles[first]
 			if not one.node.visible:
@@ -65,6 +79,7 @@ func run() -> void:
 				var half := traffic.grid_half_extents(one) + traffic.grid_half_extents(two)
 				no_overlaps = no_overlaps and not (absf(one.node.position.x - two.node.position.x) < half.x - 0.01 and absf(one.node.position.z - two.node.position.z) < half.y - 0.01)
 	check(no_overlaps, "Grid vehicles keep physical clearance through turns and queues")
+	check(stayed_out_of_center_dash, "Vehicles do not overlap the longitudinal centre dash outside junction turns")
 	check(on_roads, "Every sampled civilian position remains on the actual constructed road network")
 	var moving_count := 0
 	var active_count := 0

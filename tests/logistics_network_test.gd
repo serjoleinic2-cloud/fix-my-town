@@ -121,6 +121,21 @@ func run() -> void:
 	check(float(truck_model.delivery_cargo_height) > float(truck_model.delivery_cab_height), "Closed cargo box stands higher than the cab roof")
 	truck.queue_free()
 	await process_frame
+	var logistics_object := GameObjectScene.instantiate()
+	root.add_child(logistics_object)
+	logistics_object.setup("logistics_center", "logistics_loading_yard_test")
+	var logistics_model: Node3D = logistics_object.visual_root.get_child(0)
+	var loading_yard: Node3D = logistics_model.get_node_or_null("LogisticsLoadingYard") as Node3D
+	check(loading_yard != null, "Logistics center has a distinct unloading yard inside its replaceable visual")
+	if loading_yard != null:
+		var parked_trucks := loading_yard.find_children("ParkedDeliveryTruck*", "Node3D", true, false)
+		var unloading_pallets := loading_yard.find_children("UnloadingBoxes*", "Node3D", true, false)
+		check(parked_trucks.size() == 2, "Logistics center displays two parked delivery trucks at its loading bays")
+		check(unloading_pallets.size() == 2, "Logistics center displays box pallets beside both parked trucks")
+		for parked_truck: Node in parked_trucks:
+			check(str(parked_truck.get_meta("yard_role", "")) == "parked_delivery_truck", "Loading-yard trucks are static visual props, not traffic vehicles")
+	logistics_object.queue_free()
+	await process_frame
 	check(not game.can_demolish_grid_building(center.instance_id), "A logistics center with active warehouses cannot be removed")
 	check(game.upgrade_grid_house(center.instance_id, true), "The logistics center can be upgraded")
 	check(game.logistics_warehouse_limit() == 2 and game.can_build_warehouse() and game.logistics_upgrade_allowed(warehouse), "Center level two permits a second warehouse and level-two warehouse upgrades")

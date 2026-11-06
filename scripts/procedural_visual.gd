@@ -307,6 +307,7 @@ func logistics_center() -> void:
 		Art.box(self, Vector3(x, 1.15, 2.53), Vector3(1.95, 2.0, 0.12), Color("566b73"))
 		Art.box(self, Vector3(x, 2.22, 2.62), Vector3(2.0, 0.18, 0.1), Color("dea84e"))
 	Art.box(self, Vector3(0, 3.05, 2.72), Vector3(6.6, 0.68, 0.18), Color("3e6d78"))
+	logistics_loading_yard()
 
 	Art.box(self, Vector3(-4.35, 0.42, -1.6), Vector3(0.5, 0.7, 5.6), Color("d7c78e"))
 	Art.box(self, Vector3(4.35, 0.42, -1.6), Vector3(0.5, 0.7, 5.6), Color("d7c78e"))
@@ -319,6 +320,55 @@ func logistics_center() -> void:
 		Art.box(self, Vector3(3.0, 5.5, -2.25), Vector3(2.85, 0.2, 2.75), Color("405c70"))
 		for x in [1.95, 3.0, 4.05]:
 			Art.box(self, Vector3(x, 4.35, -0.96), Vector3(0.08, 1.3, 0.05), Color("dce8dd"))
+
+func logistics_loading_yard() -> void:
+	var yard := Node3D.new()
+	yard.name = "LogisticsLoadingYard"
+	yard.set_meta("yard_role", "loading_area")
+	add_child(yard)
+	# A small paved apron sits in front of the loading bays, within the building footprint.
+	Art.box(yard, Vector3(0, 0.18, 4.0), Vector3(12.0, 0.16, 5.4), Color("858a84"))
+	for x in [-4.45, -1.25, 1.25, 4.45]:
+		Art.box(yard, Vector3(x, 0.275, 4.0), Vector3(0.07, 0.025, 4.6), Color("e5d8b2"))
+	add_logistics_loading_truck(yard, "ParkedDeliveryTruckLeft", Vector3(-2.65, 0.275, 4.25), Color("477681"))
+	add_logistics_loading_truck(yard, "ParkedDeliveryTruckRight", Vector3(2.65, 0.275, 4.25), Color("b56d45"))
+	add_logistics_pallet(yard, "UnloadingBoxesLeft", Vector3(-4.35, 0.29, 2.65))
+	add_logistics_pallet(yard, "UnloadingBoxesRight", Vector3(4.35, 0.29, 2.65))
+
+func add_logistics_loading_truck(parent: Node3D, truck_name: String, position_value: Vector3, cab_color: Color) -> void:
+	var truck_root := Node3D.new()
+	truck_root.name = truck_name
+	truck_root.position = position_value
+	truck_root.set_meta("yard_role", "parked_delivery_truck")
+	parent.add_child(truck_root)
+	Art.box(truck_root, Vector3(0, 0.62, -0.48), Vector3(1.62, 0.6, 2.65), Color("3f555a"))
+	Art.box(truck_root, Vector3(0, 1.55, -0.55), Vector3(1.72, 1.75, 2.55), Color("d9e0d8"))
+	Art.box(truck_root, Vector3(0, 2.44, -0.55), Vector3(1.76, 0.09, 2.60), Color("bcc9c5"))
+	for side in [-1.0, 1.0]:
+		Art.box(truck_root, Vector3(side * 0.87, 1.55, -0.55), Vector3(0.06, 1.62, 2.43), Color("bfcac4"))
+	Art.box(truck_root, Vector3(0, 1.55, -1.84), Vector3(1.62, 1.62, 0.06), Color("aebcb7"))
+	Art.box(truck_root, Vector3(0, 1.02, 0.92), Vector3(1.48, 1.15, 1.0), cab_color)
+	Art.box(truck_root, Vector3(0, 1.22, 1.46), Vector3(1.18, 0.62, 0.06), Color("9fc7ca"))
+	for side in [-1.0, 1.0]:
+		Art.box(truck_root, Vector3(side * 0.52, 0.72, 1.49), Vector3(0.14, 0.12, 0.07), Color("fff1bf"))
+		for z in [-1.38, 1.12]:
+			var wheel := Art.cylinder(truck_root, Vector3(side * 0.78, 0.34, z), 0.34, 0.18, Color("374345"), 1, 10)
+			wheel.rotation.z = PI / 2
+
+func add_logistics_pallet(parent: Node3D, pallet_name: String, position_value: Vector3) -> void:
+	var pallet := Node3D.new()
+	pallet.name = pallet_name
+	pallet.position = position_value
+	pallet.set_meta("yard_role", "unloading_pallet")
+	parent.add_child(pallet)
+	for x in [-0.42, 0.0, 0.42]:
+		Art.box(pallet, Vector3(x, 0.08, 0), Vector3(0.22, 0.16, 0.92), Color("9c7047"))
+	for box_data: Dictionary in [
+		{"position": Vector3(-0.24, 0.48, -0.19), "size": Vector3(0.42, 0.64, 0.42), "color": Color("b98752")},
+		{"position": Vector3(0.22, 0.42, -0.19), "size": Vector3(0.44, 0.52, 0.42), "color": Color("c7965d")},
+		{"position": Vector3(0.0, 0.39, 0.28), "size": Vector3(0.72, 0.46, 0.42), "color": Color("a97846")}
+	]:
+		Art.box(pallet, box_data.position, box_data.size, box_data.color)
 
 func warehouse() -> void:
 	# Compact 2x2 storage building with readable level upgrades.

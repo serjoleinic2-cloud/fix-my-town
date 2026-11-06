@@ -4093,20 +4093,24 @@ static func logistics_driving_route(road_route: Array) -> Array:
 				driving_route.append(second + logistics_lane_offset(next_direction) + Vector3(0, 0.32, 0))
 	return driving_route
 
-func logistics_vehicle_half_extents(direction: Vector3) -> Vector2:
+static func logistics_vehicle_half_extents(direction: Vector3) -> Vector2:
 	return Vector2(0.78, 0.52) if absf(direction.x) >= absf(direction.z) else Vector2(0.52, 0.78)
 
-func set_logistics_traffic_blocker(identifier: String, position_value: Vector3, half_extents: Vector2) -> void:
+func set_logistics_traffic_blocker(identifier: String, position_value: Vector3, half_extents: Vector2, heading: Vector3) -> void:
 	if scenery == null or scenery.traffic_controller == null:
 		return
 	var blockers: Array = scenery.traffic_controller.blocking_positions
+	var axis := "H" if absf(heading.x) >= absf(heading.z) else "V"
+	var direction := int(signf(heading.x if axis == "H" else heading.z))
 	for index in range(blockers.size()):
 		if str(blockers[index].get("id", "")) == identifier:
 			blockers[index].position = position_value
 			blockers[index].half_extents = half_extents
 			blockers[index].moving_vehicle = true
+			blockers[index].axis = axis
+			blockers[index].direction = direction
 			return
-	blockers.append({"id": identifier, "position": position_value, "half_extents": half_extents, "moving_vehicle": true})
+	blockers.append({"id": identifier, "position": position_value, "half_extents": half_extents, "moving_vehicle": true, "axis": axis, "direction": direction})
 
 func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> void:
 	var driving_routes: Array = []
@@ -4126,7 +4130,8 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 		first_route_length += first_route[segment - 1].distance_to(first_route[segment])
 	if first_route_length <= 0.01:
 		return
-	var initial_progress := fposmod(float(index) * 4.2, first_route_length)
+	var spawn_blockers := logistics_spawn_blockers()
+	var initial_progress := logistics_spawn_progress(first_route, 8.0 + float(index) * 4.2, spawn_blockers)
 	var initial_pose := logistics_route_pose(first_route, initial_progress)
 	var identifier := "delivery_%s_%d" % [source_id, index]
 	var truck := create_object(logistics_visuals, "delivery_truck", identifier, initial_pose.position)
@@ -4140,7 +4145,7 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 	var delivery_speed := 4.0 + float(speed_slot) * 0.36
 	logistics_vehicles.append({"id": identifier, "object": truck, "routes": driving_routes, "route_index": 0, "progress": initial_progress, "speed": delivery_speed})
 
-func logistics_route_pose(route: Array, progress_value: float) -> Dictionary:
+static func logistics_route_pose(route: Array, progress_value: float) -> Dictionary:
 	var remaining := progress_value
 	for segment in range(1, route.size()):
 		var first: Vector3 = route[segment - 1]
@@ -4156,6 +4161,42 @@ static func logistics_route_length(route: Array) -> float:
 	for segment in range(1, route.size()):
 		total += route[segment - 1].distance_to(route[segment])
 	return total
+
+static func logistics_spawn_progress(route: Array, preferred_progress: float, blockers: Array) -> float:
+	var route_length := logistics_route_length(route)
+	if route_length <= 0.01:
+		return 0.0
+	var attempts := maxi(1, int(ceil(route_length / 2.5)))
+	for attempt in range(attempts):
+		var candidate := fposmod(preferred_progress + float(attempt) * 2.5, route_length)
+		var pose := logistics_route_pose(route, candidate)
+		var truck_half := logistics_vehicle_half_extents(pose.direction)
+		var clear := true
+		for blocker: Dictionary in blockers:
+			var blocker_position: Vector3 = blocker.get("position", Vector3.ZERO)
+			var blocker_half: Vector2 = blocker.get("half_extents", Vector2(0.85, 0.85))
+			if absf(pose.position.x - blocker_position.x) < truck_half.x + blocker_half.x + 0.55 and absf(pose.position.z - blocker_position.z) < truck_half.y + blocker_half.y + 0.55:
+				clear = false
+				break
+		if clear:
+			return candidate
+	return fposmod(preferred_progress, route_length)
+
+func logistics_spawn_blockers() -> Array:
+	var blockers: Array = []
+	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
+	if traffic_controller != null:
+		for vehicle: Dictionary in traffic_controller.vehicles:
+			if not vehicle.node.visible:
+				continue
+			blockers.append({"position": vehicle.node.position, "half_extents": traffic_controller.grid_half_extents(vehicle)})
+	for vehicle: Dictionary in logistics_vehicles:
+		var truck: Node3D = vehicle.get("object")
+		if truck == null or not is_instance_valid(truck):
+			continue
+		var heading := Vector3(sin(truck.rotation.y), 0, cos(truck.rotation.y))
+		blockers.append({"position": truck.position, "half_extents": logistics_vehicle_half_extents(heading)})
+	return blockers
 
 static func logistics_progress_after_motion(routes: Array, start_route_index: int, start_progress: float, requested_advance: float, moved_fraction: float) -> Dictionary:
 	if routes.is_empty():
@@ -4180,7 +4221,7 @@ func tick_logistics_vehicles(delta: float) -> void:
 		if parked_truck == null or not is_instance_valid(parked_truck):
 			continue
 		var heading := Vector3(sin(parked_truck.rotation.y), 0, cos(parked_truck.rotation.y))
-		set_logistics_traffic_blocker(str(parked_vehicle.get("id", "")), parked_truck.position, logistics_vehicle_half_extents(heading))
+		set_logistics_traffic_blocker(str(parked_vehicle.get("id", "")), parked_truck.position, logistics_vehicle_half_extents(heading), heading)
 	for vehicle: Dictionary in logistics_vehicles:
 		var truck: Node3D = vehicle.get("object")
 		if truck == null or not is_instance_valid(truck):
@@ -4247,7 +4288,7 @@ func tick_logistics_vehicles(delta: float) -> void:
 			vehicle.progress = float(committed.progress)
 			truck.position = current_position.move_toward(proposed_position, allowed_distance)
 			truck.rotation.y = atan2(direction.x, direction.z)
-			set_logistics_traffic_blocker(str(vehicle.get("id", "")), truck.position, logistics_vehicle_half_extents(direction))
+			set_logistics_traffic_blocker(str(vehicle.get("id", "")), truck.position, logistics_vehicle_half_extents(direction), direction)
 			break
 
 func building_effect(kind: String, level_value: int) -> String:

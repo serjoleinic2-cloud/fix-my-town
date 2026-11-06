@@ -77,6 +77,49 @@ func run() -> void:
 	check(traffic.permission(turn_lock, "H", "turn_car_a", 0.05), "First car reserves an unsignalized turn conflict point")
 	check(not traffic.permission(turn_lock, "V", "turn_car_b", 0.05), "Opposing car waits for the same turn conflict point")
 	traffic.reservations.erase("synthetic_turn_lock")
+	# Uncontrolled intersections use the local right-hand priority rule.
+	traffic.grid = RefCounted.new()
+	var priority_one: Dictionary = traffic.vehicles[0]
+	var priority_two: Dictionary = traffic.vehicles[1]
+	var priority_states: Array[Dictionary] = []
+	for vehicle: Dictionary in traffic.vehicles:
+		priority_states.append({"visible": vehicle.node.visible, "axis": vehicle.axis, "direction": vehicle.direction, "road": vehicle.road, "coordinate": vehicle.coordinate, "position": vehicle.node.position})
+		vehicle.node.hide()
+	priority_one.node.show()
+	priority_one.axis = "H"
+	priority_one.direction = 1
+	priority_one.node.position = Vector3(-6, 0.22, 0)
+	priority_two.node.show()
+	priority_two.axis = "V"
+	priority_two.direction = -1
+	priority_two.node.position = Vector3(0, 0.22, 6)
+	var uncontrolled := {"key": "priority_rule", "x": 0.0, "z": 0.0, "offset": 0.0, "node": null, "unsignalized": true}
+	traffic.reservations.clear()
+	check(not traffic.permission(uncontrolled, "H", str(priority_one.id), 0.05, 1), "Driver yields to a vehicle approaching from the right")
+	priority_two.direction = 1
+	priority_two.node.position = Vector3(0, 0.22, -6)
+	traffic.reservations.clear()
+	check(traffic.permission(uncontrolled, "H", str(priority_one.id), 0.05, 1), "Driver proceeds when the other approach is on the left")
+	traffic.reservations.clear()
+	priority_two.node.position = Vector3(0, 0.22, 0)
+	traffic.reservations["priority_rule"] = {"actor": str(priority_one.id), "remaining": 8.0, "grid_lock": true, "entered": true, "x": 0.0, "z": 0.0}
+	check(traffic.permission(uncontrolled, "H", str(priority_one.id), 0.05, 1), "Vehicle already inside a reserved junction keeps priority to clear it")
+	for index in range(traffic.vehicles.size()):
+		var vehicle: Dictionary = traffic.vehicles[index]
+		var saved: Dictionary = priority_states[index]
+		vehicle.node.visible = saved.visible
+		vehicle.axis = saved.axis
+		vehicle.direction = saved.direction
+		vehicle.road = saved.road
+		vehicle.coordinate = saved.coordinate
+		vehicle.node.position = saved.position
+	traffic.reservations.clear()
+	traffic.grid = null
+	traffic.blocking_positions = [{"id": "moving_delivery", "position": Vector3.ZERO, "moving_vehicle": true}]
+	check(not traffic.has_nearby_incident_blocker(Vector3.ZERO), "Moving delivery traffic does not disable deadlock recovery")
+	traffic.blocking_positions = [{"id": "fire_response", "incident_id": "fire_1", "position": Vector3.ZERO}]
+	check(traffic.has_nearby_incident_blocker(Vector3.ZERO), "A deliberate incident roadblock still suppresses automatic deadlock recovery")
+	traffic.blocking_positions.clear()
 	traffic.grid = RefCounted.new()
 	var grid_actor: String = str(traffic.vehicles[0].id)
 	check(traffic.permission(turn_lock, "H", grid_actor, 0.05), "Grid car reserves the turn conflict point")

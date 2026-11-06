@@ -43,6 +43,11 @@ func run() -> void:
 	for turn_index in range(1, turn_route.size()):
 		shortest_turn_segment = minf(shortest_turn_segment, (turn_route[turn_index] as Vector3).distance_to(turn_route[turn_index - 1]))
 	check(turn_route.size() == 5 and shortest_turn_segment < 0.7, "A logistics truck transitions between lane offsets through the junction center rather than jumping across the corner")
+	var spawn_route: Array = [Vector3(0, 0.32, 0), Vector3(0, 0.32, -20)]
+	var occupied_start: Array = [{"position": Vector3(0, 0.32, 0), "half_extents": Vector2(1.8, 0.6)}]
+	var safe_spawn_progress := MainScript.logistics_spawn_progress(spawn_route, 0.0, occupied_start)
+	var safe_spawn_pose := MainScript.logistics_route_pose(spawn_route, safe_spawn_progress)
+	check(safe_spawn_progress > 0.0 and safe_spawn_pose.position.distance_to(Vector3.ZERO) > 2.5, "A logistics truck does not spawn on top of an occupied bus or car")
 	var game := Simulation.new(false)
 	game.save_path = "user://logistics_network_test.json"
 	game.start_empty_city()

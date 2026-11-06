@@ -239,7 +239,7 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		if ahead < stop_distance - 0.3:
 			wait_times.erase(intersection.key + ":" + vehicle.id)
 		if ahead >= stop_distance - 0.1 and ahead <= stop_distance + distance + 0.2:
-			if not permission(intersection, vehicle.axis, vehicle.id, delta):
+			if not permission(intersection, vehicle.axis, vehicle.id, delta, int(vehicle.direction)):
 				distance = minf(distance, maxf(0, ahead - stop_distance))
 	if grid != null:
 		var proposed := current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0.0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0.0)
@@ -266,17 +266,32 @@ func release_grid_reservations_for_vehicle(vehicle: Dictionary) -> void:
 		elif reservation.get("entered", false):
 			reservations.erase(key)
 
-func permission(intersection: Dictionary, axis: String, actor: String, delta: float) -> bool:
+func permission(intersection: Dictionary, axis: String, actor: String, delta: float, direction: int = 0) -> bool:
+	var reservation: Dictionary = reservations.get(intersection.key, {})
+	if not reservation.is_empty() and str(reservation.get("actor", "")) == actor:
+		# Once a vehicle has entered the junction, it owns the right of way until
+		# its rear clears. Yielding again to a queue at the stop line can deadlock
+		# two approaches nose-to-nose inside the junction.
+		if reservation.get("grid_lock", false) and reservation.get("entered", false):
+			return true
+		if cross_traffic_clear(intersection, axis, actor):
+			return true
+		return false
 	if not cross_traffic_clear(intersection, axis, actor):
 		return false
-	if reservations.has(intersection.key) and str(reservations[intersection.key].get("actor", "")) != actor:
+	if not reservation.is_empty():
 		return false
 	if intersection.get("unsignalized", false):
+		if not unsignalized_right_of_way_clear(intersection, axis, direction, actor):
+			var wait_key: String = str(intersection.key) + ":" + actor
+			wait_times[wait_key] = float(wait_times.get(wait_key, 0.0)) + delta
+			return false
 		reserve_intersection(intersection, actor)
 		return true
 	if not is_broken(intersection):
 		if phase(axis, clock + intersection.offset) != "green":
 			return false
+		wait_times.erase(intersection.key + ":" + actor)
 		reserve_intersection(intersection, actor)
 		return true
 	var wait_key: String = intersection.key + ":" + actor
@@ -286,6 +301,41 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 	# Сломанный узел пропускает машины по очереди после паузы.
 	reserve_intersection(intersection, actor)
 	return true
+
+func unsignalized_right_of_way_clear(intersection: Dictionary, axis: String, direction: int, actor: String) -> bool:
+	if direction == 0:
+		return true
+	var velocity := Vector2(direction, 0) if axis == "H" else Vector2(0, direction)
+	var right_of_actor := Vector2(-velocity.y, velocity.x)
+	var junction := Vector2(float(intersection.x), float(intersection.z))
+	for other: Dictionary in vehicles:
+		if not other.node.visible or str(other.id) == actor or str(other.axis) == axis:
+			continue
+		if approach_is_from_right(junction, right_of_actor, lane_position(other), str(other.axis), int(other.direction)):
+			return false
+	for blocker: Dictionary in blocking_positions:
+		if not blocker.get("moving_vehicle", false) or str(blocker.get("id", "")) == actor:
+			continue
+		var blocker_axis := str(blocker.get("axis", ""))
+		if blocker_axis == "" or blocker_axis == axis:
+			continue
+		var blocker_direction := int(blocker.get("direction", 0))
+		if approach_is_from_right(junction, right_of_actor, blocker.get("position", Vector3.ZERO), blocker_axis, blocker_direction):
+			return false
+	return true
+
+func approach_is_from_right(junction: Vector2, right_of_actor: Vector2, position_value: Vector3, axis: String, direction: int) -> bool:
+	if direction == 0:
+		return false
+	var offset := Vector2(position_value.x, position_value.z) - junction
+	if offset.length() > 7.0:
+		return false
+	var other_velocity := Vector2(direction, 0) if axis == "H" else Vector2(0, direction)
+	if other_velocity.dot(-offset) <= 0.0:
+		return false
+	# At an uncontrolled conflict, yield to a vehicle approaching from the
+	# right. Signal-controlled junctions use their light phase instead.
+	return offset.dot(right_of_actor) > 0.0
 
 func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
 	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
@@ -415,7 +465,7 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		if ahead < stop_distance - 0.01:
 			wait_times.erase(intersection.key + ":" + actor_id)
 		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01:
-			var may_pass := cross_traffic_clear(intersection, axis, actor_id) if emergency else permission(intersection, axis, actor_id, delta)
+			var may_pass := cross_traffic_clear(intersection, axis, actor_id) if emergency else permission(intersection, axis, actor_id, delta, int(direction))
 			if not may_pass:
 				distance = minf(distance, maxf(0, ahead - stop_distance))
 	return distance
@@ -606,6 +656,10 @@ func has_nearby_incident_blocker(position_value: Vector3) -> bool:
 	if service_active and position_value.distance_to(service_position) < 18.0:
 		return true
 	for blocker: Dictionary in blocking_positions:
+		# Moving traffic is expected to clear by itself. Treat only fixed service
+		# or incident blockers as a reason to suppress the local deadlock recovery.
+		if blocker.get("moving_vehicle", false):
+			continue
 		if position_value.distance_to(blocker.position) < 18.0:
 			return true
 	return false

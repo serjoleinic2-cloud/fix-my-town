@@ -38,6 +38,12 @@ func run() -> void:
 		scene.game = Simulation.new(true)
 		scene.game.save_path = "user://test_responsive.json"
 		scene.game.empty_city_mode = false
+		check(scene.catalog_size("business_tower") == "2×2 клетки", "Business tower catalog shows the shared 2x2 footprint")
+		for language in ["ru", "en"]:
+			scene.game.language = language
+			var tower_requirement: String = scene.catalog_requirement("business_tower")
+			check("2×2" in tower_requirement and "4×4" not in tower_requirement and "жетон" not in tower_requirement.to_lower() and "credit" not in tower_requirement.to_lower(), "Business tower requirements show the 2x2 lot and no demolition-credit gate: " + language)
+		scene.game.language = "ru"
 		scene.scenery.visible = true
 		scene.scenery.traffic_controller.set_active_count(0)
 		if scene.subsidy_dialog != null and is_instance_valid(scene.subsidy_dialog):

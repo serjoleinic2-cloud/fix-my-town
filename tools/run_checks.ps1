@@ -44,6 +44,8 @@ Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--scr
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/logistics_network_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/feature_transfer_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/modern_city_transport_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/business_tower_footprint_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/budget_persistence_test.gd')
 if ($script:FailedGodotChecks.Count -gt 0) {
     throw "Провалены проверки: $($script:FailedGodotChecks -join ' | ')"
 }

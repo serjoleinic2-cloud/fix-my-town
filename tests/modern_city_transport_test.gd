@@ -107,9 +107,10 @@ func run() -> void:
 	var elite_entry: Dictionary = game.territory.building_at(9, 19)
 	check(not elite_entry.is_empty() and game.demolish_grid_building(str(elite_entry.get("instance_id", ""))), "Open the compact parcel for the tower-size regression")
 	game.campaign_stage = 5
-	game.renewal_credits = 2
+	game.renewal_credits = 0
 	game.budget = 10000
 	check(game.start_grid_construction(9, 19, "business_tower"), "Stage-five tower accepts the standard cleared 2x2 parcel")
+	check(game.renewal_credits == 0, "Stage-five tower is available without demolition credits")
 	game.tick(6.1, false)
 	game.tick(1.3, false)
 	var tower_entry: Dictionary = game.territory.building_at(9, 19)

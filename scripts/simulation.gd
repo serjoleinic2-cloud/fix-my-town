@@ -6,6 +6,7 @@ var transit = Transit.new()
 var territory = TerritoryGrid.new()
 const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
+const MAX_SAVED_BUDGET: int = 1000000000
 
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
@@ -778,8 +779,6 @@ func start_grid_construction(col: int, row: int, type_id: String) -> bool:
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
 	if territory.placement_reason(col, row, placement_kind) != "" or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
 		return false
-	if type_id == "business_tower" and renewal_credits < 2:
-		return false
 	return _start_construction({"kind": "build_grid", "type_id": type_id, "col": col, "row": row, "cost": Catalog.cost(type_id)})
 
 func has_city_hall() -> bool:
@@ -1067,16 +1066,12 @@ func build_grid_building(col: int, row: int, type_id: String, reserved: bool = f
 		return false
 	if not initial_building_allowed(col, row, type_id) or not logistics_site_allowed(type_id, col, row) or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
 		return false
-	if type_id == "business_tower" and renewal_credits < 2:
-		return false
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
 	var price: int = Catalog.cost(type_id)
 	if (not reserved and budget < price) or territory.placement_reason(col, row, placement_kind) != "" or not territory.place_building(col, row, type_id):
 		return false
 	if not reserved:
 		budget -= price
-	if type_id == "business_tower":
-		renewal_credits -= 2
 	save_game()
 	return true
 
@@ -2093,6 +2088,9 @@ func load_game() -> bool:
 	for key in ["budget", "route_index", "repair_left", "income_clock"]:
 		if not (data.get(key) is float or data.get(key) is int) or not is_finite(float(data[key])):
 			return false
+	var saved_budget: Variant = data.budget
+	if float(saved_budget) < 0.0 or float(saved_budget) > float(MAX_SAVED_BUDGET) or floor(float(saved_budget)) != float(saved_budget):
+		return false
 	if float(data.repair_left) < 0.0 or float(data.repair_left) > 12.0:
 		return false
 	if typeof(data.get("leak_fixed")) != TYPE_BOOL or typeof(data.get("signal_fixed")) != TYPE_BOOL:
@@ -2323,7 +2321,7 @@ func load_game() -> bool:
 		return false
 	transit = loaded_transit
 	territory = loaded_territory
-	budget = clampi(int(data.budget), 0, 1000000)
+	budget = int(saved_budget)
 	empty_city_mode = bool(data.get("empty_city_mode", false))
 	territory.strict_building_frontier = empty_city_mode
 	city_layout_version = int(data.get("city_layout_version", 0))

@@ -244,7 +244,6 @@ const TEXT = {
 	"catalog_requirement_legacy": ["Свободный участок старого квартала", "A vacant lot in the existing district"],
 	"catalog_footprint_small": ["1 клетка", "1 cell"],
 	"catalog_footprint_large": ["2×2 клетки", "2×2 cells"],
-	"catalog_footprint_renewal": ["4×4 клетки · снос двух домов", "4×4 cells · replace two homes"],
 	"catalog_footprint_legacy": ["1 участок · 9×9 м", "1 lot · 9×9 m"],
 	"category_residential": ["Жилые", "Residential"],
 	"category_commercial": ["Коммерция", "Commercial"],
@@ -1686,8 +1685,6 @@ func catalog_icon(type_id: String) -> String:
 func catalog_size(type_id: String) -> String:
 	if type_id in ["clear", "road"] or Catalog.is_landscaping(type_id):
 		return t("catalog_footprint_small")
-	if type_id == "business_tower":
-		return t("catalog_footprint_renewal")
 	if catalog_target_plot >= 0 and type_id in ["house", "cafe", "park"]:
 		return t("catalog_footprint_legacy")
 	return t("catalog_footprint_large")
@@ -1708,7 +1705,7 @@ func catalog_requirement(type_id: String) -> String:
 	if Catalog.is_landscaping(type_id):
 		return t("catalog_requirement_landscape")
 	if type_id == "business_tower":
-		return tr_text("Нужны 2 жетона обновления: снесите два обычных дома. Затем расчистите площадку 4×4.", "Requires 2 renewal credits: demolish two ordinary homes, then clear a 4×4 site.")
+		return tr_text("Участок 2×2; требуется открытие по этапу и подключённая дорога.", "2×2 lot; requires its city stage to be unlocked and connected road access.")
 	return t("catalog_requirement_house")
 
 func catalog_item_unlocked(type_id: String) -> bool:
@@ -1908,7 +1905,6 @@ func build_catalog_detail_sheet() -> void:
 	if Catalog.TYPES.has(type_id):
 		label(17, details_column, tr_text("Доход за цикл: %d", "Income per cycle: %d") % int(Catalog.TYPES[type_id].get("income", 0)))
 	if type_id == "business_tower":
-		label(17, details_column, tr_text("Нужно снести два обычных дома. Доступно жетонов обновления: %d", "Demolish two ordinary homes. Renewal credits available: %d") % game.renewal_credits).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label(17, details_column, tr_text("В доме — парковка, мини-сад и частная инфраструктура. Работы по авариям в крупных зданиях идут дольше.", "Includes parking, a mini-garden and private amenities. Incidents at larger buildings take longer to resolve.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if type_id in ["logistics_center", "warehouse"]:
 		label(17, details_column, building_effect(type_id, 1)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1925,7 +1921,7 @@ func build_catalog_detail_sheet() -> void:
 	build_button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	build_button.clip_text = true
 	build_button.name = "PrepareCatalogPlacement"
-	build_button.disabled = not catalog_item_unlocked(type_id) or game.budget < catalog_cost(type_id) or (type_id == "business_tower" and game.renewal_credits < 2)
+	build_button.disabled = not catalog_item_unlocked(type_id) or game.budget < catalog_cost(type_id)
 	button(sheet_column, t("cancel"), return_to_catalog_items)
 
 func catalog_target_reason(type_id: String) -> String:
@@ -2248,8 +2244,6 @@ func territory_reason() -> String:
 			return tr_text("Выбранный элемент не совпадает с подключёнными сторонами дороги.", "This road piece does not match the connected sides.")
 	if territory_tool not in ["clear", "road"] and maxi(game.city_level(), game.campaign_stage) < Catalog.unlock_level(selected_type):
 		return "locked"
-	if selected_type == "business_tower" and game.renewal_credits < 2:
-		return "renewal_credits"
 	var cost := catalog_cost(selected_type)
 	return "" if game.budget >= cost else "budget"
 
@@ -2265,7 +2259,6 @@ func placement_hint(reason: String) -> String:
 		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
 		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
 		"locked": return tr_text("Это здание ещё не открыто.", "This building is still locked.")
-		"renewal_credits": return tr_text("Для элитной застройки нужно снести два обычных дома.", "Demolish two ordinary homes to unlock this elite site.")
 		"logistics_requirement": return tr_text("Склад открывается после логистического центра; проверьте его уровень и лимит складов.", "A warehouse requires a logistics center and an available warehouse slot.")
 	if territory_tool == "clear":
 		return tr_text("Расчистка стоит 5. Для дома очистите все клетки его контура 2×2.", "Clear for 5. Clear all four cells in the 2×2 home footprint.")
@@ -2819,8 +2812,6 @@ func draw_buildable_hints(type_id: String) -> void:
 	if game.budget < catalog_cost(type_id):
 		return
 	if type_id not in ["clear", "road"] and maxi(game.city_level(), game.campaign_stage) < Catalog.unlock_level(type_id):
-		return
-	if type_id == "business_tower" and game.renewal_credits < 2:
 		return
 	var placements: Array[Vector3] = []
 	# Preview only nearby build sites; this is recalculated on map pan. A full

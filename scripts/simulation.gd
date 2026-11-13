@@ -1617,7 +1617,9 @@ func repair_fire_damage(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
 	var base_price := 120 if entry.is_empty() else maxi(120, int(Catalog.cost(str(entry.type_id)) / 2))
 	var price := base_price if ruined else 40 + damage
-	if damage <= 0 or not fires.is_empty() or job != "" or not fire_jobs.is_empty() or not construction_job.is_empty() or budget < price:
+	# Only an active fire on this building prevents repair. An unrelated fire or
+	# service trip elsewhere in the city must not disable construction globally.
+	if damage <= 0 or fires.has(identifier) or budget < price:
 		return false
 	if ruined:
 		var task_kind := "restore_legacy" if identifier.begins_with("pine_district_legacy_") else "restore_grid"

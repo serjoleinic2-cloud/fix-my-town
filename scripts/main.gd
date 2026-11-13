@@ -605,7 +605,9 @@ func update_layout() -> void:
 		mission.size.y = 110
 	fire_notice.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
 	fire_notice.size = Vector2(size_value.x - safe_left - safe_right, 72)
-	var service_mode: bool = selection_kind in ["signal", "leak", "fire"]
+	# A fire card must not lock the player out of normal navigation. The player
+	# may inspect or build elsewhere while firefighters handle the call.
+	var service_mode: bool = selection_kind in ["signal", "leak"]
 	var fullscreen_menu: bool = selection_kind in ["catalog", "catalog_detail", "catalog_legacy_placement", "land_cell", "grid_house", "grid_upgrade", "grid_road", "district_status"]
 	navbar.visible = not service_mode
 	hud.visible = not fullscreen_menu
@@ -3545,7 +3547,8 @@ func _process(delta: float) -> void:
 		if intended > 0.0001:
 			var emergency_call: bool = game.job == "fire" and game.job_phase == "travel"
 			var crew_vehicle_type := "fire_engine" if game.job == "fire" else "repair_van"
-			movement_fraction = scenery.traffic_controller.service_travel_distance(current, proposed, delta, "crew_0", emergency_call, "", crew_vehicle_type) / intended
+			var movement_actor_id := str(game.job_vehicle_id) if game.job == "fire" and str(game.job_vehicle_id) != "" else "crew_0"
+			movement_fraction = scenery.traffic_controller.service_travel_distance(current, proposed, delta, movement_actor_id, emergency_call, "", crew_vehicle_type) / intended
 	var construction_was_active: bool = not game.construction_job.is_empty()
 	var completed_construction: Dictionary = game.construction_job.duplicate(true)
 	if game.tick(delta, true, movement_fraction, fire_motion):
@@ -3992,7 +3995,7 @@ func build_grid_house_sheet() -> void:
 		var premium_damage := game.house_damage(entry.instance_id)
 		if premium_damage > 0:
 			label(18, sheet_column, t("fire_damaged") % premium_damage).add_theme_color_override("font_color", Color("c96b52"))
-			if game.fires.is_empty():
+			if not game.fires.has(str(entry.instance_id)):
 				var restoration_cost := 120 if game.is_ruined(entry.instance_id) else 40 + premium_damage
 				if game.is_ruined(entry.instance_id):
 					restoration_cost = maxi(120, int(Catalog.cost(entry.type_id) / 2))
@@ -4047,7 +4050,7 @@ func build_grid_house_sheet() -> void:
 	var grid_ruined := game.is_ruined(grid_selected_id)
 	if grid_damage > 0:
 		label(20, sheet_column, t("fire_damaged") % grid_damage).add_theme_color_override("font_color", Color("c96b52"))
-		if game.fires.is_empty():
+		if not game.fires.has(grid_selected_id):
 			var grid_repair_price := 120 if game.is_ruined(grid_selected_id) else 40 + grid_damage
 			var grid_restore := button(sheet_column, (tr_text("Восстановить дом", "Rebuild home") if game.is_ruined(grid_selected_id) else tr_text("Восстановить дом", "Restore home")) + " · %d" % grid_repair_price, func():
 				if game.repair_fire_damage(grid_selected_id):
@@ -4159,7 +4162,7 @@ func build_building_sheet() -> void:
 		var damage := game.house_damage("pine_district_legacy_%d" % selected)
 		if damage > 0:
 			label(20, sheet_column, t("fire_damaged") % damage).add_theme_color_override("font_color", Color("c96b52"))
-			if game.fires.is_empty():
+			if not game.fires.has("pine_district_legacy_%d" % selected):
 				var house_id := "pine_district_legacy_%d" % selected
 				var repair_price := 120 if game.is_ruined(house_id) else 40 + damage
 				var restore := button(sheet_column, (tr_text("Восстановить дом", "Rebuild home") if game.is_ruined(house_id) else tr_text("Восстановить дом", "Restore home")) + " · %d" % repair_price, func():

@@ -563,6 +563,11 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		blockers.append({"id": "primary_service", "position": service_position})
 	for blocker: Dictionary in blockers:
 		var block_position: Vector3 = blocker.position
+		# A lights-and-siren response may pass an ordinary moving queue in its
+		# lane. Cross traffic inside a junction remains protected by
+		# cross_traffic_clear() and the exclusive reservation below.
+		if priority_response and blocker.get("moving_vehicle", false) and not blocker.get("emergency", false):
+			continue
 		if vehicle_type == "delivery_truck" and blocker.get("moving_vehicle", false):
 			# A same-lane moving vehicle is a queue leader, with a clearance based
 			# on both body lengths. Cross-lane/crossing conflicts remain the

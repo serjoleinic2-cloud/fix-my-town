@@ -183,16 +183,31 @@ func happiness() -> int:
 	for incident: Dictionary in incidents.values():
 		if str(incident.get("type", "")) == "strike" and str(incident.get("state", "new")) == "overdue":
 			value -= ceili((12.0 + float(incident.get("progress", 0.0)) * 8.0) * clampf(float(incident.get("progress", 0.0)), 0.0, 1.0))
-	# Fire affects the mayor rating immediately, while accumulated damage and
-	# destroyed buildings keep affecting it until the property is restored.
+	# An active emergency is immediately visible in the rating. Persistent fire
+	# damage is normalized by the residential stock below, so a badly damaged
+	# city remains recoverable one completed restoration at a time.
 	for fire: Dictionary in fires.values():
 		value -= 4 if str(fire.get("phase", "warning")) == "warning" else 8
-	for identifier in fire_damage:
-		value -= ceili(clampf(float(fire_damage[identifier]), 0.0, 100.0) / 10.0)
-	for identifier in fire_ruins:
-		if bool(fire_ruins[identifier]):
-			value -= 20
+	value -= fire_damage_rating_penalty()
 	return clampi(value + (3 if transit_metrics().served > 0 else -5), 0, 100)
+
+func fire_damage_rating_penalty() -> int:
+	var residential_count := 0
+	var accumulated_damage := 0.0
+	var ruined_count := 0
+	for entry: Dictionary in all_buildings():
+		if not is_residential_type(str(entry.get("type_id", ""))):
+			continue
+		residential_count += 1
+		var identifier := str(entry.get("instance_id", ""))
+		accumulated_damage += clampf(float(fire_damage.get(identifier, 0.0)), 0.0, 100.0)
+		if is_ruined(identifier):
+			ruined_count += 1
+	if residential_count <= 0:
+		return 0
+	var damage_share := accumulated_damage / (100.0 * float(residential_count))
+	var ruin_share := float(ruined_count) / float(residential_count)
+	return roundi(damage_share * 20.0 + ruin_share * 30.0)
 
 func city_level() -> int:
 	var score := happiness()

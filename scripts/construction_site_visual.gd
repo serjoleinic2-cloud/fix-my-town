@@ -53,10 +53,6 @@ func _ready() -> void:
 	for x in [-1.8, 1.8]:
 		Art.box(frame, Vector3(x, 2.1, 0), Vector3(0.18, 0.18, 3.6), Color("b99865"))
 
-func set_progress(value: float) -> void:
-	if frame != null:
-		frame.scale.y = lerpf(0.35, 1.0, clampf(value, 0.0, 1.0))
-
 func draw_tron_worksite_fence(parent: Node3D, width: float, depth: float) -> void:
 	var glow := StandardMaterial3D.new()
 	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

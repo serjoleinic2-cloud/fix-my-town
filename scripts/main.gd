@@ -824,8 +824,6 @@ func sync_construction_site() -> void:
 		site.interaction_area.collision_layer = 0
 		site.scale = Vector3(size_value / 9.6, 1.0, size_value / 9.6)
 		construction_objects = {"site": site, "signature": signature}
-	var visual: Node = construction_objects.site.visual_root.get_child(0)
-	visual.set_progress(game.construction_progress())
 func make_marker(marker_name: String, point: Vector3) -> void:
 	var existing := world.get_node_or_null(marker_name)
 	if existing != null:
@@ -3499,16 +3497,20 @@ func _process(delta: float) -> void:
 		if assignment.phase == "repair" and not bool(assignment.get("jam_cleared", false)):
 			scenery.traffic_controller.blocking_positions.append({"id": str(assignment.vehicle_id), "incident_id": fire_id, "position": map_position(assignment.vehicle)})
 		fire_motion[fire_id] = 1.0
-		if assignment.phase == "travel" and int(assignment.route_index) < assignment.route.size():
+		if assignment.phase in ["travel", "return"] and int(assignment.route_index) < assignment.route.size():
 			var current_fire := map_position(assignment.vehicle)
 			var next_fire := map_position(assignment.route[int(assignment.route_index)])
 			var fire_delta := next_fire - current_fire
 			var fire_axis := "H" if absf(fire_delta.x) >= absf(fire_delta.z) else "V"
 			var fire_direction := int(signf(fire_delta.x if fire_axis == "H" else fire_delta.z))
-			scenery.traffic_controller.blocking_positions.append({"id": str(assignment.vehicle_id), "position": current_fire, "moving_vehicle": true, "emergency": true, "axis": fire_axis, "direction": fire_direction, "half_extents": scenery.traffic_controller.service_half_extents("fire_engine", fire_axis)})
+			var urgent_response := assignment.phase == "travel"
+			scenery.traffic_controller.blocking_positions.append({"id": str(assignment.vehicle_id), "position": current_fire, "moving_vehicle": true, "emergency": urgent_response, "axis": fire_axis, "direction": fire_direction, "half_extents": scenery.traffic_controller.service_half_extents("fire_engine", fire_axis)})
 			var intended_fire := current_fire.distance_to(next_fire)
-			if intended_fire > 0.0001:
-				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, current_fire.move_toward(next_fire, delta * 2.6), delta, str(assignment.vehicle_id), true, "", "fire_engine") / intended_fire
+			# The primary engine is evaluated below through movement_fraction. A
+			# secondary engine uses priority only on the outbound emergency leg;
+			# its return trip observes the ordinary signal phase.
+			if intended_fire > 0.0001 and not bool(assignment.get("primary", false)):
+				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, current_fire.move_toward(next_fire, delta * 2.6), delta, str(assignment.vehicle_id), urgent_response, "", "fire_engine") / intended_fire
 	if not game.police_job.is_empty():
 		if game.police_job.phase == "clearing":
 			scenery.traffic_controller.blocking_positions.append({"id": "police_" + str(game.police_job.get("depot_instance_id", "")), "position": map_position(game.police_job.vehicle)})

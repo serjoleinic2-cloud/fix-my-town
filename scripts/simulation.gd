@@ -1922,32 +1922,9 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		if tick_city_problems(delta):
 			changed = true
 	if not construction_job.is_empty():
-		var previous_progress := floori(construction_progress() * 20.0)
 		construction_job.remaining = maxf(0.0, float(construction_job.remaining) - delta)
-		var elapsed_work := float(construction_job.total) - float(construction_job.remaining)
-		var arrival_ratio := clampf(elapsed_work / maxf(0.1, float(construction_job.get("arrival_duration", 0.8))), 0.0, 1.0)
-		for moving_machine in [["excavator_position", "excavator_start_position", "excavator_target_position", "excavator_route"], ["truck_position", "truck_start_position", "truck_target_position", "truck_route"]]:
-			var from_point: Array = construction_job.get(moving_machine[1], construction_job.get(moving_machine[0], []))
-			var to_point: Array = construction_job.get(moving_machine[2], construction_job.get(moving_machine[0], []))
-			var current_world: Vector3
-			var saved_route: Variant = construction_job.get(moving_machine[3], [])
-			if saved_route is Array and saved_route.size() >= 2:
-				var route_index_float := arrival_ratio * float(saved_route.size() - 1)
-				var route_index := mini(int(floor(route_index_float)), saved_route.size() - 2)
-				var route_fraction := route_index_float - float(route_index)
-				var route_from: Array = saved_route[route_index]
-				var route_to: Array = saved_route[route_index + 1]
-				current_world = Vector3(route_from[0], route_from[1], route_from[2]).lerp(Vector3(route_to[0], route_to[1], route_to[2]), route_fraction)
-			elif valid_point(from_point) and valid_point(to_point):
-				current_world = Vector3(from_point[0], from_point[1], from_point[2]).lerp(Vector3(to_point[0], to_point[1], to_point[2]), arrival_ratio)
-			else:
-				continue
-			if true:
-				construction_job[moving_machine[0]] = [current_world.x, current_world.y, current_world.z]
 		if float(construction_job.remaining) <= 0.0:
 			_finish_construction()
-			changed = true
-		elif floori(construction_progress() * 20.0) != previous_progress:
 			changed = true
 	for raw_id in fires.keys():
 		var identifier := str(raw_id)

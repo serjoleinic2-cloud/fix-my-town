@@ -3507,12 +3507,13 @@ func _process(delta: float) -> void:
 			var fire_direction := int(signf(fire_delta.x if fire_axis == "H" else fire_delta.z))
 			var urgent_response: bool = str(assignment.get("phase", "")) == "travel"
 			scenery.traffic_controller.blocking_positions.append({"id": str(assignment.vehicle_id), "position": current_fire, "moving_vehicle": true, "emergency": urgent_response, "axis": fire_axis, "direction": fire_direction, "half_extents": scenery.traffic_controller.service_half_extents("fire_engine", fire_axis)})
-			var intended_fire := current_fire.distance_to(next_fire)
+			var proposed_fire := current_fire.move_toward(next_fire, delta * 2.6)
+			var intended_fire := current_fire.distance_to(proposed_fire)
 			# The primary engine is evaluated below through movement_fraction. A
 			# secondary engine uses priority only on the outbound emergency leg;
 			# its return trip observes the ordinary signal phase.
 			if intended_fire > 0.0001 and not bool(assignment.get("primary", false)):
-				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, current_fire.move_toward(next_fire, delta * 2.6), delta, str(assignment.vehicle_id), urgent_response, "", "fire_engine") / intended_fire
+				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, proposed_fire, delta, str(assignment.vehicle_id), urgent_response, "", "fire_engine") / intended_fire
 	if not game.police_job.is_empty():
 		if game.police_job.phase == "clearing":
 			scenery.traffic_controller.blocking_positions.append({"id": "police_" + str(game.police_job.get("depot_instance_id", "")), "position": map_position(game.police_job.vehicle)})

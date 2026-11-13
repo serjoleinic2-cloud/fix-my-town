@@ -2624,7 +2624,13 @@ func load_game() -> bool:
 		return false
 	for identifier in raw_fire_jobs:
 		var assignment: Variant = raw_fire_jobs[identifier]
-		if not assignment is Dictionary or not is_house_id_in(str(identifier), stored, loaded_territory) or loaded_ruins.has(str(identifier)):
+		if not assignment is Dictionary or not is_house_id_in(str(identifier), stored, loaded_territory):
+			return false
+		var assignment_phase := str(assignment.get("phase", ""))
+		# A building may reach 100% while its assigned engine is still travelling.
+		# The engine then returns to the station; that saved return trip remains
+		# valid even though the target is now a ruin.
+		if loaded_ruins.has(str(identifier)) and assignment_phase != "return":
 			return false
 		if str(identifier) == stored_target and stored_job == "fire" or not loaded_fires.has(str(identifier)) and assignment.get("phase") != "return":
 			return false

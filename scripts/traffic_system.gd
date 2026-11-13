@@ -357,18 +357,31 @@ func clear_external_vehicle_state(actor_prefix: String) -> void:
 		deadlock_cycles.clear()
 		deadlock_reroutes.clear()
 
+static func same_response_fleet(first: String, second: String) -> bool:
+	var marker := "_engine_"
+	if marker not in first or marker not in second:
+		return false
+	return first.get_slice(marker, 0) == second.get_slice(marker, 0)
+
 func permission(intersection: Dictionary, axis: String, actor: String, delta: float, direction: int = 0, external_half_extents: Vector2 = Vector2.ZERO, emergency_priority: bool = false) -> bool:
 	var reservation: Dictionary = reservations.get(intersection.key, {})
+	var reservation_actor := str(reservation.get("actor", ""))
+	# An outbound engine may take an unentered reservation from a returning
+	# engine of the same station. The returning engine then yields outside the
+	# junction instead of locking both vehicles nose-to-nose.
+	if emergency_priority and not reservation.is_empty() and reservation_actor != actor and not reservation.get("entered", false) and same_response_fleet(actor, reservation_actor):
+		reservations.erase(intersection.key)
+		reservation = {}
 	if not reservation.is_empty() and str(reservation.get("actor", "")) == actor:
 		# Once a vehicle has entered the junction, it owns the right of way until
 		# its rear clears. Yielding again to a queue at the stop line can deadlock
 		# two approaches nose-to-nose inside the junction.
 		if reservation.get("grid_lock", false) and reservation.get("entered", false):
 			return true
-		if cross_traffic_clear(intersection, axis, actor, external_half_extents):
+		if cross_traffic_clear(intersection, axis, actor, external_half_extents, emergency_priority):
 			return true
 		return false
-	if not cross_traffic_clear(intersection, axis, actor, external_half_extents):
+	if not cross_traffic_clear(intersection, axis, actor, external_half_extents, emergency_priority):
 		return false
 	if not reservation.is_empty():
 		return false
@@ -435,7 +448,7 @@ func approach_is_from_right(junction: Vector2, right_of_actor: Vector2, position
 	# right. Signal-controlled junctions use their light phase instead.
 	return offset.dot(right_of_actor) > 0.0
 
-func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String, supplied_half_extents: Vector2 = Vector2.ZERO) -> bool:
+func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String, supplied_half_extents: Vector2 = Vector2.ZERO, emergency_priority: bool = false) -> bool:
 	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
 	var actor_vehicle: Dictionary = {}
 	for vehicle: Dictionary in vehicles:
@@ -458,6 +471,8 @@ func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String, 
 			return false
 	for blocker: Dictionary in blocking_positions:
 		if not blocker.get("moving_vehicle", false) or str(blocker.get("id", "")) == actor:
+			continue
+		if emergency_priority and not blocker.get("emergency", false) and same_response_fleet(actor, str(blocker.get("id", ""))):
 			continue
 		if str(blocker.get("axis", "")) == axis:
 			continue
@@ -563,6 +578,11 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 		blockers.append({"id": "primary_service", "position": service_position})
 	for blocker: Dictionary in blockers:
 		var block_position: Vector3 = blocker.position
+		# A returning engine must keep clearing the lane when an outbound engine
+		# from the same station approaches with priority. Otherwise both bodies can
+		# stop nose-to-nose on the shared depot access road.
+		if blocker.get("emergency", false) and same_response_fleet(actor_id, str(blocker.get("id", ""))):
+			continue
 		# A lights-and-siren response may pass an ordinary moving queue in its
 		# lane. Cross traffic inside a junction remains protected by
 		# cross_traffic_clear() and the exclusive reservation below.

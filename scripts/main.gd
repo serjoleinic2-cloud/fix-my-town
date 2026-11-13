@@ -3436,7 +3436,9 @@ func sync_service_vehicle_parking() -> void:
 		if station != null:
 			if str(entry.type_id) == "fire_station":
 				var active_engines := game.fire_assignments().filter(func(assignment: Dictionary) -> bool: return str(assignment.get("depot_instance_id", "")) == station_id).size()
-				station.set_parked_service_vehicle_count(maxi(0, 2 - active_engines))
+				# Only one engine is displayed in the yard. The reserve crew stays
+				# inside the garage and remains available for a second fire call.
+				station.set_parked_service_vehicle_count(1 if active_engines == 0 else 0)
 			else:
 				station.set_parked_service_vehicle_visible(not game.has_active_service_dispatch(station_id))
 

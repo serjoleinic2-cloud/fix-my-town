@@ -355,7 +355,8 @@ func run() -> void:
 	fire_station.setup("fire_station", "fire_visual_test")
 	var fire_model: Variant = fire_station.visual_root.get_child(0)
 	var fire_sign: Label3D = fire_model.find_child("FireStation911", true, false) as Label3D
-	check(fire_sign != null and fire_sign.text == "911" and has_batched_feature(fire_model, "FireStation911Badge") and has_batched_feature(fire_model, "FireEngineRoofBadge"), "Fire station has a 911 roof badge and fire engine roof insignia")
+	check(fire_sign != null and fire_sign.text == "911" and has_batched_feature(fire_model, "FireStation911Badge"), "Fire station keeps its visible 911 identification")
+	check(has_batched_feature(fire_model, "FireEngineLadder") and has_batched_feature(fire_model, "FireEngineHoseReel") and not has_batched_feature(fire_model, "FireEngineRoofBadge"), "Fire engine uses ladders and hose reels instead of a medical cross")
 	fire_station.queue_free()
 	await process_frame
 	var hospital := GameObjectScene.instantiate()

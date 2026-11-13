@@ -44,7 +44,6 @@ func _ready() -> void:
 	elif visual_type == "fire_station":
 		fire_station()
 		parked_service_vehicle("fire_engine", 0)
-		parked_service_vehicle("fire_engine", 1)
 	elif visual_type == "police_station":
 		service_station(Color("54768c"), Color("d9e5e6"), "ПОЛИЦИЯ")
 		police_helipad()
@@ -425,8 +424,8 @@ func add_vehicle_lights(half_width: float, front_z: float, y: float, rear_z: flo
 		Art.box(self, Vector3(side * half_width, y * 0.78, rear_z), Vector3(0.18, 0.12, 0.08), Color("e45e4f"))
 
 func parked_service_vehicle(kind: String, slot: int = 0) -> void:
-	# Each fire engine has a separate apron. Both use the exact road model so
-	# parked and dispatched vehicles have the same dimensions and scale.
+	# The visible vehicle uses the exact road model so its parked and dispatched
+	# dimensions match. A second logical fire crew is kept inside the depot.
 	var parking_position := Vector3(3.0, 0.27, 2.55) if slot == 0 else Vector3(0.25, 0.27, 3.15)
 	Art.box(self, Vector3(parking_position.x, 0.19, parking_position.z), Vector3(2.55, 0.12, 4.45), Color("697276"))
 	var vehicle := Node3D.new()
@@ -467,13 +466,6 @@ func parked_service_vehicle(kind: String, slot: int = 0) -> void:
 			var police_door := Art.box(vehicle, Vector3(side * 0.94, 0.95, 0.0), Vector3(0.06, 0.42, 1.05), Color("315b88"))
 			police_door.name = "PoliceLiveryDoor"
 			Art.sphere(vehicle, Vector3(side * 0.98, 0.97, 0.0), 0.12, Color("d7c884"))
-	elif kind == "fire_engine":
-		Art.box(vehicle, Vector3(0, 0.96, -0.3), Vector3(0.16, 0.18, 1.6), Color("f3d463"))
-		var fire_vehicle_badge := Art.cylinder(vehicle, Vector3(0, 1.94, -0.58), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
-		fire_vehicle_badge.set_meta("batch_feature", "FireEngineRoofBadge")
-		for side in [-1.0, 1.0]:
-			Art.box(vehicle, Vector3(side * 0.18, 1.99, -0.58), Vector3(0.12, 0.04, 0.44), Color("d44343"))
-			Art.box(vehicle, Vector3(0, 1.99, -0.58), Vector3(0.38, 0.04, 0.12), Color("d44343"))
 	else:
 		Art.box(vehicle, Vector3(0, 1.18, -0.64), Vector3(1.35, 0.42, 1.15), Color("d79626"))
 		var repair_vehicle_badge := Art.cylinder(vehicle, Vector3(0, 1.48, -0.64), 0.31, 0.06, Color("fffdf8"), 1.0, 16)
@@ -505,7 +497,7 @@ func parked_service_vehicle(kind: String, slot: int = 0) -> void:
 	Art.batch(vehicle)
 
 func set_parked_service_vehicle_visible(value: bool) -> void:
-	set_parked_service_vehicle_count(2 if value and visual_type == "fire_station" else (1 if value else 0))
+	set_parked_service_vehicle_count(1 if value else 0)
 
 func set_parked_service_vehicle_count(available: int) -> void:
 	var first := find_child("ParkedServiceVehicle", false, false) as Node3D
@@ -570,10 +562,22 @@ func build_fire_engine_model(parent: Node3D) -> void:
 	Art.box(parent, Vector3(0, 1.38, 1.68), Vector3(1.72, 0.62, 0.06), Color("9bc7d0"))
 	Art.box(parent, Vector3(0, 1.31, -2.56), Vector3(1.78, 0.9, 0.08), Color("dce2db"))
 	Art.box(parent, Vector3(0, 1.38, -0.65), Vector3(0.15, 0.18, 2.65), Color("f3d463"))
-	var roof_badge := Art.cylinder(parent, Vector3(0, 1.95, -0.55), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
-	roof_badge.set_meta("batch_feature", "FireEngineRoofBadge")
-	Art.box(parent, Vector3(0, 2.0, -0.55), Vector3(0.13, 0.04, 0.46), Color("d44343"))
-	Art.box(parent, Vector3(0, 2.0, -0.55), Vector3(0.40, 0.04, 0.13), Color("d44343"))
+	# Fire-specific roof equipment: a full ladder instead of the medical-style
+	# cross that used to make the engine look like an ambulance.
+	for side in [-1.0, 1.0]:
+		var rail := Art.box(parent, Vector3(side * 0.57, 1.98, -0.58), Vector3(0.10, 0.10, 2.75), Color("d7ddd7"))
+		rail.set_meta("batch_feature", "FireEngineLadder")
+	for rung_z in [-1.72, -1.28, -0.84, -0.40, 0.04, 0.48]:
+		var rung := Art.box(parent, Vector3(0, 2.02, rung_z), Vector3(1.24, 0.08, 0.09), Color("e4e7df"))
+		rung.set_meta("batch_feature", "FireEngineLadder")
+	# Coiled yellow hoses are mounted on both sides of the equipment body.
+	for side in [-1.0, 1.0]:
+		var reel := Art.cylinder(parent, Vector3(side * 1.12, 1.16, -0.72), 0.37, 0.10, Color("4e5552"), 1.0, 16)
+		reel.rotation.z = PI / 2
+		reel.set_meta("batch_feature", "FireEngineHoseReel")
+		var hose := Art.cylinder(parent, Vector3(side * 1.18, 1.16, -0.72), 0.27, 0.07, Color("e0b43c"), 1.0, 16)
+		hose.rotation.z = PI / 2
+		hose.set_meta("batch_feature", "FireEngineHoseReel")
 	Art.cylinder(parent, Vector3(0, 2.02, 0.85), 0.13, 0.12, Color("4c9de0"), 1, 8)
 	var beacon_left := Art.box(parent, Vector3(-0.28, 2.02, 0.85), Vector3(0.22, 0.12, 0.14), Color("dc4242"))
 	beacon_left.name = "BeaconRed"

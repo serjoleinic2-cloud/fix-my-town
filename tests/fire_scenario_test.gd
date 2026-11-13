@@ -42,9 +42,9 @@ func run() -> void:
 					check(parked.visible, "%s parked vehicle returns when available" % kind)
 				if kind == "fire_station":
 					var mini_pad := visual.visual_root.find_child("ParkedServiceVehicle2", true, false) as Node3D
-					check(mini_pad != null and not mini_pad.position.is_equal_approx(parked.position), "Fire station exposes separate main and mini parking starts")
+					check(mini_pad == null, "Fire station shows exactly one parked engine in its yard")
 					visual.set_parked_service_vehicle_count(1)
-					check(parked.visible and not mini_pad.visible, "One parked engine remains while the other is dispatched")
+					check(parked.visible, "The single parked engine is visible while the depot is idle")
 			visual.queue_free()
 	var ruin_test: Node3D = GameObjectScene.instantiate()
 	root.add_child(ruin_test)

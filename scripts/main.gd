@@ -3503,7 +3503,7 @@ func _process(delta: float) -> void:
 			var fire_delta := next_fire - current_fire
 			var fire_axis := "H" if absf(fire_delta.x) >= absf(fire_delta.z) else "V"
 			var fire_direction := int(signf(fire_delta.x if fire_axis == "H" else fire_delta.z))
-			var urgent_response := assignment.phase == "travel"
+			var urgent_response: bool = str(assignment.get("phase", "")) == "travel"
 			scenery.traffic_controller.blocking_positions.append({"id": str(assignment.vehicle_id), "position": current_fire, "moving_vehicle": true, "emergency": urgent_response, "axis": fire_axis, "direction": fire_direction, "half_extents": scenery.traffic_controller.service_half_extents("fire_engine", fire_axis)})
 			var intended_fire := current_fire.distance_to(next_fire)
 			# The primary engine is evaluated below through movement_fraction. A

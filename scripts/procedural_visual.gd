@@ -510,15 +510,13 @@ func set_parked_service_vehicle_count(available: int) -> void:
 func police_helipad() -> void:
 	# Roof pad stays within the police station's standard 2x2 lot.
 	Art.cylinder(self, helicopter_pad, 1.25, 0.08, Color("53646a"), 1.0, 20)
-	for side in [-1.0, 1.0]:
-		var rim := Art.box(self, helicopter_pad + Vector3(side * 1.12, 0.055, 0), Vector3(0.06, 0.025, 0.92), Color("e5e5d8"))
-		rim.rotation.y = 0.5
-		var cross_rim := Art.box(self, helicopter_pad + Vector3(0, 0.055, side * 1.12), Vector3(0.92, 0.025, 0.06), Color("e5e5d8"))
-		cross_rim.rotation.y = 0.5
+	# A continuous white annulus reads as a helipad circle from every camera angle.
+	Art.cylinder(self, helicopter_pad + Vector3(0, 0.055, 0), 1.13, 0.025, Color("f4f4eb"), 1.0, 32)
+	Art.cylinder(self, helicopter_pad + Vector3(0, 0.068, 0), 0.94, 0.026, Color("53646a"), 1.0, 32)
 	for x in [-0.28, 0.28]:
-		var stem := Art.box(self, helicopter_pad + Vector3(x, 0.075, 0), Vector3(0.16, 0.035, 0.9), Color("fff4d8"))
+		var stem := Art.box(self, helicopter_pad + Vector3(x, 0.092, 0), Vector3(0.16, 0.025, 0.9), Color("fff4d8"))
 		stem.set_meta("batch_feature", "HelipadH")
-	var bar := Art.box(self, helicopter_pad + Vector3(0, 0.075, 0), Vector3(0.56, 0.035, 0.16), Color("fff4d8"))
+	var bar := Art.box(self, helicopter_pad + Vector3(0, 0.092, 0), Vector3(0.56, 0.025, 0.16), Color("fff4d8"))
 	bar.set_meta("batch_feature", "HelipadH")
 
 	police_helicopter = Node3D.new()

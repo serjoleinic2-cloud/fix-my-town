@@ -1395,9 +1395,9 @@ func map_input(event: InputEvent) -> void:
 		if marker != null and game.legacy_problem_available(kind) and not fixed and camera.unproject_position(marker.position).distance_to(point) < 36.0 * render_scale / viewport_container.stretch_shrink:
 			select_problem(kind)
 			return
-	if selection_kind != "territory" and select_projected_building(point):
-		return
 	if selection_kind != "territory" and select_vehicle_at(point):
+		return
+	if selection_kind != "territory" and select_projected_building(point):
 		return
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if hit == null:
@@ -1533,6 +1533,10 @@ func select_vehicle_at(point: Vector2) -> bool:
 		var node: Node3D = vehicle.node
 		if node.visible:
 			candidates.append(node)
+	for delivery: Dictionary in logistics_vehicles:
+		var delivery_node := delivery.get("object") as Node3D
+		if delivery_node != null and is_instance_valid(delivery_node) and delivery_node.visible:
+			candidates.append(delivery_node)
 	var best: Node3D
 	var best_distance := 44.0 * render_scale / viewport_container.stretch_shrink
 	for node in candidates:

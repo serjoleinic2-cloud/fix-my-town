@@ -183,6 +183,15 @@ func happiness() -> int:
 	for incident: Dictionary in incidents.values():
 		if str(incident.get("type", "")) == "strike" and str(incident.get("state", "new")) == "overdue":
 			value -= ceili((12.0 + float(incident.get("progress", 0.0)) * 8.0) * clampf(float(incident.get("progress", 0.0)), 0.0, 1.0))
+	# Fire affects the mayor rating immediately, while accumulated damage and
+	# destroyed buildings keep affecting it until the property is restored.
+	for fire: Dictionary in fires.values():
+		value -= 4 if str(fire.get("phase", "warning")) == "warning" else 8
+	for identifier in fire_damage:
+		value -= ceili(clampf(float(fire_damage[identifier]), 0.0, 100.0) / 10.0)
+	for identifier in fire_ruins:
+		if bool(fire_ruins[identifier]):
+			value -= 20
 	return clampi(value + (3 if transit_metrics().served > 0 else -5), 0, 100)
 
 func city_level() -> int:

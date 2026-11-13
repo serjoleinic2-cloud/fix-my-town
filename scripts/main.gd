@@ -1371,7 +1371,10 @@ func map_input(event: InputEvent) -> void:
 			open_stop_card(tapped_stop)
 			return
 	for identifier in game.fires:
-		var marker: Sprite3D = fire_markers.get(identifier)
+		# Fire markers are Node3D containers with an AnimatedSprite3D child.
+		# Typing the container as Sprite3D aborted touch handling on a burning
+		# building before its fire card could open.
+		var marker: Node3D = fire_markers.get(identifier)
 		if marker != null and marker.visible and camera.unproject_position(marker.position).distance_to(point) < 42.0 * render_scale / viewport_container.stretch_shrink:
 			selected_fire_id = str(identifier)
 			select_problem("fire")

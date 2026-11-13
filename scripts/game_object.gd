@@ -106,6 +106,15 @@ func set_parked_service_vehicle_visible(value: bool) -> void:
 	if model.has_method("set_parked_service_vehicle_visible"):
 		model.set_parked_service_vehicle_visible(value)
 
+func set_parked_service_vehicle_count(available: int) -> void:
+	if visual_root.get_child_count() == 0:
+		return
+	var model := visual_root.get_child(0)
+	if model.has_method("set_parked_service_vehicle_count"):
+		model.set_parked_service_vehicle_count(available)
+	else:
+		set_parked_service_vehicle_visible(available > 0)
+
 func set_serviced(value: bool) -> void:
 	serviced_value = value
 	# Только визуальное состояние; игровой источник истины находится в Simulation.

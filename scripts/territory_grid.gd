@@ -11,18 +11,29 @@ const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
 const CITY_HALL_TYPE := "city_hall"
 const CITY_HALL_SITE := Vector2i(12, 19)
-const BUILDINGS = ["city_hall", "house", "cafe", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
+const BUILDINGS = ["city_hall", "house", "cafe", "supermarket", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
 var expansion_cols: Vector2i = EXPANSION_COLS
 var expansion_rows: Vector2i = EXPANSION_ROWS
 var strict_building_frontier: bool = false
+var _expanded_level: int = -1
+var _expanded_cells: Array = []
+var _expanded_halls: Array = []
+var _routing_revision: int = 0
+var _frontage_cache: Dictionary = {}
+var _route_cache: Dictionary = {}
+var _routing_cache_hits: int = 0
+var _routing_cache_misses: int = 0
 
 func _init() -> void:
 	reset()
 
 func reset() -> void:
+	_expanded_level = -1
+	_expanded_cells.clear()
+	_expanded_halls.clear()
 	expansion_cols = EXPANSION_COLS
 	expansion_rows = EXPANSION_ROWS
 	strict_building_frontier = false
@@ -38,6 +49,25 @@ func reset() -> void:
 		visibility_line.fill(true)
 		revealed.append(visibility_line)
 	buildings.clear()
+	invalidate_routing_cache()
+
+func invalidate_routing_cache() -> void:
+	_routing_revision += 1
+	_frontage_cache.clear()
+	_route_cache.clear()
+
+func routing_revision() -> int:
+	return _routing_revision
+
+func routing_cache_stats() -> Dictionary:
+	return {"hits": _routing_cache_hits, "misses": _routing_cache_misses, "revision": _routing_revision}
+
+func reset_routing_cache_stats() -> void:
+	_routing_cache_hits = 0
+	_routing_cache_misses = 0
+
+func _routing_building_key(entry: Dictionary) -> String:
+	return "%s:%d:%d:%d:%d:%s" % [str(entry.get("instance_id", "")), int(entry.get("col", -1)), int(entry.get("row", -1)), int(entry.get("width", 0)), int(entry.get("height", 0)), str(entry.get("arch_axis", ""))]
 
 func initialize_legacy_road_network() -> void:
 	# Used by the old-save loader and explicit test fixtures only.
@@ -45,6 +75,7 @@ func initialize_legacy_road_network() -> void:
 		for col in range(WIDTH):
 			if (row <= 18 and row % 3 == 0) or (col <= 18 and col % 3 == 0 and row <= 18):
 				cells[row][col] = "road"
+	invalidate_routing_cache()
 
 func initialize_natural_terrain(start_col: int = 12, start_row: int = 20, visible_radius: int = 3) -> void:
 	# A new city starts as uninterrupted forest. Legacy roads belong to the old
@@ -73,6 +104,14 @@ func install_starting_city_hall() -> bool:
 	return place_building(CITY_HALL_SITE.x, CITY_HALL_SITE.y, CITY_HALL_TYPE)
 
 func set_expansion_level(level: int) -> void:
+	# Catalogue availability reads the level repeatedly. Re-reveal only when
+	# the level or actual land/hall layout changes, not for every UI query.
+	var halls: Array = []
+	for entry: Dictionary in buildings:
+		if entry.type_id == CITY_HALL_TYPE:
+			halls.append([entry.col, entry.row, entry.width, entry.height])
+	if level == _expanded_level and halls == _expanded_halls and cells == _expanded_cells:
+		return
 	# Reveal new land as a frontier around the town centre and connected roads;
 	# city level increases the reach without revealing an arbitrary rectangle.
 	var radius := 3 + maxi(0, level - 1) * 3
@@ -87,6 +126,9 @@ func set_expansion_level(level: int) -> void:
 	var growth := maxi(0, level - 1) * 6
 	expansion_cols = Vector2i(maxi(1, EXPANSION_COLS.x - growth), mini(WIDTH - 2, EXPANSION_COLS.y + growth))
 	expansion_rows = Vector2i(maxi(1, EXPANSION_ROWS.x - growth), mini(HEIGHT - 2, EXPANSION_ROWS.y + growth))
+	_expanded_level = level
+	_expanded_cells = cells.duplicate(true)
+	_expanded_halls = halls
 
 func migrate_legacy(legacy_buildings: Array) -> void:
 	for index in range(24):
@@ -103,8 +145,10 @@ func migrate_legacy(legacy_buildings: Array) -> void:
 		if kind != "empty":
 			buildings.append({"type_id": kind, "instance_id": "pine_district_legacy_%d" % index, "col": col, "row": row, "width": 2, "height": 2, "legacy_plot": index})
 			reveal_area(col, row, 3)
+	invalidate_routing_cache()
 
 func reset_visibility() -> void:
+	_expanded_level = -1
 	revealed.clear()
 	for row in range(HEIGHT):
 		var line: Array = []
@@ -213,6 +257,7 @@ func place_road(col: int, row: int) -> bool:
 		return false
 	cells[row][col] = "road"
 	reveal_area(col, row, 1)
+	invalidate_routing_cache()
 	return true
 
 func build_house(col: int, row: int) -> bool:
@@ -275,6 +320,8 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 				cells[row + dy][col + dx] = "occupied"
 	var prefix := "pine_district_%s" % type_id
 	var entry := {"type_id": type_id, "instance_id": "%s_%d_%d" % [prefix, col, row], "col": col, "row": row, "width": footprint.x, "height": footprint.y, "level": 1, "inspected": false}
+	if type_id in ["cafe", "supermarket"]:
+		entry.food_stock = 240.0 if type_id == "cafe" else 600.0
 	if arch_axis != "":
 		entry.arch_axis = arch_axis
 		entry.arch_offset = elite_residence_arch_offset(col, row, footprint, arch_axis)
@@ -282,6 +329,7 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 		entry.service_building = true
 	buildings.append(entry)
 	reveal_area(col, row, 3)
+	invalidate_routing_cache()
 	return true
 
 func path_to_city(col: int, row: int) -> Array[Vector2i]:
@@ -329,6 +377,13 @@ func building_at(col: int, row: int) -> Dictionary:
 	return {}
 
 func building_road_frontage(entry: Dictionary) -> Array[Vector2i]:
+	var cache_key := _routing_building_key(entry)
+	if _frontage_cache.has(cache_key):
+		_routing_cache_hits += 1
+		var cached_frontage: Array[Vector2i] = []
+		cached_frontage.assign(_frontage_cache[cache_key])
+		return cached_frontage
+	_routing_cache_misses += 1
 	var result: Array[Vector2i] = []
 	if not entry.has("col") or not entry.has("row") or not entry.has("width") or not entry.has("height"):
 		return result
@@ -349,12 +404,21 @@ func building_road_frontage(entry: Dictionary) -> Array[Vector2i]:
 				var cell := Vector2i(int(entry.col) + dx, int(entry.row) + dy) + offset
 				if state_at(cell.x, cell.y) == "road" and connected_road(cell.x, cell.y) and cell not in result:
 					result.append(cell)
+	_frontage_cache[cache_key] = result.duplicate()
 	return result
 
 func road_route_between_buildings(source: Dictionary, destination: Dictionary, max_distance: int = -1) -> Array[Vector2i]:
+	var cache_key := "%s>%s:%d" % [_routing_building_key(source), _routing_building_key(destination), max_distance]
+	if _route_cache.has(cache_key):
+		_routing_cache_hits += 1
+		var cached_route: Array[Vector2i] = []
+		cached_route.assign(_route_cache[cache_key])
+		return cached_route
+	_routing_cache_misses += 1
 	var starts := building_road_frontage(source)
 	var goals := building_road_frontage(destination)
 	if starts.is_empty() or goals.is_empty():
+		_route_cache[cache_key] = []
 		return []
 	var goal_set: Dictionary = {}
 	var previous: Dictionary = {}
@@ -376,6 +440,7 @@ func road_route_between_buildings(source: Dictionary, destination: Dictionary, m
 			var route: Array[Vector2i] = [current]
 			while previous[route[0]].x >= 0:
 				route.push_front(previous[route[0]])
+			_route_cache[cache_key] = route.duplicate()
 			return route
 		if max_distance >= 0 and current_distance >= max_distance:
 			continue
@@ -385,6 +450,7 @@ func road_route_between_buildings(source: Dictionary, destination: Dictionary, m
 				previous[next] = current
 				distances[next] = current_distance + 1
 				queue.append(next)
+	_route_cache[cache_key] = []
 	return []
 
 func road_distance_between_buildings(source: Dictionary, destination: Dictionary, max_distance: int = -1) -> int:
@@ -411,6 +477,70 @@ func road_path(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
 			if state_at(next.x, next.y) == "road" and not previous.has(next):
 				previous[next] = current
 				queue.append(next)
+	return []
+
+func road_route_legal_return(outbound: Array[Vector2i]) -> Array[Vector2i]:
+	# Find a fresh return route through the road graph. The first edge cannot
+	# reverse the outbound arrival; degree-two road cells also cannot be used as
+	# turnaround points. A dead end is the only place where a U-turn is allowed.
+	if outbound.size() < 2:
+		return []
+	var destination := outbound[outbound.size() - 1]
+	var destination_neighbours := road_neighbours(destination)
+	var forbidden_first := outbound[outbound.size() - 2]
+	if destination_neighbours.size() <= 1:
+		# Cul-de-sac: turning around here is legal and required to leave.
+		forbidden_first = Vector2i(-1, -1)
+	var source_neighbours := road_neighbours(outbound[0])
+	var forbidden_goal_previous := outbound[1]
+	if source_neighbours.size() <= 1:
+		# The continuous delivery loop can reverse only at a dead-end depot road.
+		forbidden_goal_previous = Vector2i(-1, -1)
+	return road_path_without_midsegment_uturn(destination, outbound[0], forbidden_first, forbidden_goal_previous)
+
+func road_neighbours(cell: Vector2i) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		var neighbour := cell + offset
+		if state_at(neighbour.x, neighbour.y) == "road":
+			result.append(neighbour)
+	return result
+
+func road_path_without_midsegment_uturn(start: Vector2i, goal: Vector2i, forbidden_first: Vector2i = Vector2i(-1, -1), forbidden_goal_previous: Vector2i = Vector2i(-1, -1)) -> Array[Vector2i]:
+	if state_at(start.x, start.y) != "road" or state_at(goal.x, goal.y) != "road":
+		return []
+	var invalid_cell := Vector2i(-1, -1)
+	var start_key := "%d,%d|%d,%d" % [invalid_cell.x, invalid_cell.y, start.x, start.y]
+	var states: Dictionary = {start_key: {"previous": invalid_cell, "cell": start}}
+	var parents: Dictionary = {start_key: ""}
+	var queue: Array[String] = [start_key]
+	var cursor := 0
+	while cursor < queue.size():
+		var key := queue[cursor]
+		cursor += 1
+		var state: Dictionary = states[key]
+		var previous: Vector2i = state.previous
+		var current: Vector2i = state.cell
+		if current == goal and previous != invalid_cell and (forbidden_goal_previous == invalid_cell or previous != forbidden_goal_previous):
+			var result: Array[Vector2i] = []
+			var path_key := key
+			while path_key != "":
+				var path_state: Dictionary = states[path_key]
+				result.push_front(path_state.cell)
+				path_key = str(parents[path_key])
+			return result
+		var neighbours := road_neighbours(current)
+		for neighbour: Vector2i in neighbours:
+			if previous == invalid_cell and neighbour == forbidden_first:
+				continue
+			if previous != invalid_cell and neighbour == previous and neighbours.size() > 1:
+				continue
+			var next_key := "%d,%d|%d,%d" % [current.x, current.y, neighbour.x, neighbour.y]
+			if states.has(next_key):
+				continue
+			states[next_key] = {"previous": current, "cell": neighbour}
+			parents[next_key] = key
+			queue.append(next_key)
 	return []
 
 func nearest_road(point: Vector3) -> Vector2i:
@@ -710,6 +840,12 @@ func restore(value: Variant) -> bool:
 		var level_value: Variant = building.get("level", 1)
 		if not (level_value is int or level_value is float) or not is_finite(float(level_value)) or level_value != int(level_value) or level_value < 1 or level_value > 3:
 			return false
+		if str(building.type_id) in ["cafe", "supermarket"]:
+			var capacity := 240.0 if str(building.type_id) == "cafe" else 600.0
+			var stock_value: Variant = building.get("food_stock", capacity * float(level_value))
+			if not (stock_value is int or stock_value is float) or not is_finite(float(stock_value)) or float(stock_value) < 0.0 or float(stock_value) > 1000000.0:
+				return false
+			building.food_stock = minf(float(stock_value), capacity * float(level_value))
 		if typeof(building.get("inspected", false)) != TYPE_BOOL:
 			return false
 		if typeof(building.get("shanty", false)) != TYPE_BOOL or (bool(building.get("shanty", false)) and str(building.type_id) != "house"):
@@ -730,6 +866,8 @@ func restore(value: Variant) -> bool:
 					return false
 	cells = new_cells.duplicate(true)
 	buildings = new_buildings.duplicate(true)
+	_expanded_level = -1
+	invalidate_routing_cache()
 	if new_revealed is Array and new_revealed.size() == HEIGHT and new_revealed.all(func(line): return line is Array and line.size() == WIDTH):
 		revealed = new_revealed.duplicate(true)
 	else:

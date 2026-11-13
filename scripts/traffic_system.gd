@@ -10,6 +10,13 @@ const STOP_GAP = 0.2
 const STOP_DISTANCE = 5.35
 const SERVICE_STOP_DISTANCE = 5.5
 const FOLLOW_DISTANCE = 3.6
+const EXTERNAL_QUEUE_GAP = 0.55
+const SERVICE_VEHICLE_SIZES = {
+	"repair_van": Vector2(1.8, 3.0),
+	"fire_engine": Vector2(2.2, 4.2),
+	"police_car": Vector2(1.8, 3.0),
+	"ambulance": Vector2(2.0, 3.0)
+}
 const SPEED = 5.2
 const CYCLE = 19.0
 const GRID_LANE_OFFSET = 0.76
@@ -24,6 +31,9 @@ var blocking_positions: Array[Dictionary] = []
 var wait_times: Dictionary = {}
 var reservations: Dictionary = {}
 var last_states: Dictionary = {}
+var deadlock_cycles: Dictionary = {}
+var deadlock_reroutes: Dictionary = {}
+var recovery_vehicle_id := ""
 var route_rng := RandomNumberGenerator.new()
 var grid: RefCounted
 var grid_roads: Array[Vector2i] = []
@@ -193,14 +203,21 @@ func continue_road_loop(vehicle: Dictionary) -> void:
 func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	var distance := SPEED * delta * float(vehicle.get("speed_factor", 1.0))
 	var current_position := lane_position(vehicle)
+	vehicle.waiting_reason = ""
+	vehicle.waiting_on = ""
 	for other: Dictionary in vehicles:
 		if other.id == vehicle.id or not other.node.visible:
+			continue
+		if vehicle.get("recovery_mode", false):
 			continue
 		var same_lane: bool = other.axis == vehicle.axis and other.direction == vehicle.direction and is_equal_approx(float(other.road), float(vehicle.road))
 		if same_lane:
 			var gap: float = (other.coordinate - vehicle.coordinate) * vehicle.direction
 			if gap > 0 and gap < maxf(vehicle.spacing, other.spacing) + distance:
 				distance = maxf(0, gap - maxf(vehicle.spacing, other.spacing))
+				if distance <= 0.001:
+					vehicle.waiting_reason = "queue"
+					vehicle.waiting_on = str(other.id)
 			continue
 		# Different lanes only interact when both cars are actually approaching
 		# the same crossing. A stable id priority prevents mutual deadlock.
@@ -210,6 +227,8 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		var proposed_position: Vector3 = current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0)
 		if proposed_position.distance_to(other_position) < 2.8 and current_position.distance_to(other_position) < 7.0 and str(other.id) < str(vehicle.id):
 			distance = 0.0
+			vehicle.waiting_reason = "yield"
+			vehicle.waiting_on = str(other.id)
 	var position_value := lane_position(vehicle)
 	var blockers := blocking_positions.duplicate()
 	if service_active:
@@ -217,16 +236,39 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 	for blocker: Dictionary in blockers:
 		var block_position: Vector3 = blocker.position
 		if blocker.get("moving_vehicle", false):
-			var proposed_position := position_value + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0.0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0.0)
+			if vehicle.get("recovery_mode", false):
+				continue
 			var own_half := grid_half_extents(vehicle)
 			var block_half: Vector2 = blocker.get("half_extents", Vector2(0.7, 0.7))
+			var blocker_axis := str(blocker.get("axis", ""))
+			var blocker_direction := int(blocker.get("direction", 0))
+			var blocker_id := str(blocker.get("id", ""))
+			if blocker_axis == vehicle.axis and blocker_direction == int(vehicle.direction):
+				# Moving trucks are queue leaders: stop by their full body length,
+				# not at the point where a collision box is already touching.
+				var lateral: float = absf(block_position.z - position_value.z) if vehicle.axis == "H" else absf(block_position.x - position_value.x)
+				var lateral_extent: float = own_half.y + block_half.y if vehicle.axis == "H" else own_half.x + block_half.x
+				var gap: float = ((block_position.x - position_value.x) if vehicle.axis == "H" else (block_position.z - position_value.z)) * float(vehicle.direction)
+				if lateral < lateral_extent + 0.12 and gap > 0.0:
+					var clearance := (own_half.x + block_half.x if vehicle.axis == "H" else own_half.y + block_half.y) + EXTERNAL_QUEUE_GAP
+					distance = minf(distance, maxf(0.0, gap - clearance))
+					if distance <= 0.001:
+						vehicle.waiting_reason = "queue"
+						vehicle.waiting_on = blocker_id
+					continue
+			var proposed_position := position_value + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0.0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0.0)
 			if absf(proposed_position.x - block_position.x) < own_half.x + block_half.x + 0.12 and absf(proposed_position.z - block_position.z) < own_half.y + block_half.y + 0.12:
 				distance = 0.0
+				vehicle.waiting_reason = "moving_vehicle"
+				vehicle.waiting_on = blocker_id
 			continue
 		var lateral: float = absf(block_position.z - position_value.z) if vehicle.axis == "H" else absf(block_position.x - position_value.x)
 		var gap: float = ((block_position.x - position_value.x) if vehicle.axis == "H" else (block_position.z - position_value.z)) * vehicle.direction
 		if lateral < 1.8 and gap > 0 and gap < vehicle.spacing + distance:
 			distance = maxf(0, gap - maxf(vehicle.spacing, 3.8))
+			if distance <= 0.001:
+				vehicle.waiting_reason = "static_blocker"
+				vehicle.waiting_on = str(blocker.get("id", ""))
 	for intersection: Dictionary in intersections:
 		if absf((intersection.z if vehicle.axis == "H" else intersection.x) - vehicle.road) > 0.1:
 			continue
@@ -241,17 +283,32 @@ func travel_distance(vehicle: Dictionary, delta: float) -> float:
 		if ahead >= stop_distance - 0.1 and ahead <= stop_distance + distance + 0.2:
 			if not permission(intersection, vehicle.axis, vehicle.id, delta, int(vehicle.direction)):
 				distance = minf(distance, maxf(0, ahead - stop_distance))
+				if distance <= 0.001:
+					vehicle.waiting_reason = "signal"
 	if grid != null:
 		var proposed := current_position + Vector3(vehicle.direction * distance if vehicle.axis == "H" else 0.0, 0, vehicle.direction * distance if vehicle.axis == "V" else 0.0)
 		distance = grid_safe_distance(vehicle, current_position, proposed)
 	return distance
 
-func reserve_intersection(intersection: Dictionary, actor: String) -> void:
-	var reservation := {"actor": actor, "remaining": 2.5}
-	var is_grid_vehicle := grid != null and vehicles.any(func(vehicle: Dictionary) -> bool: return str(vehicle.get("id", "")) == actor)
-	if is_grid_vehicle:
-		# A moving grid car owns the turn until its rear clears the conflict point.
-		reservation = {"actor": actor, "remaining": 8.0, "grid_lock": true, "entered": false, "x": float(intersection.x), "z": float(intersection.z)}
+func reserve_intersection(intersection: Dictionary, actor: String, axis: String = "", direction: int = 0, external_half_extents: Vector2 = Vector2.ZERO) -> void:
+	var reservation := {"actor": actor, "remaining": 2.5, "approach_axis": axis, "direction": direction}
+	var grid_vehicle: Dictionary = {}
+	for vehicle: Dictionary in vehicles:
+		if str(vehicle.get("id", "")) == actor:
+			grid_vehicle = vehicle
+			break
+	if grid != null and not grid_vehicle.is_empty():
+		# Reserve the entire conflict point conservatively across every approach
+		# and turn. Store the manoeuvre and vehicle footprint so the lock remains
+		# held until the rear, not just the center, clears the intersection.
+		var half_extents := grid_half_extents(grid_vehicle)
+		var exit_cell: Vector2i = grid_vehicle.get("waiting_next", grid_vehicle.get("turn_exit_cell", Vector2i(-1, -1)))
+		var manoeuvre := "turn" if exit_cell != Vector2i(-1, -1) and grid_vehicle.get("cell", exit_cell) != exit_cell else "through"
+		reservation = {"actor": actor, "remaining": 8.0, "grid_lock": true, "entered": false, "x": float(intersection.x), "z": float(intersection.z), "approach_axis": axis, "direction": direction, "manoeuvre": manoeuvre, "exit_cell": exit_cell, "half_extents": half_extents, "clearance_radius": half_extents.x + half_extents.y + 0.3}
+	elif external_half_extents.length_squared() > 0.001:
+		# Logistics trucks are external route actors rather than grid vehicles, but
+		# they still own the whole conflict area until their rear clears it.
+		reservation = {"actor": actor, "remaining": 8.0, "grid_lock": true, "entered": false, "x": float(intersection.x), "z": float(intersection.z), "approach_axis": axis, "direction": direction, "manoeuvre": "external_turn", "half_extents": external_half_extents, "clearance_radius": external_half_extents.x + external_half_extents.y + 0.7}
 	reservations[intersection.key] = reservation
 
 func release_grid_reservations_for_vehicle(vehicle: Dictionary) -> void:
@@ -261,12 +318,46 @@ func release_grid_reservations_for_vehicle(vehicle: Dictionary) -> void:
 		if not reservation.get("grid_lock", false) or str(reservation.get("actor", "")) != str(vehicle.id):
 			continue
 		var distance := Vector2(position_value.x - float(reservation.x), position_value.z - float(reservation.z)).length()
-		if distance <= 3.0:
+		var clearance_radius := float(reservation.get("clearance_radius", 3.0))
+		if distance <= clearance_radius:
 			reservation.entered = true
 		elif reservation.get("entered", false):
 			reservations.erase(key)
 
-func permission(intersection: Dictionary, axis: String, actor: String, delta: float, direction: int = 0) -> bool:
+func release_external_reservations_for_vehicle(actor: String, position_value: Vector3) -> void:
+	for key in reservations.keys():
+		var reservation: Dictionary = reservations[key]
+		if not reservation.get("grid_lock", false) or str(reservation.get("actor", "")) != actor:
+			continue
+		var distance := Vector2(position_value.x - float(reservation.x), position_value.z - float(reservation.z)).length()
+		var clearance_radius := float(reservation.get("clearance_radius", 2.0))
+		if distance <= clearance_radius:
+			reservation.entered = true
+		elif reservation.get("entered", false):
+			reservations.erase(key)
+
+func clear_external_vehicle_state(actor_prefix: String) -> void:
+	var had_external_wait := false
+	for key in reservations.keys():
+		if str(reservations[key].get("actor", "")).begins_with(actor_prefix):
+			reservations.erase(key)
+	for key in wait_times.keys():
+		var parts := str(key).split(":")
+		if not parts.is_empty() and str(parts[parts.size() - 1]).begins_with(actor_prefix):
+			wait_times.erase(key)
+	for vehicle: Dictionary in vehicles:
+		if str(vehicle.get("waiting_on", "")).begins_with(actor_prefix):
+			had_external_wait = true
+			vehicle.erase("waiting_on")
+			vehicle.erase("waiting_reason")
+			vehicle.stalled_time = 0.0
+	if had_external_wait:
+		# The recorded wait-for cycle may have depended on a truck that was just
+		# recreated after the city changed. Re-evaluate it from fresh positions.
+		deadlock_cycles.clear()
+		deadlock_reroutes.clear()
+
+func permission(intersection: Dictionary, axis: String, actor: String, delta: float, direction: int = 0, external_half_extents: Vector2 = Vector2.ZERO, emergency_priority: bool = false) -> bool:
 	var reservation: Dictionary = reservations.get(intersection.key, {})
 	if not reservation.is_empty() and str(reservation.get("actor", "")) == actor:
 		# Once a vehicle has entered the junction, it owns the right of way until
@@ -274,32 +365,39 @@ func permission(intersection: Dictionary, axis: String, actor: String, delta: fl
 		# two approaches nose-to-nose inside the junction.
 		if reservation.get("grid_lock", false) and reservation.get("entered", false):
 			return true
-		if cross_traffic_clear(intersection, axis, actor):
+		if cross_traffic_clear(intersection, axis, actor, external_half_extents):
 			return true
 		return false
-	if not cross_traffic_clear(intersection, axis, actor):
+	if not cross_traffic_clear(intersection, axis, actor, external_half_extents):
 		return false
 	if not reservation.is_empty():
 		return false
 	if intersection.get("unsignalized", false):
-		if not unsignalized_right_of_way_clear(intersection, axis, direction, actor):
+		if not emergency_priority and not unsignalized_right_of_way_clear(intersection, axis, direction, actor):
 			var wait_key: String = str(intersection.key) + ":" + actor
 			wait_times[wait_key] = float(wait_times.get(wait_key, 0.0)) + delta
 			return false
-		reserve_intersection(intersection, actor)
+		reserve_intersection(intersection, actor, axis, direction, external_half_extents)
+		return true
+	if emergency_priority:
+		# Emergency calls bypass the signal phase only after the conflict area is
+		# clear and this vehicle has acquired the same exclusive reservation as
+		# ordinary traffic. This makes approaching cars stop at their own stop line.
+		reserve_intersection(intersection, actor, axis, direction, external_half_extents)
+		wait_times.erase(str(intersection.key) + ":" + actor)
 		return true
 	if not is_broken(intersection):
 		if phase(axis, clock + intersection.offset) != "green":
 			return false
 		wait_times.erase(intersection.key + ":" + actor)
-		reserve_intersection(intersection, actor)
+		reserve_intersection(intersection, actor, axis, direction, external_half_extents)
 		return true
 	var wait_key: String = intersection.key + ":" + actor
 	wait_times[wait_key] = float(wait_times.get(wait_key, 0)) + delta
 	if wait_times[wait_key] < 0.9:
 		return false
 	# Сломанный узел пропускает машины по очереди после паузы.
-	reserve_intersection(intersection, actor)
+	reserve_intersection(intersection, actor, axis, direction, external_half_extents)
 	return true
 
 func unsignalized_right_of_way_clear(intersection: Dictionary, axis: String, direction: int, actor: String) -> bool:
@@ -337,14 +435,16 @@ func approach_is_from_right(junction: Vector2, right_of_actor: Vector2, position
 	# right. Signal-controlled junctions use their light phase instead.
 	return offset.dot(right_of_actor) > 0.0
 
-func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) -> bool:
+func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String, supplied_half_extents: Vector2 = Vector2.ZERO) -> bool:
 	# Не въезжать в ещё занятый пересекающийся поток, даже после смены фазы.
 	var actor_vehicle: Dictionary = {}
 	for vehicle: Dictionary in vehicles:
 		if str(vehicle.get("id", "")) == actor:
 			actor_vehicle = vehicle
 			break
-	var actor_half := grid_half_extents(actor_vehicle) if grid != null and not actor_vehicle.is_empty() else Vector2(2.3, 2.3)
+	var actor_half := grid_half_extents(actor_vehicle) if grid != null and not actor_vehicle.is_empty() else supplied_half_extents
+	if actor_half.length_squared() <= 0.001:
+		actor_half = Vector2(1.1, 0.75)
 	for other: Dictionary in vehicles:
 		if not other.node.visible or other.id == actor or other.axis == axis:
 			continue
@@ -354,6 +454,16 @@ func cross_traffic_clear(intersection: Dictionary, axis: String, actor: String) 
 		# Only a vehicle physically inside the conflict area blocks entry. The
 		# previous fixed 3.5–4.6 m square included cars waiting at their stop lines,
 		# so a continuous queue could hold a managed bus at the junction forever.
+		if absf(point.x - intersection.x) < clearance.x and absf(point.z - intersection.z) < clearance.y:
+			return false
+	for blocker: Dictionary in blocking_positions:
+		if not blocker.get("moving_vehicle", false) or str(blocker.get("id", "")) == actor:
+			continue
+		if str(blocker.get("axis", "")) == axis:
+			continue
+		var point: Vector3 = blocker.get("position", Vector3.ZERO)
+		var other_half: Vector2 = blocker.get("half_extents", Vector2(0.8, 1.4))
+		var clearance := actor_half + other_half + Vector2(0.12, 0.12)
 		if absf(point.x - intersection.x) < clearance.x and absf(point.z - intersection.z) < clearance.y:
 			return false
 	return true
@@ -397,24 +507,39 @@ func place_vehicle(vehicle: Dictionary) -> void:
 	vehicle.node.rotation.y = (PI / 2 * vehicle.direction) if vehicle.axis == "H" else (0.0 if vehicle.direction == 1 else PI)
 
 static func stop_distance_for(type_id: String, grid_markings: bool = false) -> float:
-	var front := 2.33 if type_id == "city_bus" else (1.4 if type_id == "repair_van" else 1.25)
+	var front := 2.33 if type_id == "city_bus" else (1.02 if type_id == "delivery_truck" else (service_vehicle_size(type_id).y * 0.5 if type_id in SERVICE_VEHICLE_SIZES else 1.25))
+	var gap := 0.35 if type_id == "delivery_truck" else STOP_GAP
 	# New 2x2-growth streets draw the stop line 2.3 m from junction center.
 	# The legacy road layout retains its original 3.9 m marking offset.
 	var line_offset := 2.3 if grid_markings else STOP_LINE_DISTANCE
-	return line_offset + front + STOP_GAP
+	return line_offset + front + gap
 
 func service_allowed(current: Vector3, target: Vector3, delta: float) -> bool:
 	return service_travel_distance(current, current.move_toward(target, 20 * delta), delta) > 0.0001
 
+static func service_vehicle_size(vehicle_type: String) -> Vector2:
+	return SERVICE_VEHICLE_SIZES.get(vehicle_type, SERVICE_VEHICLE_SIZES.repair_van)
+
+static func service_half_extents(vehicle_type: String, axis: String) -> Vector2:
+	var size := service_vehicle_size(vehicle_type)
+	return Vector2(size.y * 0.5, size.x * 0.5) if axis == "H" else Vector2(size.x * 0.5, size.y * 0.5)
+
 func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, actor_id: String = "crew_0", emergency: bool = false, ignore_incident_id: String = "", vehicle_type: String = "repair_van") -> float:
+	release_external_reservations_for_vehicle(actor_id, current)
 	var direction_value := proposed - current
 	var distance := direction_value.length()
 	if distance < 0.0001:
 		return 0
 	var axis := "H" if absf(direction_value.x) > absf(direction_value.z) else "V"
 	var direction: float = signf(direction_value.x if axis == "H" else direction_value.z)
+	var priority_response := emergency and vehicle_type in ["fire_engine", "police_car", "ambulance"]
 	for other: Dictionary in vehicles:
 		if other.id == actor_id or not other.node.visible or other.axis != axis or other.direction != direction:
+			continue
+		# With lights and siren active, civilian traffic yields. The emergency
+		# vehicle may pass a same-direction queue, while intersection occupancy and
+		# other service vehicles remain protected by reservations/blockers below.
+		if priority_response:
 			continue
 		var road: float = current.z if axis == "H" else current.x
 		var other_road: float = float(other.road)
@@ -437,10 +562,22 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 	if service_active:
 		blockers.append({"id": "primary_service", "position": service_position})
 	for blocker: Dictionary in blockers:
-		# Logistics trucks perform a full oriented-footprint collision check just
-		# after this route/signal check. The coarse service clearance here would
-		# make two trucks in opposite lanes deadlock at a shared depot road.
+		var block_position: Vector3 = blocker.position
 		if vehicle_type == "delivery_truck" and blocker.get("moving_vehicle", false):
+			# A same-lane moving vehicle is a queue leader, with a clearance based
+			# on both body lengths. Cross-lane/crossing conflicts remain the
+			# oriented-footprint check in external_vehicle_step_is_clear().
+			var block_axis := str(blocker.get("axis", ""))
+			var block_direction := int(blocker.get("direction", 0))
+			if block_axis == axis and block_direction == int(direction):
+				var block_half: Vector2 = blocker.get("half_extents", Vector2(0.7, 0.7))
+				var block_lateral := absf(block_position.z - current.z) if axis == "H" else absf(block_position.x - current.x)
+				var own_half := Vector2(1.13, 0.60) if axis == "H" else Vector2(0.60, 1.13)
+				var block_lateral_extent := own_half.y + block_half.y if axis == "H" else own_half.x + block_half.x
+				var gap_to_blocker := ((block_position.x - current.x) if axis == "H" else (block_position.z - current.z)) * direction
+				if block_lateral < block_lateral_extent + 0.12 and gap_to_blocker > 0.0:
+					var block_longitudinal := block_half.x if axis == "H" else block_half.y
+					distance = minf(distance, maxf(0.0, gap_to_blocker - 1.13 - block_longitudinal - EXTERNAL_QUEUE_GAP))
 			continue
 		if ignore_incident_id != "" and str(blocker.get("incident_id", "")) == ignore_incident_id:
 			continue
@@ -448,7 +585,6 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 			continue
 		if str(blocker.get("id", "")) == actor_id:
 			continue
-		var block_position: Vector3 = blocker.position
 		var lateral: float = absf((current.z - block_position.z) if axis == "H" else (current.x - block_position.x))
 		var ahead_to_blocker: float = ((block_position.x - current.x) if axis == "H" else (block_position.z - current.z)) * direction
 		if lateral < 1.7 and ahead_to_blocker > 0 and ahead_to_blocker < distance + 4.5:
@@ -456,16 +592,18 @@ func service_travel_distance(current: Vector3, proposed: Vector3, delta: float, 
 	var stop_distance := stop_distance_for(vehicle_type, grid != null)
 	for intersection: Dictionary in intersections:
 		var lateral: float = absf((current.z - intersection.z) if axis == "H" else (current.x - intersection.x))
-		if lateral > (0.9 if grid != null else 0.15):
+		if lateral > (0.9 if grid != null or vehicle_type == "delivery_truck" else 0.15):
 			continue
 		var ahead: float = ((intersection.x - current.x) if axis == "H" else (intersection.z - current.z)) * direction
 		var reservation: Dictionary = reservations.get(intersection.key, {})
-		if ahead < -1.5 and str(reservation.get("actor", "")) == actor_id:
+		if ahead < -1.5 and str(reservation.get("actor", "")) == actor_id and not reservation.get("grid_lock", false):
 			reservations.erase(intersection.key)
 		if ahead < stop_distance - 0.01:
 			wait_times.erase(intersection.key + ":" + actor_id)
 		if ahead >= stop_distance - 0.01 and ahead <= stop_distance + distance + 0.01:
-			var may_pass := cross_traffic_clear(intersection, axis, actor_id) if emergency else permission(intersection, axis, actor_id, delta, int(direction))
+			var external_footprint := service_half_extents(vehicle_type, axis) if vehicle_type in SERVICE_VEHICLE_SIZES else (Vector2(1.13, 0.60) if axis == "H" else Vector2(0.60, 1.13)) if vehicle_type == "delivery_truck" else Vector2.ZERO
+			var has_priority := emergency and vehicle_type in ["fire_engine", "police_car", "ambulance"]
+			var may_pass := permission(intersection, axis, actor_id, delta, int(direction), external_footprint, has_priority)
 			if not may_pass:
 				distance = minf(distance, maxf(0, ahead - stop_distance))
 	return distance
@@ -513,6 +651,22 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 	var changed := signature != grid_signature
 	grid_signature = signature
 	grid_roads = roads
+	if changed:
+		# Reservations and wait-for edges belong to a particular road graph.
+		reservations.clear()
+		wait_times.clear()
+		last_states.clear()
+		deadlock_cycles.clear()
+		deadlock_reroutes.clear()
+		recovery_vehicle_id = ""
+		for vehicle: Dictionary in vehicles:
+			vehicle.erase("waiting_next")
+			vehicle.erase("turn_exit_cell")
+			vehicle.erase("waiting_on")
+			vehicle.erase("waiting_reason")
+			vehicle.erase("stalled_time")
+			vehicle.erase("recovery_mode")
+			vehicle.erase("recovery_remaining")
 	if roads.is_empty() or (desired <= 0 and not bus_active):
 		for car in cars:
 			remove_child(car)
@@ -572,17 +726,8 @@ func step_grid(delta: float) -> void:
 			stalled_time = 0.0
 		vehicle.last_position = current
 		vehicle.stalled_time = stalled_time
-		if stalled_time > 22.0 and not has_nearby_incident_blocker(current):
-			# Recover accidental signal/car deadlocks locally, but keep deliberate
-			# service/construction roadblocks for their owning service or police.
-			if vehicle.has("waiting_next"):
-				vehicle.previous = vehicle.waiting_next
-				vehicle.erase("waiting_next")
-			var recovery_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
-			var recovery_lane := grid_lane_offset(str(vehicle.axis), int(vehicle.direction))
-			vehicle.target = recovery_center + recovery_lane
-			vehicle.stalled_time = 0.0
-			target = vehicle.target
+		# Red-light waits, dead-end roads and queues do not trigger recovery by
+		# elapsed time alone. _update_deadlock_recovery() requires a stalled cycle.
 		if current.distance_to(target) < 0.08:
 			if vehicle.has("turn_exit_cell"):
 				var exit_cell: Vector2i = vehicle.turn_exit_cell
@@ -600,6 +745,8 @@ func step_grid(delta: float) -> void:
 				if options.size() > 1:
 					options.erase(vehicle.previous)
 				if options.is_empty():
+					vehicle.waiting_reason = "no_road_exit"
+					vehicle.waiting_on = ""
 					continue
 				var forward := Vector2i(int(vehicle.direction), 0) if str(vehicle.axis) == "H" else Vector2i(0, int(vehicle.direction))
 				var forward_cell: Vector2i = vehicle.cell + forward
@@ -613,8 +760,11 @@ func step_grid(delta: float) -> void:
 				var next_center: Vector3 = grid.cell_world(next.x, next.y)
 				var crossing := find_intersection(next_center.x, next_center.z)
 				var incoming_axis := "H" if next.x != vehicle.cell.x else "V"
-				if not crossing.is_empty() and not permission(crossing, incoming_axis, str(vehicle.id), delta):
+				var crossing_direction: int = next.x - vehicle.cell.x if next.x != vehicle.cell.x else next.y - vehicle.cell.y
+				if not crossing.is_empty() and not permission(crossing, incoming_axis, str(vehicle.id), delta, crossing_direction):
 					vehicle.waiting_next = next
+					vehicle.waiting_reason = "signal"
+					vehicle.waiting_on = ""
 					var current_center: Vector3 = grid.cell_world(vehicle.cell.x, vehicle.cell.y)
 					var lane_shift := grid_lane_offset(str(vehicle.axis), int(vehicle.direction))
 					vehicle.target = current_center + lane_shift + Vector3(float(forward.x), 0, float(forward.y)) * (TerritoryGrid.CELL_SIZE * 0.5 - 1.45)
@@ -647,10 +797,123 @@ func step_grid(delta: float) -> void:
 		vehicle.coordinate = current.x if vehicle.axis == "H" else current.z
 		var allowed := travel_distance(vehicle, delta)
 		var proposed := current.move_toward(target, allowed)
-		vehicle.node.position = current.move_toward(proposed, grid_safe_distance(vehicle, current, proposed))
+		var safe_distance := grid_safe_distance(vehicle, current, proposed)
+		vehicle.node.position = current.move_toward(proposed, safe_distance)
+		var moved_distance := current.distance_to(vehicle.node.position)
+		if moved_distance > 0.02:
+			vehicle.stalled_time = 0.0
+		if vehicle.get("recovery_mode", false):
+			vehicle.recovery_remaining = maxf(0.0, float(vehicle.get("recovery_remaining", 0.0)) - moved_distance)
+			if float(vehicle.recovery_remaining) <= 0.01:
+				vehicle.erase("recovery_mode")
+				vehicle.erase("recovery_remaining")
 		vehicle.coordinate = vehicle.node.position.x if vehicle.axis == "H" else vehicle.node.position.z
 		vehicle.node.rotation.y = PI / 2 * vehicle.direction if vehicle.axis == "H" else (0.0 if vehicle.direction > 0 else PI)
 		release_grid_reservations_for_vehicle(vehicle)
+	_update_deadlock_recovery(delta)
+
+func _waiting_cycle(start_id: String) -> Array[String]:
+	var path: Array[String] = []
+	var positions: Dictionary = {}
+	var current_id := start_id
+	while path.size() <= vehicles.size():
+		if positions.has(current_id):
+			return path.slice(int(positions[current_id]))
+		var vehicle: Dictionary = {}
+		for candidate: Dictionary in vehicles:
+			if str(candidate.get("id", "")) == current_id:
+				vehicle = candidate
+				break
+		if vehicle.is_empty() or not vehicle.node.visible or float(vehicle.get("stalled_time", 0.0)) < 4.0:
+			return []
+		if str(vehicle.get("waiting_reason", "")) not in ["queue", "yield", "moving_vehicle", "vehicle_collision"]:
+			return []
+		var next_id := str(vehicle.get("waiting_on", ""))
+		if next_id == "":
+			return []
+		positions[current_id] = path.size()
+		path.append(current_id)
+		current_id = next_id
+	return []
+
+func _update_deadlock_recovery(delta: float) -> void:
+	var active_cycles: Dictionary = {}
+	for vehicle: Dictionary in vehicles:
+		if not vehicle.node.visible or vehicle.get("managed", false):
+			continue
+		var cycle := _waiting_cycle(str(vehicle.id))
+		if cycle.size() < 2:
+			continue
+		cycle.sort()
+		var key := ",".join(cycle)
+		active_cycles[key] = cycle
+	for key: String in deadlock_cycles.keys():
+		if not active_cycles.has(key):
+			deadlock_cycles.erase(key)
+			deadlock_reroutes.erase(key)
+	for key: String in active_cycles:
+		deadlock_cycles[key] = float(deadlock_cycles.get(key, 0.0)) + delta
+	if recovery_vehicle_id != "":
+		for vehicle: Dictionary in vehicles:
+			if str(vehicle.id) == recovery_vehicle_id and vehicle.get("recovery_mode", false):
+				return
+		recovery_vehicle_id = ""
+	for key: String in deadlock_cycles:
+		var cycle_elapsed := float(deadlock_cycles[key])
+		var cycle: Array = active_cycles.get(key, [])
+		if cycle_elapsed >= 4.0 and not deadlock_reroutes.has(key):
+			deadlock_reroutes[key] = true
+			if _try_cycle_detour(cycle):
+				return
+		if cycle_elapsed < 12.0:
+			continue
+		if cycle.is_empty():
+			continue
+		# Release one car at a time for a short road-bounded distance. Signals,
+		# static blockers and the connected-road graph remain authoritative.
+		var recovery_id := str(cycle[0])
+		for vehicle: Dictionary in vehicles:
+			if str(vehicle.id) == recovery_id:
+				vehicle.recovery_mode = true
+				vehicle.recovery_remaining = TerritoryGrid.CELL_SIZE * 1.5
+				vehicle.stalled_time = 0.0
+				recovery_vehicle_id = recovery_id
+				return
+
+func _try_cycle_detour(cycle: Array) -> bool:
+	if grid == null:
+		return false
+	for identifier in cycle:
+		var vehicle: Dictionary = {}
+		for candidate: Dictionary in vehicles:
+			if str(candidate.get("id", "")) == str(identifier):
+				vehicle = candidate
+				break
+		if vehicle.is_empty() or not vehicle.has("cell"):
+			continue
+		var options: Array[Vector2i] = []
+		var current_cell: Vector2i = vehicle.cell
+		for direction: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var candidate_cell := current_cell + direction
+			if grid.state_at(candidate_cell.x, candidate_cell.y) == "road" and candidate_cell != vehicle.get("previous", Vector2i(-1, -1)) and candidate_cell != vehicle.get("waiting_next", Vector2i(-1, -1)):
+				options.append(candidate_cell)
+		for candidate_cell: Vector2i in options:
+			var occupied := vehicles.any(func(other: Dictionary) -> bool: return str(other.get("id", "")) != str(vehicle.id) and other.node.visible and other.get("cell", Vector2i(-1, -1)) == candidate_cell)
+			if occupied:
+				continue
+			var has_exit := false
+			for direction: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var exit_cell := candidate_cell + direction
+				if exit_cell != current_cell and grid.state_at(exit_cell.x, exit_cell.y) == "road":
+					has_exit = true
+					break
+			if not has_exit:
+				continue
+			vehicle.waiting_next = candidate_cell
+			vehicle.waiting_reason = ""
+			vehicle.waiting_on = ""
+			return true
+	return false
 
 func has_nearby_incident_blocker(position_value: Vector3) -> bool:
 	if service_active and position_value.distance_to(service_position) < 18.0:
@@ -669,10 +932,13 @@ func grid_half_extents(vehicle: Dictionary) -> Vector2:
 	var half_width := 0.60 if vehicle.node.type_id == "city_bus" else 0.56
 	return Vector2(half_length, half_width) if vehicle.axis == "H" else Vector2(half_width, half_length)
 
-func external_vehicle_step_is_clear(current: Vector3, proposed: Vector3, half_length: float, half_width: float, actor_id: String) -> bool:
+func external_vehicle_step_is_clear(current: Vector3, proposed: Vector3, half_length: float, half_width: float, actor_id: String, heading: Vector3 = Vector3.ZERO) -> bool:
 	var movement := proposed - current
-	var horizontal := absf(movement.x) >= absf(movement.z)
-	var own_half := Vector2(half_length, half_width) if horizontal else Vector2(half_width, half_length)
+	var body_heading := Vector2(movement.x, movement.z) if movement.length_squared() > 0.0001 else Vector2(heading.x, heading.z)
+	if body_heading.length_squared() < 0.0001:
+		body_heading = Vector2.RIGHT
+	body_heading = body_heading.normalized()
+	var own_half := Vector2(half_length * absf(body_heading.x) + half_width * absf(body_heading.y), half_length * absf(body_heading.y) + half_width * absf(body_heading.x))
 	var own_position := Vector2(proposed.x, proposed.z)
 	var old_position := Vector2(current.x, current.z)
 	for vehicle: Dictionary in vehicles:
@@ -680,6 +946,16 @@ func external_vehicle_step_is_clear(current: Vector3, proposed: Vector3, half_le
 			continue
 		var other_position: Vector3 = lane_position(vehicle)
 		var other_half := grid_half_extents(vehicle)
+		if grid != null and str(vehicle.axis) == ("H" if absf(body_heading.x) >= absf(body_heading.y) else "V") and int(vehicle.direction) == int(signf(body_heading.x if absf(body_heading.x) >= absf(body_heading.y) else body_heading.y)):
+			var axis := str(vehicle.axis)
+			var lateral := absf(own_position.y - other_position.z) if axis == "H" else absf(own_position.x - other_position.x)
+			var lateral_extent := own_half.y + other_half.y if axis == "H" else own_half.x + other_half.x
+			var direction := int(vehicle.direction)
+			var current_gap := ((other_position.x - current.x) if axis == "H" else (other_position.z - current.z)) * direction
+			var proposed_gap := ((other_position.x - proposed.x) if axis == "H" else (other_position.z - proposed.z)) * direction
+			var clearance := (own_half.x + other_half.x if axis == "H" else own_half.y + other_half.y) + EXTERNAL_QUEUE_GAP
+			if lateral < lateral_extent + 0.12 and current_gap > 0.0 and proposed_gap < clearance:
+				return false
 		var overlaps := absf(own_position.x - other_position.x) < own_half.x + other_half.x + 0.12 and absf(own_position.y - other_position.z) < own_half.y + other_half.y + 0.12
 		if overlaps:
 			var was_overlapping := absf(old_position.x - other_position.x) < own_half.x + other_half.x + 0.12 and absf(old_position.y - other_position.z) < own_half.y + other_half.y + 0.12
@@ -695,6 +971,18 @@ func external_vehicle_step_is_clear(current: Vector3, proposed: Vector3, half_le
 			continue
 		var block_position: Vector3 = blocker.position
 		var block_half: Vector2 = blocker.get("half_extents", Vector2(0.85, 0.85))
+		if blocker.get("moving_vehicle", false):
+			var block_axis := str(blocker.get("axis", ""))
+			var move_axis := "H" if absf(body_heading.x) >= absf(body_heading.y) else "V"
+			var move_direction := int(signf(body_heading.x if move_axis == "H" else body_heading.y))
+			if block_axis == move_axis and int(blocker.get("direction", 0)) == move_direction:
+				var lateral := absf(own_position.y - block_position.z) if move_axis == "H" else absf(own_position.x - block_position.x)
+				var lateral_extent := own_half.y + block_half.y if move_axis == "H" else own_half.x + block_half.x
+				var current_gap := ((block_position.x - current.x) if move_axis == "H" else (block_position.z - current.z)) * move_direction
+				var proposed_gap := ((block_position.x - proposed.x) if move_axis == "H" else (block_position.z - proposed.z)) * move_direction
+				var clearance := (own_half.x + block_half.x if move_axis == "H" else own_half.y + block_half.y) + EXTERNAL_QUEUE_GAP
+				if lateral < lateral_extent + 0.12 and current_gap > 0.0 and proposed_gap < clearance:
+					return false
 		if absf(own_position.x - block_position.x) < own_half.x + block_half.x + 0.12 and absf(own_position.y - block_position.z) < own_half.y + block_half.y + 0.12:
 			var was_overlapping := absf(old_position.x - block_position.x) < own_half.x + block_half.x + 0.12 and absf(old_position.y - block_position.z) < own_half.y + block_half.y + 0.12
 			if was_overlapping and own_position.distance_squared_to(Vector2(block_position.x, block_position.z)) > old_position.distance_squared_to(Vector2(block_position.x, block_position.z)):
@@ -707,10 +995,14 @@ func grid_safe_distance(vehicle: Dictionary, current: Vector3, proposed: Vector3
 	for other: Dictionary in vehicles:
 		if other.id == vehicle.id or not other.node.visible:
 			continue
+		if vehicle.get("recovery_mode", false):
+			continue
 		var sum := own + grid_half_extents(other)
 		var other_position: Vector3 = other.node.position
 		if absf(proposed.x - other_position.x) < sum.x and absf(proposed.z - other_position.z) < sum.y:
 			if proposed.distance_squared_to(other_position) > current.distance_squared_to(other_position) and absf(current.x - other_position.x) < sum.x and absf(current.z - other_position.z) < sum.y:
 				continue
+			vehicle.waiting_reason = "vehicle_collision"
+			vehicle.waiting_on = str(other.id)
 			return 0.0
 	return current.distance_to(proposed)

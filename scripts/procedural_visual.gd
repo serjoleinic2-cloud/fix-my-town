@@ -43,7 +43,8 @@ func _ready() -> void:
 		business_tower()
 	elif visual_type == "fire_station":
 		fire_station()
-		parked_service_vehicle("fire_engine")
+		parked_service_vehicle("fire_engine", 0)
+		parked_service_vehicle("fire_engine", 1)
 	elif visual_type == "police_station":
 		service_station(Color("54768c"), Color("d9e5e6"), "ПОЛИЦИЯ")
 		police_helipad()
@@ -423,14 +424,19 @@ func add_vehicle_lights(half_width: float, front_z: float, y: float, rear_z: flo
 		Art.box(self, Vector3(side * half_width, y, front_z), Vector3(0.22, 0.14, 0.08), Color("fff1bf"))
 		Art.box(self, Vector3(side * half_width, y * 0.78, rear_z), Vector3(0.18, 0.12, 0.08), Color("e45e4f"))
 
-func parked_service_vehicle(kind: String) -> void:
-	# Dedicated parking pad and one vehicle for this service, kept inside its 2x2 lot.
-	Art.box(self, Vector3(3.1, 0.19, 3.35), Vector3(2.8, 0.12, 2.75), Color("697276"))
+func parked_service_vehicle(kind: String, slot: int = 0) -> void:
+	# Each fire engine has a separate apron. Both use the exact road model so
+	# parked and dispatched vehicles have the same dimensions and scale.
+	var parking_position := Vector3(3.0, 0.27, 2.55) if slot == 0 else Vector3(0.25, 0.27, 3.15)
+	Art.box(self, Vector3(parking_position.x, 0.19, parking_position.z), Vector3(2.55, 0.12, 4.45), Color("697276"))
 	var vehicle := Node3D.new()
-	vehicle.name = "ParkedServiceVehicle"
-	vehicle.position = Vector3(3.1, 0.27, 3.25)
-	vehicle.scale = Vector3.ONE * 0.68
+	vehicle.name = "ParkedServiceVehicle" if slot == 0 else "ParkedServiceVehicle2"
+	vehicle.position = parking_position
 	add_child(vehicle)
+	if kind == "fire_engine":
+		build_fire_engine_model(vehicle)
+		Art.batch(vehicle)
+		return
 	var body_color := Color("d64f3e") if kind == "fire_engine" else (Color("f4f0df") if kind in ["police_car", "ambulance"] else Color("e5a932"))
 	var ambulance := kind == "ambulance"
 	var body_size := Vector3(1.95, 1.1, 2.75) if ambulance else Vector3(1.85, 0.62, 2.6)
@@ -499,9 +505,15 @@ func parked_service_vehicle(kind: String) -> void:
 	Art.batch(vehicle)
 
 func set_parked_service_vehicle_visible(value: bool) -> void:
-	var vehicle := find_child("ParkedServiceVehicle", false, false) as Node3D
-	if vehicle != null:
-		vehicle.visible = value
+	set_parked_service_vehicle_count(2 if value and visual_type == "fire_station" else (1 if value else 0))
+
+func set_parked_service_vehicle_count(available: int) -> void:
+	var first := find_child("ParkedServiceVehicle", false, false) as Node3D
+	var second := find_child("ParkedServiceVehicle2", false, false) as Node3D
+	if first != null:
+		first.visible = available >= 1
+	if second != null:
+		second.visible = available >= 2
 
 func police_helipad() -> void:
 	# Roof pad stays within the police station's standard 2x2 lot.
@@ -551,24 +563,34 @@ func service_station(wall: Color, accent: Color, sign_text: String) -> void:
 	for x in [-2.4, -0.9, 0.6]:
 		Art.box(self, Vector3(x, 1.6, 2.40), Vector3(0.72, 1.0, 0.08), Color("9bc7d0"))
 
-func fire_engine() -> void:
-	Art.box(self, Vector3(0, 0.72, -0.35), Vector3(1.9, 1.15, 2.8), Color("d64f3e"))
-	Art.box(self, Vector3(0, 1.32, 0.58), Vector3(1.82, 1.15, 1.0), Color("c94334"))
-	Art.box(self, Vector3(0, 1.38, 1.11), Vector3(1.5, 0.62, 0.06), Color("9bc7d0"))
-	Art.box(self, Vector3(0, 1.31, -1.78), Vector3(1.52, 0.9, 0.08), Color("dce2db"))
-	Art.box(self, Vector3(0, 1.38, -0.4), Vector3(0.15, 0.18, 1.65), Color("f3d463"))
-	Art.cylinder(self, Vector3(0, 2.02, 0.25), 0.13, 0.12, Color("4c9de0"), 1, 8)
-	var beacon_left := Art.box(self, Vector3(-0.28, 2.02, 0.25), Vector3(0.22, 0.12, 0.14), Color("dc4242"))
+func build_fire_engine_model(parent: Node3D) -> void:
+	# Matches TrafficSystem.SERVICE_VEHICLE_SIZES.fire_engine (2.2 x 4.2).
+	Art.box(parent, Vector3(0, 0.72, -0.45), Vector3(2.2, 1.15, 4.2), Color("d64f3e"))
+	Art.box(parent, Vector3(0, 1.32, 1.08), Vector3(2.12, 1.15, 1.15), Color("c94334"))
+	Art.box(parent, Vector3(0, 1.38, 1.68), Vector3(1.72, 0.62, 0.06), Color("9bc7d0"))
+	Art.box(parent, Vector3(0, 1.31, -2.56), Vector3(1.78, 0.9, 0.08), Color("dce2db"))
+	Art.box(parent, Vector3(0, 1.38, -0.65), Vector3(0.15, 0.18, 2.65), Color("f3d463"))
+	var roof_badge := Art.cylinder(parent, Vector3(0, 1.95, -0.55), 0.34, 0.06, Color("fffdf8"), 1.0, 16)
+	roof_badge.set_meta("batch_feature", "FireEngineRoofBadge")
+	Art.box(parent, Vector3(0, 2.0, -0.55), Vector3(0.13, 0.04, 0.46), Color("d44343"))
+	Art.box(parent, Vector3(0, 2.0, -0.55), Vector3(0.40, 0.04, 0.13), Color("d44343"))
+	Art.cylinder(parent, Vector3(0, 2.02, 0.85), 0.13, 0.12, Color("4c9de0"), 1, 8)
+	var beacon_left := Art.box(parent, Vector3(-0.28, 2.02, 0.85), Vector3(0.22, 0.12, 0.14), Color("dc4242"))
 	beacon_left.name = "BeaconRed"
 	beacon_left.set_meta("dynamic", true)
-	var beacon_right := Art.box(self, Vector3(0.28, 2.02, 0.25), Vector3(0.22, 0.12, 0.14), Color("438ee8"))
+	var beacon_right := Art.box(parent, Vector3(0.28, 2.02, 0.85), Vector3(0.22, 0.12, 0.14), Color("438ee8"))
 	beacon_right.name = "BeaconBlue"
 	beacon_right.set_meta("dynamic", true)
-	add_vehicle_lights(0.5, 1.14, 1.35, -1.8)
-	for x in [-0.78, 0.78]:
-		for z in [-1.15, 0.95]:
-			var wheel := Art.cylinder(self, Vector3(x, 0.43, z), 0.4, 0.24, Color("3a3b3a"), 0.8, 12)
+	for side in [-1.0, 1.0]:
+		Art.box(parent, Vector3(side * 0.62, 1.35, 1.72), Vector3(0.22, 0.14, 0.08), Color("fff1bf"))
+		Art.box(parent, Vector3(side * 0.62, 1.02, -2.58), Vector3(0.2, 0.12, 0.08), Color("e45e4f"))
+	for x in [-0.92, 0.92]:
+		for z in [-1.55, 1.35]:
+			var wheel := Art.cylinder(parent, Vector3(x, 0.43, z), 0.4, 0.24, Color("3a3b3a"), 0.8, 12)
 			wheel.rotation.z = PI / 2
+
+func fire_engine() -> void:
+	build_fire_engine_model(self)
 
 func ruins(seed_value: int) -> void:
 	Art.box(self, Vector3(0, 0.12, 0), Vector3(7.8, 0.22, 7.8), Color("827b70"))

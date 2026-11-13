@@ -32,7 +32,8 @@ func run() -> void:
 			old_city.cells[row][col] = "occupied"
 	check(restored_grid.restore(old_city) and restored_grid.building_by_id("old_elite").width == 4, "Existing 4x4 elite saves remain readable")
 	old_city.buildings[0].type_id = "business_tower"
-	check(restored_grid.restore(old_city) and restored_grid.building_by_id("old_elite").width == 4, "Existing 4x4 tower saves remain readable after the compact footprint update")
+	check(restored_grid.restore(old_city) and restored_grid.building_by_id("old_elite").width == 2 and restored_grid.building_by_id("old_elite").height == 2, "Existing 4x4 tower saves migrate to the standard footprint")
+	check(restored_grid.state_at(5, 5) == "free" and restored_grid.state_at(6, 6) == "free", "Legacy tower migration releases occupied cells outside its 2x2 footprint")
 	var game := Simulation.new(false)
 	game.save_path = "user://feature_transfer_neglect_test.json"
 	game.start_empty_city()
@@ -42,6 +43,10 @@ func run() -> void:
 		for col in range(9, 11):
 			game.territory.cells[row][col] = "free"
 	check(game.territory.place_building(9, 19, "house"), "Neglect fixture house")
+	for row in range(22, 24):
+		for col in range(9, 11):
+			game.territory.cells[row][col] = "free"
+	check(game.territory.place_building(9, 22, "depot"), "Neglect fixture has a player-built reachable maintenance depot")
 	var home := game.territory.building_at(9, 19)
 	var identifier := str(home.instance_id)
 	game.housing_neglect[identifier] = 76.0
@@ -50,7 +55,13 @@ func run() -> void:
 	var loaded := Simulation.new(false)
 	loaded.save_path = game.save_path
 	check(loaded.load_game() and loaded.housing_neglect_percent(identifier) == 76 and loaded.housing_neglect_clock == 17.0, "Neglect and active-time clock survive reload with no offline decay")
-	check(game.advance_housing_neglect(6), "Low quality gradually increases neglect")
+	check(game.problem_candidates().any(func(candidate: Dictionary): return str(candidate.type) == "neglect" and str(candidate.target.instance_id) == identifier), "Low quality and overdue maintenance create a warned, target-specific incident")
+	check(game.create_problem("neglect", identifier), "Neglect incident begins with an explicit reaction window")
+	game.tick_city_problems(75.0)
+	check(str(game.active_problem_for(identifier, "neglect").get("state", "")) == "overdue", "Neglect damage waits until the response window expires")
+	game.tick_city_problems(360.0)
+	check(game.housing_neglect_percent(identifier) == 100, "Unanswered, warned neglect gradually reaches the collapse threshold")
+	check(game.advance_housing_neglect(1), "Neglect progression can collapse a home after its warning consequences")
 	check(home.get("shanty", false) and home.width == 1 and home.height == 1, "Neglect eventually creates one-cell shanty")
 	check(game.territory.state_at(10, 20) == "free" and game.territory.state_at(11, 19) == "road", "Shrinking home releases land but preserves roads")
 	check(not game.start_grid_upgrade(identifier) and not game.upgrade_grid_house(identifier), "Shanty cannot be upgraded through UI or simulation")

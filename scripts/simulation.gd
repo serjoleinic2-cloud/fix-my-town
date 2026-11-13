@@ -42,6 +42,7 @@ var income_clock: float = 0.0
 var service_neglect_clock: float = 0.0
 var housing_neglect_clock: float = 0.0
 var housing_neglect: Dictionary = {}
+var public_discontent_clock: float = 0.0
 var completed: bool = false
 var target_instance_id: String = ""
 var depot_instance_id: String = "pine_district_legacy_2"
@@ -64,6 +65,18 @@ var incident_seed: int = 48291
 var incident_clock: float = 0.0
 var incident_rng := RandomNumberGenerator.new()
 var incidents: Dictionary = {}
+var incident_notification_serial: int = 0
+var job_problem_id: String = ""
+var problem_test_hooks_enabled: bool = false
+var _logistics_coverage_cache_signature: int = -1
+var _logistics_coverage_cache: Dictionary = {}
+var _food_access_cache_signature: int = -1
+var _food_access_cache: Dictionary = {}
+var _food_access_stats: Dictionary = {"calls": 0, "hits": 0, "misses": 0, "buildings_checked": 0, "logistics_hits": 0, "logistics_misses": 0}
+var _service_assignment_cache_signature: int = -1
+var _service_assignment_cache: Dictionary = {}
+const PROBLEM_TYPES := ["leak", "supply", "neglect", "strike"]
+const DISORDER_MINIMUM_SECONDS := 120.0
 var district_house_limit: int = 8
 var district_tasks: Array = [
 	{"id": "clear_3", "title": "Расчистить 3 участка", "done": false},
@@ -126,9 +139,11 @@ func start_empty_city() -> void:
 	service_neglect_clock = 0.0
 	housing_neglect_clock = 0.0
 	housing_neglect.clear()
+	public_discontent_clock = 0.0
 	job = ""
 	job_phase = "travel"
 	target_instance_id = ""
+	job_problem_id = ""
 	depot_instance_id = "pine_district_legacy_2"
 	job_vehicle_id = ""
 	vehicle = Vector3.ZERO
@@ -145,6 +160,7 @@ func start_empty_city() -> void:
 	parallel_construction_jobs.clear()
 	fire_jobs.clear()
 	incidents.clear()
+	incident_notification_serial = 0
 	incident_clock = 0.0
 	fire_triggered = false
 	transit = Transit.new()
@@ -164,6 +180,9 @@ func happiness() -> int:
 	for entry: Dictionary in territory.buildings:
 		if entry.type_id in ["cafe", "park"]:
 			value += Catalog.level_data(entry.type_id, int(entry.get("level", 1))).mood + record_placement_bonus(entry)
+	for incident: Dictionary in incidents.values():
+		if str(incident.get("type", "")) == "strike" and str(incident.get("state", "new")) == "overdue":
+			value -= ceili((12.0 + float(incident.get("progress", 0.0)) * 8.0) * clampf(float(incident.get("progress", 0.0)), 0.0, 1.0))
 	return clampi(value + (3 if transit_metrics().served > 0 else -5), 0, 100)
 
 func city_level() -> int:
@@ -242,14 +261,46 @@ func logistics_upgrade_allowed(entry: Dictionary) -> bool:
 func is_logistics_delivery_target(entry: Dictionary) -> bool:
 	return str(entry.get("type_id", "")) in LOGISTICS_TARGET_TYPES and entry.has("col")
 
+func _logistics_network_signature() -> int:
+	var state: Array = [territory.get_instance_id(), territory.routing_revision()]
+	for entry: Dictionary in territory.buildings:
+		state.append([str(entry.get("instance_id", "")), str(entry.get("type_id", "")), int(entry.get("col", -1)), int(entry.get("row", -1)), int(entry.get("width", 0)), int(entry.get("height", 0)), int(entry.get("level", 1))])
+	return hash(state)
+
+func _food_access_state_signature() -> int:
+	var state: Array = [_logistics_network_signature()]
+	for entry: Dictionary in territory.buildings:
+		if str(entry.get("type_id", "")) in ["cafe", "supermarket"]:
+			state.append([str(entry.get("instance_id", "")), food_stock_for(entry)])
+	return hash(state)
+
+func reset_food_access_stats() -> void:
+	_food_access_stats = {"calls": 0, "hits": 0, "misses": 0, "buildings_checked": 0, "logistics_hits": 0, "logistics_misses": 0}
+	territory.reset_routing_cache_stats()
+
+func food_access_stats() -> Dictionary:
+	var result := _food_access_stats.duplicate(true)
+	result["routing"] = territory.routing_cache_stats()
+	return result
+
 func logistics_covered_buildings(source_id: String) -> Array[Dictionary]:
+	var signature := _logistics_network_signature()
+	if signature != _logistics_coverage_cache_signature:
+		_logistics_coverage_cache_signature = signature
+		_logistics_coverage_cache.clear()
+	if _logistics_coverage_cache.has(source_id):
+		_food_access_stats.logistics_hits = int(_food_access_stats.logistics_hits) + 1
+		return _logistics_coverage_cache[source_id].duplicate(true)
+	_food_access_stats.logistics_misses = int(_food_access_stats.logistics_misses) + 1
 	var covered: Array[Dictionary] = []
 	var center := logistics_center_entry()
 	var source := territory.building_by_id(source_id)
 	if center.is_empty() or source.is_empty() or source.type_id not in ["logistics_center", "warehouse"]:
+		_logistics_coverage_cache[source_id] = covered
 		return covered
 	var center_range := logistics_center_range()
 	if source.type_id == "warehouse" and territory.road_distance_between_buildings(center, source, center_range) < 0:
+		_logistics_coverage_cache[source_id] = covered
 		return covered
 	var eligible_warehouses: Array[Dictionary] = []
 	if source.type_id == "logistics_center":
@@ -271,6 +322,7 @@ func logistics_covered_buildings(source_id: String) -> Array[Dictionary]:
 			reachable = territory.road_distance_between_buildings(source, entry, logistics_warehouse_range(source)) >= 0
 		if reachable:
 			covered.append(entry)
+	_logistics_coverage_cache[source_id] = covered.duplicate(true)
 	return covered
 
 func logistics_vehicle_routes(source_id: String) -> Array:
@@ -293,11 +345,27 @@ func logistics_vehicle_routes(source_id: String) -> Array:
 		var road_route := territory.road_route_between_buildings(source, destination, max_range)
 		if road_route.size() < 2:
 			continue
+		# The truck returns over a separately routed legal path. Reversing the
+		# delivery array would make it turn around in the destination's road cell,
+		# which is often the middle of a straight segment.
+		var return_route := territory.road_route_legal_return(road_route)
+		if return_route.size() < 2:
+			continue
+		var complete_route: Array[Vector2i] = road_route.duplicate()
+		for cell_index in range(1, return_route.size()):
+			complete_route.append(return_route[cell_index])
+		# Begin one road cell past the source and close the patrol cycle by
+		# continuing through the source onto that same outbound edge. This keeps
+		# position and heading continuous when the animation wraps around.
+		if complete_route.size() >= 3 and complete_route[0] == complete_route[complete_route.size() - 1]:
+			var continuous_route: Array[Vector2i] = []
+			for route_index in range(1, complete_route.size()):
+				continuous_route.append(complete_route[route_index])
+			continuous_route.append(complete_route[1])
+			complete_route = continuous_route
 		var world_route: Array[Vector3] = []
-		for cell: Vector2i in road_route:
+		for cell: Vector2i in complete_route:
 			world_route.append(territory.cell_world(cell.x, cell.y) + Vector3(0, 0.32, 0))
-		for route_index in range(world_route.size() - 2, -1, -1):
-			world_route.append(world_route[route_index])
 		routes.append(world_route)
 	return routes
 
@@ -466,7 +534,105 @@ func all_buildings() -> Array[Dictionary]:
 	return result
 
 func record_water(entry: Dictionary) -> bool:
-	return has_water(entry.legacy_plot) if entry.has("legacy_plot") else true
+	if entry.has("legacy_plot"):
+		return has_water(entry.legacy_plot)
+	for incident: Dictionary in incidents.values():
+		# A leak warning identifies the damaged line but does not cut the home off
+		# before the player's reaction window expires.
+		if str(incident.get("type", "")) == "leak" and str(incident.get("target_id", "")) == str(entry.get("instance_id", "")) and str(incident.get("state", "new")) == "overdue":
+			return false
+	return true
+
+func food_stock_capacity(type_id: String, level_value: int = 1) -> float:
+	var base := 240.0 if type_id == "cafe" else (600.0 if type_id == "supermarket" else 0.0)
+	return base * float(clampi(level_value, 1, 3))
+
+func food_stock_for(entry: Dictionary) -> float:
+	var type_id := str(entry.get("type_id", ""))
+	if type_id not in ["cafe", "supermarket"]:
+		return 0.0
+	return clampf(float(entry.get("food_stock", food_stock_capacity(type_id, int(entry.get("level", 1))))), 0.0, food_stock_capacity(type_id, int(entry.get("level", 1))))
+
+func initialize_food_stocks() -> void:
+	for entry: Dictionary in territory.buildings:
+		if entry.type_id in ["cafe", "supermarket"] and not entry.has("food_stock"):
+			entry.food_stock = food_stock_capacity(str(entry.type_id), int(entry.get("level", 1)))
+
+func food_delivery_covers(entry: Dictionary) -> bool:
+	var center := logistics_center_entry()
+	if center.is_empty():
+		return false
+	for supplied: Dictionary in logistics_covered_buildings(str(center.instance_id)):
+		if str(supplied.get("instance_id", "")) == str(entry.get("instance_id", "")):
+			return true
+	return false
+
+func food_access_for(entry: Dictionary) -> bool:
+	_food_access_stats.calls = int(_food_access_stats.calls) + 1
+	if not entry.has("col") or not is_residential_type(str(entry.get("type_id", ""))):
+		return false
+	var signature := _food_access_state_signature()
+	if signature != _food_access_cache_signature:
+		_food_access_cache_signature = signature
+		_food_access_cache.clear()
+	var identifier := str(entry.get("instance_id", ""))
+	if _food_access_cache.has(identifier):
+		_food_access_stats.hits = int(_food_access_stats.hits) + 1
+		return bool(_food_access_cache[identifier])
+	_food_access_stats.misses = int(_food_access_stats.misses) + 1
+	var point := territory.building_center(entry)
+	for neighbor: Dictionary in all_buildings():
+		_food_access_stats.buildings_checked = int(_food_access_stats.buildings_checked) + 1
+		if neighbor.type_id in ["cafe", "supermarket"] and food_stock_for(neighbor) > 0.0 and neighbor.position.distance_to(point) <= AMENITY_RADIUS and territory.road_distance_between_buildings(entry, neighbor) >= 0:
+			_food_access_cache[identifier] = true
+			return true
+	var accessible := food_delivery_covers(entry)
+	_food_access_cache[identifier] = accessible
+	return accessible
+
+func connected_to_residential_network(entry: Dictionary) -> bool:
+	if not entry.has("col"):
+		return false
+	var hall: Dictionary = {}
+	for candidate: Dictionary in territory.buildings:
+		if str(candidate.get("type_id", "")) == TerritoryGrid.CITY_HALL_TYPE:
+			hall = candidate
+			break
+	return not hall.is_empty() and territory.road_distance_between_buildings(entry, hall) >= 0
+
+func advance_food_stocks(minutes: int = 1) -> bool:
+	var changed := false
+	initialize_food_stocks()
+	if not territory.buildings.any(func(entry: Dictionary) -> bool: return entry.type_id in ["cafe", "supermarket"]):
+		return true
+	# Every shop/home in this tick sees the same road and delivery network.
+	# Calculate its coverage once instead of rebuilding it for every demand test.
+	var supplied_ids: Dictionary = {}
+	var center := logistics_center_entry()
+	if not center.is_empty():
+		for supplied: Dictionary in logistics_covered_buildings(str(center.instance_id)):
+			supplied_ids[str(supplied.get("instance_id", ""))] = true
+	for shop: Dictionary in territory.buildings:
+		if shop.type_id not in ["cafe", "supermarket"]:
+			continue
+		var demand := 0.0
+		for home: Dictionary in all_buildings():
+			if not is_residential_type(str(home.get("type_id", ""))) or is_ruined(str(home.get("instance_id", ""))) or supplied_ids.has(str(home.get("instance_id", ""))):
+				continue
+			if territory.road_distance_between_buildings(home, shop) < 0 or territory.building_center(home).distance_to(territory.building_center(shop)) > AMENITY_RADIUS:
+				continue
+			# Demand is proportional to occupied residents; one simulation minute
+			# is intentionally a small drain so empty shops do not fail instantly.
+			demand += float(record_residents(home)) * 0.02 * float(minutes)
+		var old_stock := food_stock_for(shop)
+		var new_stock := maxf(0.0, old_stock - demand)
+		# A connected logistics delivery route replenishes a local shop gradually.
+		if supplied_ids.has(str(shop.get("instance_id", ""))):
+			new_stock = minf(food_stock_capacity(str(shop.type_id), int(shop.get("level", 1))), new_stock + food_stock_capacity(str(shop.type_id), int(shop.get("level", 1))) * 0.05 * float(minutes))
+		if not is_equal_approx(old_stock, new_stock):
+			shop.food_stock = new_stock
+			changed = true
+	return changed
 
 func record_residents(entry: Dictionary) -> int:
 	if entry.type_id not in ["house", "elite_residence", "business_tower"]:
@@ -478,6 +644,11 @@ func record_residents(entry: Dictionary) -> int:
 	if bool(entry.get("shanty", false)):
 		return 3
 	var occupied := capacity if record_water(entry) else capacity / 2
+	var supply_problem := active_problem_for(str(entry.get("instance_id", "")), "supply")
+	if not supply_problem.is_empty() and str(supply_problem.get("state", "new")) == "overdue":
+		var shortage_progress := clampf(float(supply_problem.get("progress", 0.0)), 0.0, 1.0)
+		if shortage_progress > 0.0:
+			occupied = maxi(0, occupied - mini(occupied, maxi(1, ceili(float(occupied) * 0.2 * shortage_progress))))
 	return int(occupied * (1.0 - float(damage) / 140.0))
 
 func population() -> int:
@@ -628,6 +799,11 @@ func record_quality(entry: Dictionary) -> Dictionary:
 			environment += Catalog.level_data(neighbor.type_id, neighbor.level).environment
 	var damage := house_damage(entry.instance_id) if is_residential_type(entry.type_id) else 0
 	var score := (30 if water else 0) + (20 if services else 10) + (20 if transport else 0) + mini(environment, 30) - int(damage * 0.35)
+	var neglect := housing_neglect_percent(str(entry.get("instance_id", ""))) if entry.type_id == "house" else 0
+	score -= int(float(neglect) * 0.2)
+	var supply_problem := active_problem_for(str(entry.get("instance_id", "")), "supply")
+	if not supply_problem.is_empty() and str(supply_problem.get("state", "new")) == "overdue":
+		score -= ceili(12.0 * clampf(float(supply_problem.get("progress", 0.0)), 0.0, 1.0))
 	if bool(entry.get("shanty", false)):
 		score -= 28
 	for neighbor: Dictionary in territory.buildings:
@@ -635,7 +811,7 @@ func record_quality(entry: Dictionary) -> Dictionary:
 			score -= 10
 	if not water:
 		score = mini(score, 19)
-	return {"score": clampi(score, 0, 100), "water": water, "services": services, "transport": transport, "environment": mini(environment, 30)}
+	return {"score": clampi(score, 0, 100), "water": water, "services": services, "transport": transport, "environment": mini(environment, 30), "maintenance": neglect}
 
 func district_quality() -> float:
 	var total := 0
@@ -1072,6 +1248,9 @@ func build_grid_building(col: int, row: int, type_id: String, reserved: bool = f
 		return false
 	if not reserved:
 		budget -= price
+	if type_id in ["cafe", "supermarket"]:
+		var shop_entry := territory.building_at(col, row)
+		shop_entry.food_stock = food_stock_capacity(type_id, 1)
 	save_game()
 	return true
 
@@ -1102,6 +1281,7 @@ func demolish_grid_building(identifier: String) -> bool:
 			if territory.cells[entry.row + dy][entry.col + dx] == "occupied":
 				territory.cells[entry.row + dy][entry.col + dx] = "free"
 	territory.buildings.erase(entry)
+	territory.invalidate_routing_cache()
 	housing_neglect.erase(identifier)
 	save_game()
 	return true
@@ -1129,6 +1309,7 @@ func demolish_road(col: int, row: int) -> bool:
 	if not can_demolish_road(col, row):
 		return false
 	territory.cells[row][col] = "free"
+	territory.invalidate_routing_cache()
 	save_game()
 	return true
 
@@ -1167,6 +1348,7 @@ func demolish_grid_house(identifier: String) -> bool:
 			if territory.cells[entry.row + dy][entry.col + dx] == "occupied":
 				territory.cells[entry.row + dy][entry.col + dx] = "free"
 	territory.buildings.erase(entry)
+	territory.invalidate_routing_cache()
 	housing_neglect.erase(identifier)
 	save_game()
 	return true
@@ -1189,14 +1371,40 @@ func depot_world() -> Vector3:
 	return DistrictWorld.world_position(Vector3(3, 0, -6))
 
 func service_route(identifier: String) -> Array:
+	return service_assignment(identifier).get("route", [])
+
+func service_assignment(identifier: String) -> Dictionary:
+	var signature := _logistics_network_signature()
+	if signature != _service_assignment_cache_signature:
+		_service_assignment_cache_signature = signature
+		_service_assignment_cache.clear()
+	if _service_assignment_cache.has(identifier):
+		return _service_assignment_cache[identifier].duplicate(true)
 	var entry := territory.building_by_id(identifier)
 	if entry.is_empty():
-		return []
-	var start := territory.nearest_road(depot_world())
-	var path := territory.access_path(entry, start)
-	if path.is_empty() or territory.road_path(path[-1], start).is_empty():
-		return []
-	return logical_route(path)
+		_service_assignment_cache[identifier] = {}
+		return {}
+	var best: Dictionary = {}
+	var best_distance := 2147483647
+	for depot: Dictionary in territory.buildings:
+		if depot.type_id != "depot":
+			continue
+		var start := territory.nearest_road(territory.building_center(depot))
+		var finish := territory.nearest_road(territory.building_center(entry))
+		var path := territory.road_path(start, finish)
+		if path.is_empty() or path.size() >= best_distance:
+			continue
+		best_distance = path.size()
+		var planned := logical_route(path)
+		var depot_point := DistrictWorld.logical_position(territory.building_center(depot))
+		var target_point := DistrictWorld.logical_position(territory.building_center(entry))
+		if planned.is_empty() or not planned[0].is_equal_approx(depot_point):
+			planned.push_front(depot_point)
+		if not planned[-1].is_equal_approx(target_point):
+			planned.append(target_point)
+		best = {"depot_instance_id": str(depot.instance_id), "route": planned}
+	_service_assignment_cache[identifier] = best.duplicate(true)
+	return best
 
 func logical_route(path: Array[Vector2i]) -> Array:
 	# Сохраняем повороты и крайние точки; путь остаётся на дорожных клетках.
@@ -1276,9 +1484,12 @@ func has_service_building(type_id: String) -> bool:
 	return false
 
 func job_depot_world() -> Vector3:
-	if job == "fire":
+	if depot_instance_id != "pine_district_legacy_2":
 		var source := territory.building_by_id(depot_instance_id)
-		return territory.building_center(source) if not source.is_empty() else DistrictWorld.world_position(Vector3(9, 0, -7.5))
+		if not source.is_empty():
+			return territory.building_center(source)
+	if job == "fire":
+		return DistrictWorld.world_position(Vector3(9, 0, -7.5))
 	return depot_world()
 
 func building_world_for_id(identifier: String) -> Vector3:
@@ -1321,9 +1532,10 @@ func is_ruined(identifier: String) -> bool:
 func fire_assignments() -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	if job == "fire":
+		var primary_slot := maxi(0, int(job_vehicle_id.get_slice("_engine_", 1)) - 1) if "_engine_" in job_vehicle_id else 0
 		result.append({"instance_id": target_instance_id, "vehicle_id": job_vehicle_id if job_vehicle_id != "" else depot_instance_id + "_engine_1", "depot_instance_id": depot_instance_id,
 			"phase": job_phase, "route": route, "route_index": route_index, "vehicle": vehicle, "repair_left": repair_left,
-			"primary": true, "jam_cleared": bool(jam_cleared.get(target_instance_id, false))})
+			"primary": true, "spawn_slot": primary_slot, "jam_cleared": bool(jam_cleared.get(target_instance_id, false))})
 	for identifier in fire_jobs:
 		var assignment: Dictionary = fire_jobs[identifier].duplicate(false)
 		assignment.instance_id = str(identifier)
@@ -1355,7 +1567,7 @@ func start_fire(identifier: String = FIRST_FIRE_TARGET) -> bool:
 	if fires.size() >= 2 or fires.has(identifier) or is_ruined(identifier) or not is_residential_id(identifier):
 		return false
 	fire_triggered = true
-	fires[identifier] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1, "spread_checked": false}
+	fires[identifier] = {"phase": "warning", "warning_left": 18.0, "elapsed": 0.0, "danger": 1, "spread_checked": false, "cause": "electrical_fault"}
 	save_game()
 	return true
 
@@ -1454,6 +1666,17 @@ func fire_route_from_station(station_position: Vector3, target_position: Vector3
 		return []
 	return logical_route(path)
 
+func fire_engine_departure_point(planned: Array, slot: int) -> Vector3:
+	if planned.is_empty():
+		return Vector3.ZERO
+	if slot <= 0 or planned.size() < 2:
+		return planned[0]
+	# The mini pad queues behind the main apron on the same legal road approach.
+	# It does not share the first engine's centre point and therefore cannot spawn
+	# with the two bodies intersecting.
+	var direction: Vector3 = (planned[1] - planned[0]).normalized()
+	return planned[0] - direction * 0.9
+
 func dispatch_fire(identifier: String = "") -> bool:
 	if identifier == "":
 		for key in fires:
@@ -1468,6 +1691,7 @@ func dispatch_fire(identifier: String = "") -> bool:
 		used[assignment.vehicle_id] = true
 	var selected_station: Dictionary = {}
 	var engine_id := ""
+	var selected_slot := 0
 	for station in territory.buildings:
 		if station.type_id != "fire_station":
 			continue
@@ -1477,6 +1701,7 @@ func dispatch_fire(identifier: String = "") -> bool:
 				selected_station = station.duplicate(true)
 				selected_station.position = territory.building_center(station)
 				engine_id = candidate_id
+				selected_slot = slot
 				break
 		if engine_id != "":
 			break
@@ -1487,8 +1712,9 @@ func dispatch_fire(identifier: String = "") -> bool:
 	if planned.is_empty():
 		return false
 	var on_site_time := fire_service_duration(identifier)
+	var departure := fire_engine_departure_point(planned, selected_slot)
 	var assignment := {"vehicle_id": engine_id, "depot_instance_id": selected_station.instance_id, "phase": "travel",
-		"route": planned, "route_index": 0, "vehicle": planned[0], "repair_left": on_site_time}
+		"route": planned, "route_index": 0, "vehicle": departure, "repair_left": on_site_time, "spawn_slot": selected_slot}
 	jam_cleared[identifier] = false
 	if job == "":
 		job = "fire"
@@ -1497,7 +1723,7 @@ func dispatch_fire(identifier: String = "") -> bool:
 		job_vehicle_id = engine_id
 		job_phase = "travel"
 		route = planned
-		vehicle = route[0]
+		vehicle = departure
 		route_index = 0
 		repair_left = on_site_time
 	else:
@@ -1526,13 +1752,22 @@ func dispatch_to_building(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
 	if job != "" or entry.is_empty() or entry.type_id != "house" or entry.has("legacy_plot"):
 		return false
-	var planned := service_route(identifier)
-	if planned.is_empty():
+	var matching_problem := ""
+	for problem_id in incidents:
+		var problem: Dictionary = incidents[problem_id]
+		if str(problem.get("target_id", "")) == identifier and str(problem.get("type", "")) in ["leak", "neglect"] and str(problem.get("state", "new")) != "resolved":
+			matching_problem = str(problem_id)
+			break
+	var service := service_assignment(identifier)
+	var planned: Array = service.get("route", [])
+	if planned.size() < 2:
 		return false
 	job = "inspection"
+	job_problem_id = matching_problem
+	depot_instance_id = str(service.get("depot_instance_id", "pine_district_legacy_2"))
 	job_phase = "travel"
 	target_instance_id = identifier
-	vehicle = Vector3(3, 0, -6)
+	vehicle = planned[0]
 	route = planned
 	route_index = 0
 	repair_left = 4.0
@@ -1607,7 +1842,8 @@ func begin_secondary_fire_return(identifier: String) -> void:
 	fire_jobs[identifier] = assignment
 
 func dispatch_police(incident_id: String) -> bool:
-	if not jam_cleared.has(incident_id) or bool(jam_cleared[incident_id]) or not police_job.is_empty():
+	var is_riot := incidents.has(incident_id) and str(incidents[incident_id].get("type", "")) == "strike" and str(incidents[incident_id].get("state", "new")) != "resolved"
+	if (not is_riot and (not jam_cleared.has(incident_id) or bool(jam_cleared[incident_id]))) or not police_job.is_empty():
 		return false
 	var station: Dictionary = {}
 	for entry: Dictionary in territory.buildings:
@@ -1623,11 +1859,11 @@ func dispatch_police(incident_id: String) -> bool:
 				break
 	if station.is_empty():
 		return false
-	var target := building_world_for_id(incident_id)
+	var target := building_world_for_id(str(incidents[incident_id].get("target_id", ""))) if is_riot else building_world_for_id(incident_id)
 	var planned := fire_route_from_station(station.position, target)
 	if planned.is_empty():
 		return false
-	police_job = {"incident_id": incident_id, "depot_instance_id": station.instance_id, "phase": "travel",
+	police_job = {"incident_id": incident_id, "problem_id": incident_id if is_riot else "", "depot_instance_id": station.instance_id, "phase": "travel",
 		"route": planned, "route_index": 0, "vehicle": planned[0], "clear_left": 3.0}
 	save_game()
 	return true
@@ -1641,14 +1877,26 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 			housing_neglect_clock = fmod(housing_neglect_clock, 60.0)
 			if advance_housing_neglect(neglect_cycles):
 				changed = true
+			if advance_food_stocks(neglect_cycles):
+				changed = true
+			var quality := district_quality()
+			if quality >= 0.0 and quality < 40.0:
+				public_discontent_clock += 60.0 * float(neglect_cycles)
+			elif quality >= 50.0:
+				public_discontent_clock = maxf(0.0, public_discontent_clock - 120.0 * float(neglect_cycles))
 	if empty_city_mode and not campaign_complete_pending:
 		campaign_elapsed_seconds += maxf(0.0, delta)
 	if movement_allowed:
-		incident_clock += delta
-		if incident_clock >= 90.0:
+		if active_problem_count() == 0 and fires.is_empty():
+			incident_clock += delta
+			if incident_clock >= city_problem_interval():
+				incident_clock = 0.0
+				if generate_incident():
+					changed = true
+		else:
 			incident_clock = 0.0
-			if generate_incident():
-				changed = true
+		if tick_city_problems(delta):
+			changed = true
 	if not construction_job.is_empty():
 		var previous_progress := floori(construction_progress() * 20.0)
 		construction_job.remaining = maxf(0.0, float(construction_job.remaining) - delta)
@@ -1697,7 +1945,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 				if fires.size() < 2:
 					var neighbor := fire_spread_target(identifier)
 					if neighbor != "":
-						fires[neighbor] = {"phase": "warning", "warning_left": 16.0, "elapsed": 0.0, "danger": 1, "spread_checked": false}
+						fires[neighbor] = {"phase": "warning", "warning_left": 16.0, "elapsed": 0.0, "danger": 1, "spread_checked": false, "cause": "spread_from_neighbor"}
 			if house_damage(identifier) >= 100:
 				fire_ruins[identifier] = true
 				fires.erase(identifier)
@@ -1762,6 +2010,7 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		elif job_phase == "return":
 			job = ""
 			target_instance_id = ""
+			job_problem_id = ""
 			depot_instance_id = "pine_district_legacy_2"
 			job_vehicle_id = ""
 			job_phase = "travel"
@@ -1778,6 +2027,12 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 					var entry := territory.building_by_id(target_instance_id)
 					if not entry.is_empty():
 						entry.inspected = true
+					if job_problem_id != "" and incidents.has(job_problem_id):
+						if str(incidents[job_problem_id].get("type", "")) == "neglect":
+							housing_neglect[target_instance_id] = maxf(0.0, float(housing_neglect.get(target_instance_id, 0.0)) - 35.0)
+						incidents[job_problem_id].state = "resolved"
+						incidents[job_problem_id].resolved_reason = "maintenance_service"
+						job_problem_id = ""
 				elif job == "fire":
 					fires.erase(target_instance_id)
 				job_phase = "return"
@@ -1843,7 +2098,12 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 			elif police_job.phase == "clearing":
 				police_job.clear_left = float(police_job.clear_left) - delta
 				if police_job.clear_left <= 0:
-					jam_cleared[police_job.incident_id] = true
+					var cleared_problem_id := str(police_job.get("problem_id", ""))
+					if cleared_problem_id != "" and incidents.has(cleared_problem_id):
+						incidents[cleared_problem_id].state = "resolved"
+						incidents[cleared_problem_id].resolved_reason = "police_response"
+					else:
+						jam_cleared[police_job.incident_id] = true
 					police_job.route.reverse()
 					var return_station := territory.building_by_id(str(police_job.depot_instance_id))
 					if not return_station.is_empty():
@@ -1873,8 +2133,17 @@ func advance_housing_neglect(minutes: int = 1) -> bool:
 		quality_entry.position = territory.building_center(entry)
 		var quality: int = record_quality(quality_entry).score
 		var current := float(housing_neglect.get(identifier, 0.0))
+		var maintenance_problem := active_problem_for(identifier, "neglect")
 		if quality < 55:
-			current = minf(100.0, current + 4.0 * float(minutes))
+			if not maintenance_problem.is_empty():
+				# The incident timer owns post-warning deterioration. Keep the meter
+				# stable while the player still has time to react.
+				pass
+			elif current < 20.0:
+				current = minf(20.0, current + 4.0 * float(minutes))
+			elif current > 20.0:
+				# Never collapse a home before a reachable crew can be called.
+				current = 20.0
 		elif quality >= 70:
 			current = maxf(0.0, current - 3.0 * float(minutes))
 		else:
@@ -1896,6 +2165,7 @@ func advance_housing_neglect(minutes: int = 1) -> bool:
 			entry.width = 1
 			entry.height = 1
 			entry.shanty = true
+			territory.invalidate_routing_cache()
 			housing_neglect.erase(identifier)
 			changed = true
 	for identifier in housing_neglect.keys():
@@ -1911,44 +2181,199 @@ func housing_neglect_percent(identifier: String) -> int:
 
 func incident_is_valid(incident: Dictionary) -> bool:
 	var kind := str(incident.get("type", ""))
-	if kind not in ["leak", "signal", "fire", "disease"]:
+	if kind not in PROBLEM_TYPES:
 		return false
-	if kind == "leak":
-		return legacy_problem_available("leak")
-	if kind == "signal":
-		return legacy_problem_available("signal")
 	var target_id := str(incident.get("target_id", ""))
+	if str(incident.get("id", "")) == "" or incident.get("state", "new") not in ["new", "accepted", "overdue", "resolved"]:
+		return false
+	var reaction_value: Variant = incident.get("reaction_left", incident.get("warning_left", 75.0))
+	var progress_value: Variant = incident.get("progress", 0.0)
+	if not (reaction_value is int or reaction_value is float) or not is_finite(float(reaction_value)) or float(reaction_value) < 0.0 or float(reaction_value) > 75.0:
+		return false
+	if not (progress_value is int or progress_value is float) or not is_finite(float(progress_value)) or float(progress_value) < 0.0 or float(progress_value) > 1.0:
+		return false
 	for entry: Dictionary in all_buildings():
-		if entry.instance_id == target_id and is_residential_type(str(entry.type_id)) and not is_ruined(target_id):
+		if entry.instance_id == target_id and str(entry.type_id) == "house" and not entry.has("legacy_plot") and not is_ruined(target_id):
 			return true
 	return false
 
-func generate_incident() -> bool:
-	if incidents.size() >= 2:
-		return false
-	var candidates: Array[String] = []
-	if legacy_problem_available("leak"):
-		candidates.append("leak")
-	if legacy_problem_available("signal"):
-		candidates.append("signal")
-	var has_residences := not all_buildings().filter(func(entry: Dictionary): return is_residential_type(str(entry.type_id))).is_empty()
-	if has_service_building("fire_station") and has_residences:
-		candidates.append("fire")
-	if has_service_building("hospital") and has_residences:
-		candidates.append("disease")
-	if candidates.is_empty():
-		return false
-	var kind := candidates[incident_rng.randi_range(0, candidates.size() - 1)]
-	var homes := all_buildings().filter(func(entry: Dictionary): return is_residential_type(str(entry.type_id)))
+func active_problem_count() -> int:
+	var count := 0
+	for incident: Dictionary in incidents.values():
+		if str(incident.get("type", "")) in PROBLEM_TYPES and str(incident.get("state", "new")) != "resolved":
+			count += 1
+	return count
+
+func active_problem_for(identifier: String, kind: String = "") -> Dictionary:
+	for incident: Dictionary in incidents.values():
+		if str(incident.get("target_id", "")) != identifier or str(incident.get("state", "new")) == "resolved":
+			continue
+		if kind != "" and str(incident.get("type", "")) != kind:
+			continue
+		return incident
+	return {}
+
+func food_shortage_target() -> Dictionary:
+	for entry: Dictionary in all_buildings():
+		if not is_residential_type(str(entry.type_id)) or entry.has("legacy_plot") or is_ruined(str(entry.instance_id)):
+			continue
+		if not food_access_for(entry):
+			return entry
+	return {}
+
+func problem_candidates() -> Array[Dictionary]:
+	var candidates: Array[Dictionary] = []
+	if not empty_city_mode or campaign_stage < 2:
+		return candidates
+	var homes: Array[Dictionary] = []
+	for entry: Dictionary in all_buildings():
+		if is_residential_type(str(entry.type_id)) and not is_ruined(str(entry.instance_id)):
+			homes.append(entry)
 	if homes.is_empty():
+		return candidates
+	for entry: Dictionary in homes:
+		# A leak is a consequence of a neglected line on the connected residential
+		# network. A maintenance depot improves response, but cannot prevent the
+		# underlying failure from occurring.
+		if not entry.has("legacy_plot") and housing_neglect_percent(str(entry.instance_id)) >= 20 and connected_to_residential_network(entry):
+			candidates.append({"type": "leak", "target": entry})
+			break
+	var shortage := food_shortage_target()
+	if not shortage.is_empty():
+		candidates.append({"type": "supply", "target": shortage})
+	for entry: Dictionary in homes:
+		if entry.has("legacy_plot"):
+			continue
+		var score: float = record_quality(entry).score
+		if score < 55 and housing_neglect_percent(str(entry.instance_id)) >= 20:
+			candidates.append({"type": "neglect", "target": entry})
+			break
+	if public_discontent_clock >= DISORDER_MINIMUM_SECONDS and district_quality() >= 0 and district_quality() < 40:
+		for entry: Dictionary in homes:
+			if record_quality(entry).score < 40:
+				candidates.append({"type": "strike", "target": entry})
+				break
+	var has_residences := not homes.is_empty()
+	if has_residences and fires.size() < 2:
+		var fire_targets: Array = homes.filter(func(entry: Dictionary): return not entry.has("legacy_plot"))
+		if not fire_targets.is_empty():
+			candidates.append({"type": "fire", "target": fire_targets[incident_rng.randi_range(0, fire_targets.size() - 1)]})
+	return candidates
+
+func create_problem(kind: String, target_id: String, forced: bool = false) -> bool:
+	if kind not in PROBLEM_TYPES or active_problem_count() >= 1:
 		return false
-	var target: Dictionary = homes[incident_rng.randi_range(0, homes.size() - 1)]
-	var id := "incident_%d" % incident_rng.randi()
-	incidents[id] = {"id": id, "type": kind, "district_id": "pine_district", "target_id": str(target.instance_id),
-		"seed": incident_rng.randi(), "state": "new", "difficulty": clampi(city_level(), 1, 4),
-		"reward": 100 + city_level() * 50, "reaction_left": 45.0, "progress": 0.0}
+	var target: Dictionary = {}
+	for entry: Dictionary in all_buildings():
+		if str(entry.instance_id) == target_id:
+			target = entry
+			break
+	if target.is_empty() or target.has("legacy_plot") or target.type_id != "house" or is_ruined(target_id):
+		return false
+	if kind == "leak" and (housing_neglect_percent(target_id) < 20 or not connected_to_residential_network(target)) and not forced:
+		return false
+	if kind == "neglect" and (housing_neglect_percent(target_id) < 20 or record_quality(target).score >= 55) and not forced:
+		return false
+	if kind == "strike" and (public_discontent_clock < DISORDER_MINIMUM_SECONDS or district_quality() < 0.0 or district_quality() >= 40.0) and not forced:
+		return false
+	if kind == "supply" and food_access_for(target) and not forced:
+		return false
+	incident_notification_serial += 1
+	var id := "problem_%d_%d" % [incident_rng.randi(), incident_notification_serial]
+	incidents[id] = {"id": id, "type": kind, "district_id": TerritoryGrid.DISTRICT_ID, "target_id": target_id,
+		"seed": incident_rng.randi(), "state": "new", "difficulty": clampi(campaign_stage, 1, 10),
+		"reward": 100 + campaign_stage * 50, "reaction_left": 75.0, "warning_left": 75.0,
+		"progress": 0.0, "consequence_clock": 0.0, "cause": problem_cause(kind), "created_at": campaign_elapsed_seconds}
 	save_game()
 	return true
+
+func problem_cause(kind: String) -> String:
+	match kind:
+		"leak": return "overdue_maintenance_damaged_water_line"
+		"supply": return "no_reachable_food_shop_or_delivery"
+		"neglect": return "low_housing_quality_and_overdue_maintenance"
+		"strike": return "unresolved_low_quality_and_public_complaints"
+	return "unknown"
+
+func debug_force_problem(kind: String, target_id: String) -> bool:
+	# Test harness only: explicitly enabled against a namespaced isolated save.
+	if not OS.is_debug_build() or not problem_test_hooks_enabled or not save_path.begins_with("user://city_problems_") or save_path == SAVE_PATH or kind not in PROBLEM_TYPES + ["fire"]:
+		return false
+	if kind == "fire":
+		return start_fire(target_id)
+	return create_problem(kind, target_id, true)
+
+func enable_isolated_problem_test_hooks() -> bool:
+	problem_test_hooks_enabled = OS.is_debug_build() and save_path.begins_with("user://city_problems_") and save_path != SAVE_PATH
+	return problem_test_hooks_enabled
+
+func resolve_problem(identifier: String, reason: String) -> bool:
+	if not incidents.has(identifier) or str(incidents[identifier].get("state", "new")) == "resolved":
+		return false
+	incidents[identifier].state = "resolved"
+	incidents[identifier].resolved_reason = reason
+	incidents[identifier].progress = 1.0
+	save_game()
+	return true
+
+func accept_problem(identifier: String) -> bool:
+	if not incidents.has(identifier) or str(incidents[identifier].get("state", "new")) != "new":
+		return false
+	incidents[identifier].state = "accepted"
+	save_game()
+	return true
+
+func tick_city_problems(delta: float) -> bool:
+	var changed := false
+	for key in incidents.keys():
+		var event: Dictionary = incidents[key]
+		var kind := str(event.get("type", ""))
+		if kind not in PROBLEM_TYPES or str(event.get("state", "new")) == "resolved":
+			continue
+		var target_id := str(event.get("target_id", ""))
+		if territory.building_by_id(target_id).is_empty():
+			resolve_problem(str(key), "target_removed")
+			changed = true
+			continue
+		if kind == "supply":
+			var target := territory.building_by_id(target_id)
+			if not target.is_empty() and food_access_for(target):
+				resolve_problem(str(key), "food_access_restored")
+				changed = true
+				continue
+		var remaining := maxf(0.0, float(event.get("reaction_left", event.get("warning_left", 75.0))) - delta)
+		event.reaction_left = remaining
+		if remaining <= 0.0:
+			if str(event.get("state", "new")) != "overdue":
+				event.state = "overdue"
+				changed = true
+			event.consequence_clock = float(event.get("consequence_clock", 0.0)) + delta
+			while float(event.consequence_clock) >= 60.0:
+				event.consequence_clock = float(event.consequence_clock) - 60.0
+				event.progress = minf(1.0, float(event.get("progress", 0.0)) + 0.1)
+				if kind == "leak":
+					fire_damage[target_id] = mini(99, int(fire_damage.get(target_id, 0)) + 1)
+				elif kind in ["supply", "neglect"]:
+						housing_neglect[target_id] = minf(100.0, float(housing_neglect.get(target_id, 0.0)) + (2.0 if kind == "supply" else 4.0))
+				changed = true
+		incidents[key] = event
+	return changed
+
+func generate_incident() -> bool:
+	if not empty_city_mode or campaign_stage < 2 or active_problem_count() >= 1 or not fires.is_empty():
+		return false
+	var candidates := problem_candidates()
+	if candidates.is_empty():
+		return false
+	var selected_problem: Dictionary = candidates[incident_rng.randi_range(0, candidates.size() - 1)]
+	if str(selected_problem.type) == "fire":
+		return start_fire(str(selected_problem.target.instance_id))
+	return create_problem(str(selected_problem.type), str(selected_problem.target.instance_id))
+
+func city_problem_interval() -> float:
+	# Early districts get longer quiet periods; later stages tighten the rhythm,
+	# while the single-incident cap and 75-second warning still prevent a pileup.
+	return maxf(90.0, 180.0 - float(clampi(campaign_stage, 1, 10)) * 9.0)
 
 func check_complete() -> void:
 	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
@@ -1966,7 +2391,7 @@ func save_game() -> void:
 	var active_fires: Array = []
 	for identifier in fires:
 		var fire: Dictionary = fires[identifier]
-		active_fires.append({"id": str(identifier), "phase": fire.phase, "warning_left": fire.warning_left, "elapsed": fire.elapsed, "danger": fire.danger, "spread_checked": bool(fire.get("spread_checked", false))})
+		active_fires.append({"id": str(identifier), "phase": fire.phase, "warning_left": fire.warning_left, "elapsed": fire.elapsed, "danger": fire.danger, "spread_checked": bool(fire.get("spread_checked", false)), "cause": str(fire.get("cause", "electrical_fault"))})
 	var encoded_fire_jobs: Dictionary = {}
 	for identifier in fire_jobs:
 		var assignment: Dictionary = fire_jobs[identifier].duplicate(true)
@@ -1985,16 +2410,16 @@ func save_game() -> void:
 		encoded_police_job.route = police_points
 		var police_position: Vector3 = encoded_police_job.vehicle
 		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
-	var data := {"version": 9, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
+	var data := {"version": 11, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
 		"campaign_stage": campaign_stage, "campaign_elapsed_seconds": campaign_elapsed_seconds, "campaign_complete_pending": campaign_complete_pending,
 		"campaign_completed_stage": campaign_completed_stage, "campaign_star_rating": campaign_star_rating, "campaign_reward_granted_stage": campaign_reward_granted_stage, "campaign_finished": campaign_finished, "renewal_credits": renewal_credits,
 		"subsidy_debt": subsidy_debt, "subsidy_threshold": subsidy_threshold, "subsidy_installment": subsidy_installment, "subsidy_income_accumulated": subsidy_income_accumulated,
 		"city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
 		"route_index": route_index, "vehicle": [vehicle.x, vehicle.y, vehicle.z],
-		"repair_left": repair_left, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
+		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
-		"incident_seed": incident_seed, "incident_clock": incident_clock, "incidents": incidents,
+		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -2010,13 +2435,16 @@ func load_game() -> bool:
 	if file == null:
 		return false
 	var data = JSON.parse_string(file.get_as_text())
-	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
+	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
 		return false
 	for key in ["campaign_stage", "campaign_completed_stage", "campaign_star_rating", "renewal_credits", "campaign_reward_granted_stage"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
 			return false
 	if data.has("campaign_elapsed_seconds") and (not (data.campaign_elapsed_seconds is int or data.campaign_elapsed_seconds is float) or not is_finite(float(data.campaign_elapsed_seconds)) or float(data.campaign_elapsed_seconds) < 0 or float(data.campaign_elapsed_seconds) > 1000000000):
 		return false
+	for key in ["public_discontent_clock"]:
+		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or float(data[key]) < 0.0 or float(data[key]) > 1000000000.0):
+			return false
 	if data.has("campaign_complete_pending") and typeof(data.campaign_complete_pending) != TYPE_BOOL:
 		return false
 	if data.has("campaign_finished") and typeof(data.campaign_finished) != TYPE_BOOL:
@@ -2071,6 +2499,8 @@ func load_game() -> bool:
 	var expected_target := "traffic_signal" if stored_job == "signal" else ("water_leak" if stored_job == "leak" else ("house" if stored_job in ["inspection", "fire"] else ""))
 	var expected_vehicle := "fire_engine" if stored_job == "fire" else "repair_van"
 	if data.get("vehicle_type_id", "repair_van") != expected_vehicle or data.get("target_type_id", expected_target) != expected_target:
+		return false
+	if data.has("job_problem_id") and (not data.job_problem_id is String or data.job_problem_id.length() > 96):
 		return false
 	var stored_route = data.get("route", [])
 	if not stored_route is Array or stored_route.size() > TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT + 2:
@@ -2131,6 +2561,10 @@ func load_game() -> bool:
 		# Accept the old fixed station identifier only for legacy in-flight jobs.
 		if not ((not stored_station.is_empty() and stored_station.type_id == "fire_station") or (stored_depot_id == FIRE_STATION_ID and stored_station.is_empty())):
 			return false
+	elif stored_job == "inspection":
+		var stored_depot := loaded_territory.building_by_id(stored_depot_id)
+		if stored_depot_id != "pine_district_legacy_2" and (stored_depot.is_empty() or stored_depot.type_id != "depot"):
+			return false
 	elif stored_depot_id != "pine_district_legacy_2":
 		return false
 	var loaded_fires: Dictionary = {}
@@ -2147,7 +2581,10 @@ func load_game() -> bool:
 				return false
 		if row.has("spread_checked") and typeof(row.spread_checked) != TYPE_BOOL:
 			return false
-		loaded_fires[row.id] = {"phase": row.phase, "warning_left": clampf(float(row.warning_left), 0, 18), "elapsed": clampf(float(row.elapsed), 0, 100000), "danger": clampi(int(row.danger), 1, 3), "spread_checked": bool(row.get("spread_checked", false))}
+		var fire_cause := str(row.get("cause", "electrical_fault"))
+		if fire_cause not in ["electrical_fault", "spread_from_neighbor"]:
+			return false
+		loaded_fires[row.id] = {"phase": row.phase, "warning_left": clampf(float(row.warning_left), 0, 18), "elapsed": clampf(float(row.elapsed), 0, 100000), "danger": clampi(int(row.danger), 1, 3), "spread_checked": bool(row.get("spread_checked", false)), "cause": fire_cause}
 	var loaded_damage: Dictionary = {}
 	var raw_damage: Variant = data.get("fire_damage", {})
 	if not raw_damage is Dictionary or raw_damage.size() > 24 + TerritoryGrid.WIDTH * TerritoryGrid.HEIGHT:
@@ -2238,10 +2675,19 @@ func load_game() -> bool:
 	if not raw_police_job.is_empty():
 		var police_station := loaded_territory.building_by_id(str(raw_police_job.get("depot_instance_id", "")))
 		var incident_id := str(raw_police_job.get("incident_id", ""))
+		var problem_id := str(raw_police_job.get("problem_id", ""))
 		var phase_value: Variant = raw_police_job.get("phase", "")
 		var police_route: Variant = raw_police_job.get("route", [])
 		var police_position: Variant = raw_police_job.get("vehicle", [])
-		if police_station.is_empty() or police_station.type_id != "police_station" or not loaded_jam_cleared.has(incident_id) or (loaded_jam_cleared[incident_id] and phase_value != "return") or phase_value not in ["travel", "clearing", "return"] or not police_route is Array or police_route.is_empty() or not valid_point(police_position):
+		var saved_problem_data: Variant = data.get("incidents", {})
+		var riot_data: Variant = saved_problem_data.get(problem_id, {}) if problem_id != "" and saved_problem_data is Dictionary else {}
+		var saved_riot := riot_data is Dictionary and str(riot_data.get("type", "")) == "strike" and str(riot_data.get("id", "")) == problem_id and str(riot_data.get("target_id", "")) != ""
+		var valid_police_assignment: bool = false
+		if saved_riot and incident_id == problem_id:
+			valid_police_assignment = true
+		elif loaded_jam_cleared.has(incident_id) and (not loaded_jam_cleared[incident_id] or phase_value == "return"):
+			valid_police_assignment = true
+		if police_station.is_empty() or police_station.type_id != "police_station" or not valid_police_assignment or phase_value not in ["travel", "clearing", "return"] or not police_route is Array or police_route.is_empty() or not valid_point(police_position):
 			return false
 		var normalized_police: Dictionary = raw_police_job.duplicate(true)
 		var restored_police_route: Array = []
@@ -2354,6 +2800,7 @@ func load_game() -> bool:
 	fire_ruins = loaded_ruins
 	housing_neglect = loaded_housing_neglect
 	housing_neglect_clock = clampf(float(data.get("housing_neglect_clock", 0.0)), 0.0, 60.0)
+	public_discontent_clock = clampf(float(data.get("public_discontent_clock", 0.0)), 0.0, 1000000000.0)
 	fire_jobs = loaded_fire_jobs
 	jam_cleared = loaded_jam_cleared
 	police_job = loaded_police_job
@@ -2365,9 +2812,19 @@ func load_game() -> bool:
 	if raw_incidents is Dictionary:
 		for incident_id in raw_incidents:
 			var candidate: Variant = raw_incidents[incident_id]
-			if candidate is Dictionary and incident_is_valid(candidate):
+			if candidate is Dictionary and str(candidate.get("id", "")) == str(incident_id) and incident_is_valid(candidate):
 				incidents[str(incident_id)] = candidate.duplicate(true)
 	incident_rng.seed = incident_seed
+	var stored_rng_state: Variant = data.get("incident_rng_state", "")
+	if stored_rng_state is String and stored_rng_state.is_valid_int() and int(stored_rng_state) > 0:
+		incident_rng.state = int(stored_rng_state)
+	elif (stored_rng_state is int or stored_rng_state is float) and is_finite(float(stored_rng_state)) and int(stored_rng_state) > 0:
+		# Accept v9 debug saves; new saves encode this 64-bit value as text to avoid JSON float rounding.
+		incident_rng.state = int(stored_rng_state)
+	initialize_food_stocks()
+	job_problem_id = str(data.get("job_problem_id", ""))
+	if job_problem_id != "" and (not incidents.has(job_problem_id) or str(incidents[job_problem_id].get("target_id", "")) != stored_target):
+		return false
 	district_house_limit = clampi(int(data.get("district_house_limit", 8)), 1, 100)
 	if data.get("district_tasks", []) is Array and not data.get("district_tasks", []).is_empty():
 		district_tasks = data.get("district_tasks")

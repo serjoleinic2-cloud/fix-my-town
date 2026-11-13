@@ -52,10 +52,16 @@ func run() -> void:
 	var starting_positions: Array[Vector3] = []
 	for vehicle: Dictionary in traffic.vehicles:
 		starting_positions.append(vehicle.node.position)
+	var last_positions: Array[Vector3] = starting_positions.duplicate()
 	var on_roads := true
 	var no_overlaps := true
 	var stayed_out_of_center_dash := true
-	for frame in range(800):
+	var max_local_cluster := 0
+	var longest_stall_seconds := 0.0
+	var stalled_seconds: Array[float] = []
+	for _vehicle in traffic.vehicles:
+		stalled_seconds.append(0.0)
+	for frame in range(1200):
 		traffic.step(0.05)
 		for car in traffic.cars:
 			if not car.visible:
@@ -72,15 +78,32 @@ func run() -> void:
 			var one: Dictionary = traffic.vehicles[first]
 			if not one.node.visible:
 				continue
+			var nearby_count := 0
+			for other: Dictionary in traffic.vehicles:
+				if other.node.visible and one.node.position.distance_to(other.node.position) < 9.6:
+					nearby_count += 1
+			max_local_cluster = maxi(max_local_cluster, nearby_count)
+			var moved_since_sample: float = one.node.position.distance_to(last_positions[first])
+			if moved_since_sample < 0.02:
+				stalled_seconds[first] += 0.05
+			else:
+				stalled_seconds[first] = 0.0
+			longest_stall_seconds = maxf(longest_stall_seconds, stalled_seconds[first])
 			for second in range(first + 1, traffic.vehicles.size()):
 				var two: Dictionary = traffic.vehicles[second]
 				if not two.node.visible:
 					continue
 				var half := traffic.grid_half_extents(one) + traffic.grid_half_extents(two)
 				no_overlaps = no_overlaps and not (absf(one.node.position.x - two.node.position.x) < half.x - 0.01 and absf(one.node.position.z - two.node.position.z) < half.y - 0.01)
+		last_positions.clear()
+		for vehicle: Dictionary in traffic.vehicles:
+			last_positions.append(vehicle.node.position)
 	check(no_overlaps, "Grid vehicles keep physical clearance through turns and queues")
 	check(stayed_out_of_center_dash, "Vehicles do not overlap the longitudinal centre dash outside junction turns")
 	check(on_roads, "Every sampled civilian position remains on the actual constructed road network")
+	print("60-second traffic sample: max_cluster_9.6m=%d longest_stall=%.1fs" % [max_local_cluster, longest_stall_seconds])
+	check(max_local_cluster <= 5, "Cars do not form a large local convoy during a 60-second simulation")
+	check(longest_stall_seconds < 25.0, "No civilian car remains stuck through more than one signal cycle")
 	var moving_count := 0
 	var active_count := 0
 	for index in range(traffic.vehicles.size()):

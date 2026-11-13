@@ -266,19 +266,19 @@ func run() -> void:
 	traffic.set_active_count(0)
 	traffic.signal_fixed = true
 	var emergency_center := Vector3(-14.4, 0, 0)
-	var emergency_current := emergency_center + Vector3(-6, 0, 0)
+	var emergency_current := emergency_center + Vector3(-8, 0, 0)
 	var emergency_proposed := emergency_center + Vector3(2, 0, 0)
 	traffic.clock = 10.0 # Horizontal approach is red.
-	var normal_distance := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", false)
-	var emergency_distance := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", true)
-	check(normal_distance < 1.0 and emergency_distance > normal_distance, "Fire engine bypasses red signal during an emergency response")
+	var normal_distance := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", false, "", "fire_engine")
+	var emergency_distance := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", true, "", "fire_engine")
+	check(normal_distance < emergency_distance and absf(normal_distance - (8.0 - Traffic.stop_distance_for("fire_engine"))) < 0.001, "Fire engine obeys the red signal without a call and receives safe priority during an emergency response")
 	var crossing_car: Dictionary = traffic.vehicles[0]
 	crossing_car.node.show()
 	crossing_car.axis = "V"
 	crossing_car.direction = 1
 	crossing_car.road = -14.4
 	crossing_car.coordinate = 0.0
-	var blocked_emergency := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", true)
+	var blocked_emergency := traffic.service_travel_distance(emergency_current, emergency_proposed, 0.1, "fire_test", true, "", "fire_engine")
 	check(blocked_emergency < emergency_distance, "Emergency response still yields to a vehicle occupying the crossing")
 	traffic.set_active_count(0)
 	for axis in ["H", "V"]:
@@ -323,7 +323,7 @@ func run() -> void:
 	works_vehicle.coordinate = -6.0
 	check(traffic.travel_distance(works_vehicle, 0.5) <= 2.2, "Civilian traffic queues behind the construction dump truck")
 	traffic.blocking_positions = [{"id": "fire_engine_test", "incident_id": "fire_incident", "position": Vector3(0, 0.18, 0)}]
-	var following_service := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "repair_crew", true)
+	var following_service := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "repair_crew", true, "", "fire_engine")
 	check(following_service < 2.0, "A roadblock delays another service vehicle too")
 	var police_clearance := traffic.service_travel_distance(Vector3(-6, 0.18, 0), Vector3(0, 0.18, 0), 0.2, "police", false, "fire_incident")
 	check(police_clearance > following_service, "Police can reach the exact fire engine it was called to clear")

@@ -12,7 +12,7 @@ const BUILDING_SELECT_SOUNDS := {
 	"logistics_center": "engine", "warehouse": "build", "fire_station": "siren",
 	"police_station": "warning", "hospital": "radio_call", "lawn": "leaves",
 	"flower_bed": "leaves", "street_tree": "leaves", "bush": "leaves",
-	"cafe": "place", "park": "leaves", "bus_stop": "select", "traffic_signal": "click",
+	"cafe": "place", "supermarket": "place", "park": "leaves", "bus_stop": "select", "traffic_signal": "click",
 	"water_leak": "water", "construction_site": "build"
 }
 const BUILDING_AMBIENCE_SOUNDS := {

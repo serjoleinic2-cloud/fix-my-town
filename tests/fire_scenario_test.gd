@@ -40,6 +40,11 @@ func run() -> void:
 					check(not parked.visible, "%s parked vehicle hides while dispatched" % kind)
 					visual.set_parked_service_vehicle_visible(true)
 					check(parked.visible, "%s parked vehicle returns when available" % kind)
+				if kind == "fire_station":
+					var mini_pad := visual.visual_root.find_child("ParkedServiceVehicle2", true, false) as Node3D
+					check(mini_pad != null and not mini_pad.position.is_equal_approx(parked.position), "Fire station exposes separate main and mini parking starts")
+					visual.set_parked_service_vehicle_count(1)
+					check(parked.visible and not mini_pad.visible, "One parked engine remains while the other is dispatched")
 			visual.queue_free()
 	var ruin_test: Node3D = GameObjectScene.instantiate()
 	root.add_child(ruin_test)
@@ -65,15 +70,18 @@ func run() -> void:
 	check(game.job == "", "Fire warning does not dispatch a vehicle automatically")
 	check(game.start_fire(), "Opening incident starts at its stable house ID")
 	check(game.fires[Simulation.FIRST_FIRE_TARGET].phase == "warning", "Ignition begins with a visible warning stage")
+	check(game.fires[Simulation.FIRST_FIRE_TARGET].cause == "electrical_fault", "A new fire records its cause for the incident card")
 	var warning_before: float = game.fire_warning_left(Simulation.FIRST_FIRE_TARGET)
 	var offline_reload = Simulation.new(true)
 	offline_reload.save_path = save_path
 	check(offline_reload.load_game(), "Warning state loads from the player-built station save")
 	check(is_equal_approx(offline_reload.fire_warning_left(Simulation.FIRST_FIRE_TARGET), warning_before), "Closed-game time does not advance warning")
+	check(offline_reload.fires[Simulation.FIRST_FIRE_TARGET].cause == "electrical_fault", "Fire cause survives a save and reload")
 	for i in range(70):
 		offline_reload.tick(1.0, true)
 	check(offline_reload.house_damage(Simulation.FIRST_FIRE_TARGET) > 0, "Fire damages only its named building")
 	check(offline_reload.fires.has(Simulation.FIRST_FIRE_NEIGHBOR), "Unattended fire warns a nearby house before spreading")
+	check(offline_reload.fires[Simulation.FIRST_FIRE_NEIGHBOR].cause == "spread_from_neighbor", "Spread warning names the originating cause")
 	check(str(offline_reload.fires.get(Simulation.FIRST_FIRE_NEIGHBOR, {}).get("phase", "")) == "burning", "The warned neighboring house becomes a second burning incident")
 	check(offline_reload.house_damage(Simulation.FIRST_FIRE_NEIGHBOR) > 0, "Spreading fire damages the neighboring property")
 	check(offline_reload.record_residents(offline_reload.legacy_record(0)) < game.record_residents(game.legacy_record(0)), "Damage reduces residents in affected homes")
@@ -101,6 +109,8 @@ func run() -> void:
 	check(offline_reload.job == "fire" and offline_reload.target_instance_id == Simulation.FIRST_FIRE_TARGET, "Primary engine retains its own target")
 	check(offline_reload.fire_jobs.has(Simulation.FIRST_FIRE_NEIGHBOR), "Second engine retains its separate target")
 	check(offline_reload.fire_assignment(Simulation.FIRST_FIRE_TARGET).vehicle_id != offline_reload.fire_assignment(Simulation.FIRST_FIRE_NEIGHBOR).vehicle_id, "Each burning house receives a different vehicle")
+	check(int(offline_reload.fire_assignment(Simulation.FIRST_FIRE_TARGET).spawn_slot) == 0 and int(offline_reload.fire_assignment(Simulation.FIRST_FIRE_NEIGHBOR).spawn_slot) == 1, "Concurrent calls depart from the main and mini parking slots")
+	check(not offline_reload.fire_assignment(Simulation.FIRST_FIRE_TARGET).vehicle.is_equal_approx(offline_reload.fire_assignment(Simulation.FIRST_FIRE_NEIGHBOR).vehicle), "The two engines do not spawn with overlapping body centres")
 	check(offline_reload.depot_instance_id == station_id and offline_reload.fire_assignment(Simulation.FIRST_FIRE_NEIGHBOR).depot_instance_id == station_id, "Both engines dispatch from the player-built station")
 	check(not offline_reload.route.is_empty() and not offline_reload.fire_jobs[Simulation.FIRST_FIRE_NEIGHBOR].route.is_empty(), "Both trucks receive saved road routes")
 

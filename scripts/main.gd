@@ -9,6 +9,7 @@ const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 const Art = preload("res://scripts/art.gd")
 const GroundRoadVisuals = preload("res://scripts/ground_road_visuals.gd")
 const CitizenPool = preload("res://scripts/citizen_pool.gd")
+const WorldStatusIndicators = preload("res://scripts/world_status_indicators.gd")
 const INK = Color("252c38")
 const BLUE = Color("258ed2")
 const PAPER = Color("fbf9f4")
@@ -27,6 +28,10 @@ var fire_car: Node3D
 var fire_engine_nodes: Dictionary = {}
 var selected_fire_id: String = ""
 var fire_markers: Dictionary = {}
+var problem_markers: Dictionary = {}
+var notified_problem_ids: Dictionary = {}
+var selected_problem_id: String = ""
+var city_problem_timer_label: Label
 var notified_fire_ids: Dictionary = {}
 var fire_notice: PanelContainer
 var fire_notice_label: Label
@@ -120,10 +125,19 @@ var catalog_grid_target := Vector2i(-1, -1)
 var road_selected_cell := Vector2i(-1, -1)
 var road_piece_type := "auto"
 var construction_root: Node3D
+var world_status_indicators: Node3D
 var construction_objects: Dictionary = {}
 var construction_bar_fill: MeshInstance3D
 var catalog_target_road := Vector2i(-1, -1)
 var catalog_scroll: ScrollContainer
+var catalog_service_preview_cache: Dictionary = {}
+var catalog_service_preview_queue: Array[Dictionary] = []
+var catalog_service_preview_worker_running: bool = false
+var service_catalog_refresh_pending: bool = false
+var service_catalog_baseline_profile_pending: bool = true
+var service_refresh_profile_active: bool = false
+var service_refresh_profile: Dictionary = {}
+var service_refresh_profile_start_usec: int = 0
 var catalog_scroll_dragging: bool = false
 var catalog_drag_start := Vector2.ZERO
 var catalog_drag_last := Vector2.ZERO
@@ -142,7 +156,7 @@ const QUALITY_NAMES = [["Критическое", "Неблагополучно�
 const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "landscaping"]
 const CATALOG_ITEMS := {
 	"residential": ["house", "elite_residence"],
-	"commercial": ["cafe", "park", "business_tower"],
+	"commercial": ["cafe", "supermarket", "park", "business_tower"],
 	"infrastructure": ["clear", "logistics_center", "warehouse"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
@@ -160,7 +174,7 @@ const TEXT = {
 	"repair": ["Отправить бригаду", "Dispatch crew"], "fixed": ["Обслуживание восстановлено", "Service restored"],
 	"busy": ["Бригада: %s • %s", "Crew: %s • %s"], "travel": ["в пути", "on the way"], "repairing": ["ремонт %d сек.", "repair %d sec"], "return": ["возвращается", "returning"], "idle": ["Бригада свободна • выбор участка на карте", "Crew ready • select a plot on the map"],
 	"empty": ["Участок %d • доступ к дороге\nБонус зависит от соседних домов и объектов.", "Plot %d • road access\nBonus depends on nearby homes and amenities."],
-	"cafe": ["Кафе", "Café"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Дом рабочих", "Workers depot"],
+	"cafe": ["Кафе", "Café"], "supermarket": ["Магазин", "Grocery store"], "park": ["Парк", "Park"], "house": ["Жилой дом", "Residential home"], "depot": ["Дом рабочих", "Workers depot"],
 	"city_hall": ["Городской центр", "City Hall"],
 	"logistics_center": ["Логистический центр", "Logistics center"],
 	"warehouse": ["Склад", "Warehouse"],
@@ -706,6 +720,9 @@ func build_world() -> void:
 	construction_root = Node3D.new()
 	construction_root.name = "ConstructionWorksite"
 	world.add_child(construction_root)
+	world_status_indicators = WorldStatusIndicators.new()
+	world_status_indicators.name = "BuildingStatusIndicators"
+	world.add_child(world_status_indicators)
 	if game.legacy_problem_available("signal"):
 		signal_object = scenery.traffic_controller.get_problem_signal()
 		make_marker("SignalMarker", Vector3(-14.4, 5, 0))
@@ -831,46 +848,37 @@ func update_fire_visuals() -> void:
 			fire_markers.erase(identifier)
 	for raw_id in game.fires.keys():
 		var identifier := str(raw_id)
-		var marker: Sprite3D = fire_markers.get(identifier)
+		var marker: Node3D = fire_markers.get(identifier)
 		if marker == null or not is_instance_valid(marker):
-			marker = Sprite3D.new()
+			marker = Node3D.new()
 			marker.name = "Incident_" + identifier
-			marker.texture = load("res://assets/icons/fire_marker.svg")
-			marker.pixel_size = 0.06
-			marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			marker.no_depth_test = true
-			var flame := Sprite3D.new()
-			flame.name = "FlameAndSmoke"
-			flame.texture = load("res://assets/icons/fire_effect.svg")
-			flame.position = Vector3(0, -2.5, 0.05)
-			flame.pixel_size = 0.037
+			var flame := AnimatedSprite3D.new()
+			flame.name = "FlameAnimation"
+			var flame_frames := SpriteFrames.new()
+			flame_frames.add_animation("fire")
+			flame_frames.set_animation_speed("fire", 8.0)
+			flame_frames.set_animation_loop("fire", true)
+			for frame_index in range(1, 4):
+				flame_frames.add_frame("fire", load("res://assets/icons/flame_%d.svg" % frame_index))
+			flame.sprite_frames = flame_frames
+			flame.animation = "fire"
+			flame.position = Vector3(0, 5.4, 0.05)
+			flame.pixel_size = 0.038
 			flame.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			flame.no_depth_test = true
 			marker.add_child(flame)
-			var smoke := AnimatedSprite3D.new()
-			smoke.name = "AnimatedSmoke"
-			var smoke_frames := SpriteFrames.new()
-			smoke_frames.add_animation("smoke")
-			smoke_frames.set_animation_speed("smoke", 5.0)
-			smoke_frames.set_animation_loop("smoke", true)
-			for frame_index in range(1, 5):
-				smoke_frames.add_frame("smoke", load("res://assets/icons/smoke_%d.svg" % frame_index))
-			smoke.sprite_frames = smoke_frames
-			smoke.animation = "smoke"
-			smoke.position = Vector3(0.38, -0.45, 0.08)
-			smoke.pixel_size = 0.045
-			smoke.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			smoke.no_depth_test = true
-			marker.add_child(smoke)
-			smoke.play("smoke")
-			var danger := Label3D.new()
-			danger.name = "DangerLevel"
-			danger.position = Vector3(0, 1.45, 0.1)
-			danger.font_size = 48
-			danger.outline_size = 12
-			danger.modulate = Color.WHITE
-			danger.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			marker.add_child(danger)
+			flame.play("fire")
+			var footprint := Vector2(9.0, 9.0)
+			var entry: Dictionary = game.territory.building_by_id(identifier)
+			if not entry.is_empty():
+				footprint = Vector2(float(entry.get("width", 1)) * TerritoryGrid.CELL_SIZE, float(entry.get("height", 1)) * TerritoryGrid.CELL_SIZE)
+			var perimeter := Node3D.new()
+			perimeter.name = "ProblemPerimeter"
+			marker.add_child(perimeter)
+			var red := Color("ff3e35")
+			for side in [-1.0, 1.0]:
+				Art.box(perimeter, Vector3(0, 0.32, side * footprint.y * 0.5), Vector3(footprint.x, 0.12, 0.18), red)
+				Art.box(perimeter, Vector3(side * footprint.x * 0.5, 0.32, 0), Vector3(0.18, 0.12, footprint.y), red)
 			world.add_child(marker)
 		fire_markers[identifier] = marker
 		if not notified_fire_ids.has(identifier):
@@ -880,15 +888,12 @@ func update_fire_visuals() -> void:
 			fire_notice.show()
 			if audio != null:
 				audio.play("radio_call", "Effects", game.building_world_for_id(identifier))
-		marker.position = game.building_world_for_id(identifier) + Vector3(0, 7.0 + sin(elapsed * 2.6) * 0.18, 0)
-		marker.modulate = Color("f17a3d") if game.fire_severity(identifier) == 1 else (Color("e75439") if game.fire_severity(identifier) == 2 else Color("c92e32"))
-		marker.get_node("DangerLevel").text = "%d/3" % game.fire_severity(identifier)
-		var flame_effect := marker.get_node("FlameAndSmoke") as Sprite3D
-		flame_effect.position.y = -2.5 + sin(elapsed * 8.0 + float(game.fire_severity(identifier))) * 0.12
-		flame_effect.scale = Vector3.ONE * (1.0 + sin(elapsed * 11.0) * 0.06)
-		var smoke_effect := marker.get_node("AnimatedSmoke") as AnimatedSprite3D
-		smoke_effect.position.y = -0.45 + sin(elapsed * 1.7 + float(game.fire_severity(identifier))) * 0.18
-		smoke_effect.scale = Vector3.ONE * (1.0 + sin(elapsed * 2.3) * 0.08)
+		marker.position = game.building_world_for_id(identifier)
+		var flame_effect := marker.get_node("FlameAnimation") as AnimatedSprite3D
+		flame_effect.position.y = 5.4 + sin(elapsed * 8.0 + float(game.fire_severity(identifier))) * 0.12
+		flame_effect.scale = Vector3.ONE * (0.9 + float(game.fire_severity(identifier)) * 0.10)
+		var perimeter := marker.get_node("ProblemPerimeter") as Node3D
+		perimeter.visible = int(elapsed * 3.0) % 2 == 0
 
 func redraw_plots() -> void:
 	var empty_city: bool = game.empty_city_mode or (game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty())
@@ -1020,13 +1025,16 @@ func update_territory_building_states() -> void:
 		object.set_neglect_percent(game.housing_neglect_percent(identifier))
 
 func redraw_territory() -> void:
+	var signature_started_usec := Time.get_ticks_usec()
 	var signature := territory_structure_signature_value()
 	var building_state_signature := territory_building_state_signature_value()
+	_add_profile_service_refresh_stage("territory_data_and_signature_ms", signature_started_usec)
 	if signature == territory_signature:
 		if building_state_signature != territory_building_state_signature:
 			update_territory_building_states()
 			territory_building_state_signature = building_state_signature
 		return
+	var rebuild_started_usec := Time.get_ticks_usec()
 	territory_signature = signature
 	territory_building_state_signature = building_state_signature
 	territory_full_redraw_count += 1
@@ -1183,6 +1191,7 @@ func redraw_territory() -> void:
 				Art.box(object, offset + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.2, 0.12, TerritoryGrid.CELL_SIZE - 0.2), base_color)
 	Art.batch(tile_visuals)
 	update_fog_overlay()
+	_add_profile_service_refresh_stage("territory_visual_rebuild_ms", rebuild_started_usec)
 
 func junction_has_signal(topology: String) -> bool:
 	return topology in ["tee", "cross"]
@@ -1366,6 +1375,15 @@ func map_input(event: InputEvent) -> void:
 		if marker != null and marker.visible and camera.unproject_position(marker.position).distance_to(point) < 42.0 * render_scale / viewport_container.stretch_shrink:
 			selected_fire_id = str(identifier)
 			select_problem("fire")
+			return
+	for problem_id in problem_markers:
+		var problem_marker := problem_markers[problem_id] as Sprite3D
+		if problem_marker != null and problem_marker.visible and camera.unproject_position(problem_marker.position).distance_to(point) < 40.0 * render_scale / viewport_container.stretch_shrink:
+			selected_problem_id = str(problem_id)
+			game.accept_problem(selected_problem_id)
+			selection_kind = "city_problem"
+			selected = -1
+			refresh()
 			return
 	for kind in ["leak", "signal"]:
 		var fixed: bool = game.leak_fixed if kind == "leak" else game.signal_fixed
@@ -1588,6 +1606,58 @@ func select_problem(kind: String) -> void:
 	if audio != null and kind != "fire":
 		audio.play_ui("tesla")
 	refresh()
+
+func open_food_access_catalog() -> void:
+	active_tab = "build_tab"
+	catalog_category = "commercial"
+	catalog_screen_mode = "categories"
+	selected_catalog_type = ""
+	catalog_grid_target = Vector2i(-1, -1)
+	selection_kind = "catalog"
+	refresh()
+
+func update_city_problem_visuals() -> void:
+	var active_ids: Dictionary = {}
+	for problem_id in game.incidents:
+		var incident: Dictionary = game.incidents[problem_id]
+		var kind := str(incident.get("type", ""))
+		if kind not in ["leak", "supply", "neglect", "strike"] or str(incident.get("state", "new")) == "resolved":
+			continue
+		var target_id := str(incident.get("target_id", ""))
+		var marker := problem_markers.get(str(problem_id)) as Sprite3D
+		if marker == null or not is_instance_valid(marker):
+			marker = Sprite3D.new()
+			marker.name = "CityProblem_" + str(problem_id)
+			marker.texture = load("res://assets/icons/fire_marker.svg")
+			marker.pixel_size = 0.055
+			marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			marker.no_depth_test = true
+			world.add_child(marker)
+			problem_markers[str(problem_id)] = marker
+		marker.position = game.building_world_for_id(target_id) + Vector3(0, 5.6 + sin(elapsed * 2.4) * 0.14, 0)
+		marker.modulate = {"leak": Color("45a7df"), "supply": Color("e7ad44"), "neglect": Color("9b7559"), "strike": Color("d65a4a")}.get(kind, Color.WHITE)
+		active_ids[str(problem_id)] = true
+		if not notified_problem_ids.has(str(problem_id)):
+			notified_problem_ids[str(problem_id)] = true
+			fire_notice_left = 5.0
+			fire_notice_label.text = city_problem_notice(kind)
+			fire_notice.show()
+			if audio != null:
+				audio.play("radio_call", "Effects", marker.position)
+	for problem_id in problem_markers.keys():
+		if not active_ids.has(str(problem_id)):
+			var old_marker: Node = problem_markers[problem_id]
+			if is_instance_valid(old_marker):
+				old_marker.queue_free()
+			problem_markers.erase(problem_id)
+
+func city_problem_notice(kind: String) -> String:
+	match kind:
+		"leak": return tr_text("Диспетчер · Утечка у дома. Ремонтная бригада готова к вызову.", "Dispatch · Water leak at a home. A repair crew can be sent.")
+		"supply": return tr_text("Диспетчер · Жителям не хватает продовольствия. Нужна доступная торговля или доставка.", "Dispatch · Residents lack food. Add an accessible shop or delivery coverage.")
+		"neglect": return tr_text("Диспетчер · Дом ветшает из-за низкого качества и отсутствия обслуживания.", "Dispatch · A home is deteriorating from poor conditions and overdue maintenance.")
+		"strike": return tr_text("Диспетчер · Беспорядки у жилого дома. Полиция может восстановить порядок.", "Dispatch · Disorder near a home. Police can restore public order.")
+	return ""
 
 func select_tab(key: String) -> void:
 	active_tab = key
@@ -1849,6 +1919,86 @@ func catalog_entry_button(parent: Control, type_id: String) -> Button:
 	return item
 
 func catalog_model_preview(type_id: String) -> Control:
+	if catalog_category == "services" and selection_kind == "catalog" and DisplayServer.get_name().to_lower() == "headless":
+		return catalog_service_icon_preview(type_id)
+	if catalog_category == "services" and selection_kind == "catalog" and str(service_refresh_profile.get("mode", "")) != "baseline_full":
+		return catalog_service_model_preview(type_id)
+	return _create_catalog_model_preview(type_id)
+
+func catalog_service_icon_preview(type_id: String) -> Control:
+	var holder := Control.new()
+	holder.name = "ModelPreview_" + type_id
+	holder.custom_minimum_size = Vector2(68, 68)
+	var image := TextureRect.new()
+	image.name = "PreviewImage"
+	image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	image.texture = load(Catalog.icon_path(type_id))
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(image)
+	return holder
+
+func catalog_service_model_preview(type_id: String) -> Control:
+	var holder := Control.new()
+	holder.name = "ModelPreview_" + type_id
+	holder.custom_minimum_size = Vector2(68, 68)
+	var image := TextureRect.new()
+	image.name = "PreviewImage"
+	image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if catalog_service_preview_cache.has(type_id):
+		image.texture = catalog_service_preview_cache[type_id]
+	else:
+		image.texture = load(Catalog.icon_path(type_id))
+		catalog_service_preview_queue.append({"type_id": type_id, "holder": holder})
+		if not catalog_service_preview_worker_running:
+			call_deferred("_run_catalog_service_preview_queue")
+	holder.add_child(image)
+	return holder
+
+func _run_catalog_service_preview_queue() -> void:
+	if catalog_service_preview_worker_running:
+		return
+	catalog_service_preview_worker_running = true
+	# Let the catalogue draw immediately with its 2D service icons before creating
+	# any 3D subviewports. Build and snapshot one real model at a time afterwards.
+	await get_tree().process_frame
+	while not catalog_service_preview_queue.is_empty():
+		var request: Dictionary = catalog_service_preview_queue.pop_front()
+		var holder: Control = request.holder
+		var type_id: String = str(request.type_id)
+		if not is_instance_valid(holder) or not holder.is_inside_tree():
+			continue
+		var cached_preview := catalog_service_preview_cache.get(type_id) as Texture2D
+		if cached_preview != null:
+			var cached_image := holder.get_node_or_null("PreviewImage") as TextureRect
+			if cached_image != null:
+				cached_image.texture = cached_preview
+			continue
+		var viewport_container := _create_catalog_model_preview(type_id) as SubViewportContainer
+		viewport_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		holder.add_child(viewport_container)
+		await RenderingServer.frame_post_draw
+		if is_instance_valid(holder) and is_instance_valid(viewport_container):
+			var preview_viewport := viewport_container.get_child(0) as SubViewport
+			if preview_viewport != null and preview_viewport.get_texture() != null:
+				var snapshot := preview_viewport.get_texture().get_image()
+				if snapshot != null and not snapshot.is_empty():
+					var texture := ImageTexture.create_from_image(snapshot)
+					catalog_service_preview_cache[type_id] = texture
+					var preview_image := holder.get_node_or_null("PreviewImage") as TextureRect
+					if preview_image != null:
+						preview_image.texture = texture
+					holder.remove_child(viewport_container)
+					viewport_container.queue_free()
+		await get_tree().process_frame
+	catalog_service_preview_worker_running = false
+
+func _create_catalog_model_preview(type_id: String) -> Control:
+	var started_usec := Time.get_ticks_usec()
 	var preview_box := SubViewportContainer.new()
 	preview_box.name = "ModelPreview_" + type_id
 	preview_box.stretch = true
@@ -1886,6 +2036,7 @@ func catalog_model_preview(type_id: String) -> Control:
 	environment.environment.background_mode = Environment.BG_COLOR
 	environment.environment.background_color = Color(0, 0, 0, 0)
 	preview_world.add_child(environment)
+	_add_profile_service_refresh_stage("catalog_preview_construction_ms", started_usec)
 	return preview_box
 
 func build_catalog_sheet() -> void:
@@ -2078,12 +2229,7 @@ func build_land_cell_sheet() -> void:
 			refresh(), true).name = "BuildOnLandCell"
 		button(sheet_column, tr_text("Благоустроить", "Landscaping"), open_land_catalog.bind(territory_cell), true).name = "LandscapeLandCell"
 		button(sheet_column, tr_text("Построить службу", "Build a service"), func():
-			catalog_grid_target = territory_cell
-			catalog_target_plot = -1
-			catalog_screen_mode = "items"
-			active_tab = "build_tab"
-			catalog_category = "services"
-			selection_kind = "catalog"
+			open_service_catalog("fire_station", territory_cell)
 			refresh(), true).name = "BuildServiceOnLandCell"
 	button(sheet_column, t("cancel"), close_sheet).name = "CancelLandCell"
 
@@ -2357,6 +2503,14 @@ func clear_children(parent: Node) -> void:
 func refresh() -> void:
 	if world == null or camera == null:
 		return
+	var service_catalog_request := service_catalog_refresh_pending and selection_kind == "catalog" and catalog_category == "services"
+	service_catalog_refresh_pending = false
+	var service_catalog_baseline_profile := service_catalog_request and service_catalog_baseline_profile_pending and OS.is_debug_build()
+	if service_catalog_request and OS.is_debug_build():
+		service_refresh_profile_active = true
+		service_refresh_profile = {"mode": "baseline_full" if service_catalog_baseline_profile else "ui_only"}
+		service_refresh_profile_start_usec = Time.get_ticks_usec()
+	var refresh_stage_usec := Time.get_ticks_usec()
 	ensure_legacy_visuals()
 	var current_quality: float = game.district_quality()
 	if last_quality >= 0 and not is_equal_approx(current_quality, last_quality):
@@ -2401,9 +2555,36 @@ func refresh() -> void:
 		objective.get_parent().get_node("MissionCounter").text = "%d / 3" % completed_steps
 		progress_bar.max_value = 3
 		progress_bar.value = completed_steps
+	if service_catalog_request:
+		_profile_service_refresh_stage("common_ui", refresh_stage_usec)
+		if not service_catalog_baseline_profile:
+			var ui_only_started := Time.get_ticks_usec()
+			redraw_transit()
+			_profile_service_refresh_stage("transit_overlay", ui_only_started)
+			var sheet_started := Time.get_ticks_usec()
+			build_sheet()
+			_profile_service_refresh_stage("service_sheet", sheet_started)
+			var preview_started := Time.get_ticks_usec()
+			update_preview()
+			_profile_service_refresh_stage("preview_and_highlights", preview_started)
+			var layout_started := Time.get_ticks_usec()
+			maybe_offer_subsidy()
+			update_layout()
+			update_campaign_completion()
+			_profile_service_refresh_stage("layout_and_completion", layout_started)
+			_finish_service_refresh_profile()
+			return
+	refresh_stage_usec = Time.get_ticks_usec()
+	var transit_started := refresh_stage_usec
 	redraw_plots()
+	_profile_service_refresh_stage("plots_and_territory", transit_started)
+	var traffic_started := Time.get_ticks_usec()
 	sync_city_traffic()
+	_profile_service_refresh_stage("configure_city_traffic", traffic_started)
+	var logistics_started := Time.get_ticks_usec()
 	redraw_logistics_vehicles()
+	_profile_service_refresh_stage("logistics_visuals", logistics_started)
+	var world_state_started := Time.get_ticks_usec()
 	maybe_offer_subsidy()
 	update_fire_visuals()
 	scenery.traffic_controller.signal_fixed = game.signal_fixed
@@ -2416,11 +2597,48 @@ func refresh() -> void:
 	var signal_marker := world.get_node_or_null("SignalMarker") as Node3D
 	if signal_marker != null:
 		signal_marker.visible = game.legacy_problem_available("signal")
+	_profile_service_refresh_stage("world_state_and_effects", world_state_started)
+	var sheet_started := Time.get_ticks_usec()
 	build_sheet()
+	_profile_service_refresh_stage("build_sheet", sheet_started)
+	var preview_started := Time.get_ticks_usec()
 	update_preview()
+	_profile_service_refresh_stage("preview_and_highlights", preview_started)
+	var layout_started := Time.get_ticks_usec()
 	sync_construction_site()
 	update_layout()
 	update_campaign_completion()
+	_profile_service_refresh_stage("construction_layout_and_completion", layout_started)
+	if service_catalog_baseline_profile:
+		service_catalog_baseline_profile_pending = false
+	if service_catalog_request:
+		_finish_service_refresh_profile()
+
+func _profile_service_refresh_stage(stage_name: String, started_usec: int) -> void:
+	if not service_refresh_profile_active:
+		return
+	service_refresh_profile[stage_name] = float(Time.get_ticks_usec() - started_usec) / 1000.0
+
+func _add_profile_service_refresh_stage(stage_name: String, started_usec: int) -> void:
+	if not service_refresh_profile_active:
+		return
+	var elapsed_ms := float(Time.get_ticks_usec() - started_usec) / 1000.0
+	service_refresh_profile[stage_name] = float(service_refresh_profile.get(stage_name, 0.0)) + elapsed_ms
+
+func _finish_service_refresh_profile() -> void:
+	if not service_refresh_profile_active:
+		return
+	service_refresh_profile["refresh_cpu_ms"] = float(Time.get_ticks_usec() - service_refresh_profile_start_usec) / 1000.0
+	var payload := service_refresh_profile.duplicate(true)
+	service_refresh_profile_active = false
+	if DisplayServer.get_name().to_lower() == "headless":
+		print("FMT_SERVICE_REFRESH_BREAKDOWN " + JSON.stringify(payload))
+	else:
+		RenderingServer.frame_post_draw.connect(_emit_service_refresh_after_frame.bind(payload, service_refresh_profile_start_usec), CONNECT_ONE_SHOT)
+
+func _emit_service_refresh_after_frame(payload: Dictionary, started_usec: int) -> void:
+	payload["first_frame_ms"] = float(Time.get_ticks_usec() - started_usec) / 1000.0
+	print("FMT_SERVICE_REFRESH_BREAKDOWN " + JSON.stringify(payload))
 
 func campaign_goal_text(stage: int) -> String:
 	match stage:
@@ -2524,6 +2742,7 @@ func header(title_value: String, icon_key: String = "") -> void:
 func build_sheet() -> void:
 	clear_children(sheet_column)
 	clear_children(mode_switcher)
+	city_problem_timer_label = null
 	configure_building_card_scroll(selection_kind in ["grid_house", "grid_upgrade", "catalog_detail"])
 	mode_switcher.hide()
 	sheet.add_theme_stylebox_override("panel", style(PAPER, 22))
@@ -2588,6 +2807,8 @@ func build_sheet() -> void:
 		action_height = 190
 		header(tr_text("Патруль", "Police patrol"))
 		label(20, sheet_column, tr_text("Едет освобождать дорогу", "Clearing the road"))
+	elif selection_kind == "city_problem":
+		build_city_problem_sheet()
 	elif selection_kind in ["signal", "leak"]:
 		action_height = 500
 		header(t("leak_title") if selection_kind == "leak" else t("signal_title"), "pipe_white")
@@ -2639,6 +2860,7 @@ func build_sheet() -> void:
 		header(t("fire_title"))
 		var danger := label(22, sheet_column, t("fire_warning") % ceili(float(fire.warning_left)) if fire.phase == "warning" else t("fire_burning") % game.fire_severity(identifier), true)
 		danger.add_theme_color_override("font_color", Color("dc633c"))
+		label(17, sheet_column, tr_text("Причина: повреждение электропроводки", "Cause: faulty electrical wiring") if str(fire.get("cause", "electrical_fault")) == "electrical_fault" else tr_text("Причина: огонь перекинулся с соседнего здания", "Cause: fire spread from a neighboring building"))
 		for other_id in game.fires:
 			if other_id == identifier:
 				continue
@@ -3009,6 +3231,81 @@ func dispatch_fire() -> void:
 		audio.play_ui("deny")
 	refresh()
 
+func act_on_city_problem() -> void:
+	if not game.incidents.has(selected_problem_id):
+		close_sheet()
+		return
+	var incident: Dictionary = game.incidents[selected_problem_id]
+	var kind := str(incident.get("type", ""))
+	var target_id := str(incident.get("target_id", ""))
+	if kind in ["leak", "neglect"]:
+		if not game.has_service_building("depot"):
+			open_service_catalog("depot")
+			return
+		if game.dispatch_to_building(target_id):
+			audio.play("siren", "Effects", game.vehicle)
+		else:
+			audio.play_ui("deny")
+		refresh()
+	elif kind == "supply":
+		open_food_access_catalog()
+	elif kind == "strike":
+		if not game.has_service_building("police_station"):
+			open_service_catalog("police_station")
+			return
+		if game.dispatch_police(selected_problem_id):
+			audio.play("siren", "Effects", game.police_job.vehicle)
+		else:
+			audio.play_ui("deny")
+		refresh()
+
+func build_city_problem_sheet() -> void:
+	if not game.incidents.has(selected_problem_id):
+		selection_kind = "district_status"
+		build_district_sheet()
+		return
+	var incident: Dictionary = game.incidents[selected_problem_id]
+	var kind := str(incident.get("type", ""))
+	var target_id := str(incident.get("target_id", ""))
+	var names := {
+		"leak": tr_text("Протечка", "Water leak"),
+		"supply": tr_text("Нехватка снабжения", "Supply shortage"),
+		"neglect": tr_text("Дом ветшает", "Home deterioration"),
+		"strike": tr_text("Беспорядки", "Public disorder")
+	}
+	action_height = 330
+	header(str(names.get(kind, tr_text("Проблема района", "District problem"))), "pin")
+	var remaining := float(incident.get("reaction_left", 0.0))
+	city_problem_timer_label = label(20, sheet_column, city_problem_time_text(incident), true)
+	var explanation := ""
+	match kind:
+		"leak": explanation = tr_text("Утечка возникла на подключённой жилой сети после износа. У вас есть время вызвать коммунальную бригаду; без ремонта ущерб начнёт расти постепенно.", "A leak has developed on the connected residential network after wear. You have time to call maintenance; damage will grow gradually if it is left unresolved.")
+		"supply": explanation = tr_text("Поблизости нет подключённого к дороге магазина, а доставка не покрывает дом. Постройте магазин или кафе у дороги либо подключите логистику.", "There is no nearby grocery store connected to roads, and deliveries do not cover this home. Build a roadside shop/café or connect logistics.")
+		"neglect": explanation = tr_text("Низкое качество и накопившееся обслуживание ухудшают дом. Коммунальная бригада может провести обслуживание; улучшите и окружение, чтобы причина не вернулась.", "Poor conditions and overdue maintenance are damaging this home. Send a maintenance crew and improve its surroundings to prevent recurrence.")
+		"strike": explanation = tr_text("Продолжительное недовольство вызвало беспорядки. Полиция снижает опасность и восстанавливает порядок, но качество жизни и причину недовольства нужно исправлять отдельно.", "Prolonged dissatisfaction has caused disorder. Police reduce the danger and restore order, but the underlying quality-of-life issue still needs attention.")
+	var detail := label(19, sheet_column, explanation)
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var target_name := tr_text("Дом", "Home")
+	label(18, sheet_column, target_name + " · " + target_id)
+	var action_text := ""
+	if kind == "supply":
+		action_text = tr_text("Открыть коммерческие здания", "Open commercial buildings")
+	elif kind == "strike":
+		action_text = tr_text("Вызвать полицию", "Call police") if game.has_service_building("police_station") else tr_text("Построить полицейский участок", "Build a police station")
+	else:
+		action_text = tr_text("Вызвать коммунальную бригаду", "Dispatch maintenance") if game.has_service_building("depot") else tr_text("Построить дом рабочих", "Build a maintenance depot")
+	var action_button := button(sheet_column, action_text, act_on_city_problem, true)
+	action_button.name = "ResolveCityProblem"
+	if kind in ["leak", "neglect"]:
+		action_button.disabled = game.has_service_building("depot") and (game.job != "" or game.service_route(target_id).is_empty())
+	elif kind == "strike":
+		action_button.disabled = game.has_service_building("police_station") and (not game.police_job.is_empty() or not game.incidents.has(selected_problem_id))
+	button(sheet_column, t("cancel"), close_sheet)
+
+func city_problem_time_text(incident: Dictionary) -> String:
+	var remaining := float(incident.get("reaction_left", 0.0))
+	return tr_text("Время на реакцию: %d сек.", "Time to respond: %d sec.") % ceili(remaining) if remaining > 0 else tr_text("Последствия нарастают постепенно", "Consequences are building gradually")
+
 func call_police_for_jam() -> void:
 	if game.dispatch_police(selected_fire_id):
 		audio.play("siren", "Effects", game.police_job.vehicle)
@@ -3020,15 +3317,38 @@ func open_police_station_build() -> void:
 	open_service_catalog("police_station")
 	refresh()
 
-func open_service_catalog(type_id: String) -> void:
+func open_service_catalog(type_id: String, target_cell: Vector2i = Vector2i(-1, -1)) -> void:
 	active_tab = "build_tab"
 	catalog_category = "services"
-	catalog_grid_target = Vector2i(-1, -1)
+	catalog_screen_mode = "items"
+	catalog_target_plot = -1
+	catalog_grid_target = target_cell
 	territory_cell = Vector2i(-1, -1)
 	territory_tool = "service"
 	service_type = type_id
 	selection_kind = "catalog"
 	selected = -1
+	service_catalog_refresh_pending = true
+
+func orient_service_vehicle_to_route(node: Node3D, assignment: Dictionary) -> void:
+	var route: Array = assignment.get("route", [])
+	var route_index_value := int(assignment.get("route_index", 0))
+	if route_index_value >= route.size():
+		return
+	var current_world := map_position(assignment.get("vehicle", Vector3.ZERO))
+	var target_world := map_position(route[route_index_value])
+	if current_world.distance_to(target_world) < 0.02 and route_index_value + 1 < route.size():
+		target_world = map_position(route[route_index_value + 1])
+	var direction := target_world - current_world
+	if direction.length() > 0.01:
+		node.rotation.y = atan2(direction.x, direction.z)
+
+func building_status_specs() -> Array[Dictionary]:
+	return WorldStatusIndicators.specs_for(game)
+
+func sync_building_status_indicators() -> void:
+	if world_status_indicators != null and is_instance_valid(world_status_indicators):
+		world_status_indicators.sync(building_status_specs())
 
 func sync_fire_engine_nodes() -> void:
 	var active_ids: Dictionary = {}
@@ -3044,6 +3364,7 @@ func sync_fire_engine_nodes() -> void:
 			if assignment.phase == "repair" and bool(assignment.get("jam_cleared", false)):
 				primary_offset = Vector3(0, 0, -2.4)
 			fire_car.position = map_position(assignment.vehicle) + Vector3(0, 0.18, 0) + primary_offset
+			orient_service_vehicle_to_route(fire_car, assignment)
 			fire_car.set_emergency_lights(assignment.phase == "travel", elapsed)
 			if audio != null:
 				audio.set_loop("fire_siren_" + identifier, "siren", "Effects", assignment.phase == "travel", assignment.vehicle, 0.28)
@@ -3056,12 +3377,7 @@ func sync_fire_engine_nodes() -> void:
 		engine.visible = true
 		var roadside_offset := Vector3(0, 0, -2.4) if assignment.phase == "repair" and bool(assignment.get("jam_cleared", false)) else Vector3.ZERO
 		engine.position = map_position(assignment.vehicle) + Vector3(0, 0.18, 0) + roadside_offset
-		var route: Array = assignment.route
-		if int(assignment.route_index) < route.size():
-			var target_point: Vector3 = map_position(route[int(assignment.route_index)])
-			var direction: Vector3 = target_point - engine.position
-			if direction.length() > 0.01:
-				engine.rotation.y = atan2(direction.x, direction.z)
+		orient_service_vehicle_to_route(engine, assignment)
 		engine.set_emergency_lights(assignment.phase == "travel", elapsed)
 		if audio != null:
 			audio.set_loop("fire_siren_" + identifier, "siren", "Effects", assignment.phase == "travel", assignment.vehicle, 0.28)
@@ -3118,7 +3434,11 @@ func sync_service_vehicle_parking() -> void:
 		var station_id := str(entry.instance_id)
 		var station := territory_visuals.get_node_or_null(station_id) as Node3D
 		if station != null:
-			station.set_parked_service_vehicle_visible(not game.has_active_service_dispatch(station_id))
+			if str(entry.type_id) == "fire_station":
+				var active_engines := game.fire_assignments().filter(func(assignment: Dictionary) -> bool: return str(assignment.get("depot_instance_id", "")) == station_id).size()
+				station.set_parked_service_vehicle_count(maxi(0, 2 - active_engines))
+			else:
+				station.set_parked_service_vehicle_visible(not game.has_active_service_dispatch(station_id))
 
 func open_fire_station_build() -> void:
 	open_service_catalog("fire_station")
@@ -3155,6 +3475,8 @@ func _process(delta: float) -> void:
 		if game.start_fire():
 			refresh()
 	update_mission_visibility()
+	if selection_kind == "city_problem" and is_instance_valid(city_problem_timer_label) and game.incidents.has(selected_problem_id):
+		city_problem_timer_label.text = city_problem_time_text(game.incidents[selected_problem_id])
 	if OS.is_debug_build() and OS.has_feature("android"):
 		diagnostic_clock += delta
 		if diagnostic_clock >= 5:
@@ -3175,9 +3497,13 @@ func _process(delta: float) -> void:
 		if assignment.phase == "travel" and int(assignment.route_index) < assignment.route.size():
 			var current_fire := map_position(assignment.vehicle)
 			var next_fire := map_position(assignment.route[int(assignment.route_index)])
+			var fire_delta := next_fire - current_fire
+			var fire_axis := "H" if absf(fire_delta.x) >= absf(fire_delta.z) else "V"
+			var fire_direction := int(signf(fire_delta.x if fire_axis == "H" else fire_delta.z))
+			scenery.traffic_controller.blocking_positions.append({"id": str(assignment.vehicle_id), "position": current_fire, "moving_vehicle": true, "emergency": true, "axis": fire_axis, "direction": fire_direction, "half_extents": scenery.traffic_controller.service_half_extents("fire_engine", fire_axis)})
 			var intended_fire := current_fire.distance_to(next_fire)
 			if intended_fire > 0.0001:
-				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, current_fire.move_toward(next_fire, delta * 2.6), delta, str(assignment.vehicle_id), true) / intended_fire
+				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, current_fire.move_toward(next_fire, delta * 2.6), delta, str(assignment.vehicle_id), true, "", "fire_engine") / intended_fire
 	if not game.police_job.is_empty():
 		if game.police_job.phase == "clearing":
 			scenery.traffic_controller.blocking_positions.append({"id": "police_" + str(game.police_job.get("depot_instance_id", "")), "position": map_position(game.police_job.vehicle)})
@@ -3185,9 +3511,13 @@ func _process(delta: float) -> void:
 		if game.police_job.phase == "travel" and int(game.police_job.route_index) < game.police_job.route.size():
 			var police_current := map_position(game.police_job.vehicle)
 			var police_next := map_position(game.police_job.route[int(game.police_job.route_index)])
+			var police_delta := police_next - police_current
+			var police_axis := "H" if absf(police_delta.x) >= absf(police_delta.z) else "V"
+			var police_direction := int(signf(police_delta.x if police_axis == "H" else police_delta.z))
+			scenery.traffic_controller.blocking_positions.append({"id": "police", "position": police_current, "moving_vehicle": true, "emergency": true, "axis": police_axis, "direction": police_direction, "half_extents": scenery.traffic_controller.service_half_extents("police_car", police_axis)})
 			var police_intended := police_current.distance_to(police_next)
 			if police_intended > 0.0001:
-				fire_motion["police"] = scenery.traffic_controller.service_travel_distance(police_current, police_current.move_toward(police_next, delta * 2.8), delta, "police", false, str(game.police_job.incident_id)) / police_intended
+				fire_motion["police"] = scenery.traffic_controller.service_travel_distance(police_current, police_current.move_toward(police_next, delta * 2.8), delta, "police", true, str(game.police_job.incident_id), "police_car") / police_intended
 	if scenery.traffic_controller.vehicles.size() > 2:
 		scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
@@ -3206,7 +3536,9 @@ func _process(delta: float) -> void:
 		var proposed := map_position(game.proposed_vehicle(delta))
 		var intended := current.distance_to(proposed)
 		if intended > 0.0001:
-			movement_fraction = scenery.traffic_controller.service_travel_distance(current, proposed, delta, "crew_0", game.job == "fire" and game.job_phase == "travel") / intended
+			var emergency_call: bool = game.job == "fire" and game.job_phase == "travel"
+			var crew_vehicle_type := "fire_engine" if game.job == "fire" else "repair_van"
+			movement_fraction = scenery.traffic_controller.service_travel_distance(current, proposed, delta, "crew_0", emergency_call, "", crew_vehicle_type) / intended
 	var construction_was_active: bool = not game.construction_job.is_empty()
 	var completed_construction: Dictionary = game.construction_job.duplicate(true)
 	if game.tick(delta, true, movement_fraction, fire_motion):
@@ -3225,7 +3557,6 @@ func _process(delta: float) -> void:
 		car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
 		car.visible = game.job != "fire" and game.job != ""
 	if fire_car != null and is_instance_valid(fire_car):
-		fire_car.position = map_position(game.vehicle) + Vector3(0, 0.18, 0)
 		fire_car.visible = game.job == "fire"
 	if fire_car != null and is_instance_valid(fire_car) and fire_car.visual_root.get_child_count() > 0:
 		var primary_model: Node = fire_car.visual_root.get_child(0)
@@ -3239,12 +3570,10 @@ func _process(delta: float) -> void:
 				car.position.z += signf(direction.x)
 			else:
 				car.position.x -= signf(direction.z)
-	if fire_car != null and is_instance_valid(fire_car) and car != null and is_instance_valid(car):
-		fire_car.position = car.position
-		fire_car.rotation = car.rotation
 	sync_fire_engine_nodes()
 	sync_police_vehicle()
 	sync_service_vehicle_parking()
+	sync_building_status_indicators()
 	if leak_effect != null and is_instance_valid(leak_effect):
 		leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
 	for marker_name in ["LeakMarker", "SignalMarker"]:
@@ -3257,6 +3586,7 @@ func _process(delta: float) -> void:
 		var offset: float = road_signal.get_meta("signal_offset", 0.0)
 		road_signal.set_traffic_state(scenery.traffic_controller.phase("H", elapsed + offset), scenery.traffic_controller.phase("V", elapsed + offset))
 	update_fire_visuals()
+	update_city_problem_visuals()
 	save_clock += delta
 	if save_clock > 2:
 		game.save_game()
@@ -3351,7 +3681,9 @@ func sync_city_traffic() -> void:
 	var count := 0
 	if game.population() > 0:
 		count = 3 if quality == "low" else (5 if quality == "medium" else 8)
+	var started_usec := Time.get_ticks_usec()
 	scenery.traffic_controller.configure_grid(game.territory, count, game.transit.active, signals)
+	_add_profile_service_refresh_stage("traffic_configure_grid_ms", started_usec)
 
 func on_screen_citizen_count() -> int:
 	if citizen_pool == null or camera == null or viewport_container.get_child_count() == 0:
@@ -4084,6 +4416,7 @@ func redraw_logistics_vehicles() -> void:
 	if signature == logistics_visual_signature:
 		return
 	logistics_visual_signature = signature
+	clear_logistics_traffic_blockers()
 	clear_children(logistics_visuals)
 	logistics_vehicles.clear()
 	var center := game.logistics_center_entry()
@@ -4107,15 +4440,27 @@ func redraw_logistics_vehicles() -> void:
 		if not local_routes.is_empty():
 			create_logistics_vehicle(str(warehouse.instance_id), 0, local_routes)
 
+func clear_logistics_traffic_blockers() -> void:
+	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
+	if traffic_controller == null:
+		return
+	traffic_controller.clear_external_vehicle_state("delivery_")
+	var retained: Array[Dictionary] = []
+	for blocker: Dictionary in traffic_controller.blocking_positions:
+		if not str(blocker.get("id", "")).begins_with("delivery_"):
+			retained.append(blocker)
+	traffic_controller.blocking_positions = retained
+
 static func logistics_lane_offset(direction: Vector3) -> Vector3:
 	if absf(direction.x) >= absf(direction.z):
 		return Vector3(0, 0, signf(direction.x) * 0.68)
 	return Vector3(-signf(direction.z) * 0.68, 0, 0)
 
 static func logistics_driving_route(road_route: Array) -> Array:
-	# Road routes contain cell centres. Convert them to lane positions and insert
-	# short centre connectors at bends so the truck changes lanes gradually
-	# inside the junction instead of teleporting sideways between two offsets.
+	# Road routes contain cell centres. Stay in the incoming lane through the
+	# junction, then begin the outgoing lane shift after the truck has turned.
+	# Connecting both offsets through the exact center made the truck drive
+	# sideways twice, which looked like a counter-clockwise loop on right turns.
 	var driving_route: Array = []
 	if road_route.size() < 2:
 		return driving_route
@@ -4134,12 +4479,17 @@ static func logistics_driving_route(road_route: Array) -> Array:
 			var next: Vector3 = road_route[segment + 1]
 			var next_direction := (next - second).normalized()
 			if direction.dot(next_direction) < 0.999:
-				driving_route.append(second + Vector3(0, 0.32, 0))
-				driving_route.append(second + logistics_lane_offset(next_direction) + Vector3(0, 0.32, 0))
+				var turn_advance := minf(1.2, second.distance_to(next) * 0.25)
+				driving_route.append(second + next_direction * turn_advance + logistics_lane_offset(direction) + Vector3(0, 0.32, 0))
 	return driving_route
 
 static func logistics_vehicle_half_extents(direction: Vector3) -> Vector2:
-	return Vector2(0.78, 0.52) if absf(direction.x) >= absf(direction.z) else Vector2(0.52, 0.78)
+	var heading := Vector2(direction.x, direction.z).normalized()
+	if heading.length_squared() < 0.0001:
+		heading = Vector2.RIGHT
+	# The scaled 3D cargo body spans about 3.3 m by 1.76 m. Reserve its real
+	# half-footprint, including the cab, and rotate that footprint on turns.
+	return Vector2(1.13 * absf(heading.x) + 0.60 * absf(heading.y), 1.13 * absf(heading.y) + 0.60 * absf(heading.x))
 
 func set_logistics_traffic_blocker(identifier: String, position_value: Vector3, half_extents: Vector2, heading: Vector3) -> void:
 	if scenery == null or scenery.traffic_controller == null:
@@ -4162,6 +4512,15 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 	for road_route: Array in routes:
 		var driving_route := logistics_driving_route(road_route)
 		if driving_route.size() >= 2:
+			var nodes: Array[String] = []
+			var directions: Array[String] = []
+			for node_index in range(driving_route.size()):
+				var point: Vector3 = driving_route[node_index]
+				nodes.append("(%.2f,%.2f)" % [point.x, point.z])
+				if node_index > 0:
+					var delta: Vector3 = point - driving_route[node_index - 1]
+					directions.append("(%.2f,%.2f)" % [delta.x, delta.z])
+			print("[FMT_LOGISTICS_ROUTE] source=%s route=%d nodes=%s directions=%s" % [source_id, driving_routes.size(), nodes, directions])
 			driving_routes.append(driving_route)
 	if driving_routes.is_empty():
 		return
@@ -4177,6 +4536,8 @@ func create_logistics_vehicle(source_id: String, index: int, routes: Array) -> v
 		return
 	var spawn_blockers := logistics_spawn_blockers()
 	var initial_progress := logistics_spawn_progress(first_route, 8.0 + float(index) * 4.2, spawn_blockers)
+	if initial_progress < 0.0:
+		return
 	var initial_pose := logistics_route_pose(first_route, initial_progress)
 	var identifier := "delivery_%s_%d" % [source_id, index]
 	var truck := create_object(logistics_visuals, "delivery_truck", identifier, initial_pose.position)
@@ -4225,12 +4586,21 @@ static func logistics_spawn_progress(route: Array, preferred_progress: float, bl
 				break
 		if clear:
 			return candidate
-	return fposmod(preferred_progress, route_length)
+	return -1.0
 
 func logistics_spawn_blockers() -> Array:
 	var blockers: Array = []
 	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
 	if traffic_controller != null:
+		# The grid traffic node can still hold its placeholder position after a
+		# refresh while Transit already has the saved bus position. Publish the
+		# authoritative position before choosing delivery-truck spawn slots, or a
+		# truck can spawn inside the bus and both vehicles can deadlock.
+		if game.transit.active:
+			for vehicle: Dictionary in traffic_controller.vehicles:
+				if vehicle.node.type_id == "city_bus" and vehicle.node.visible:
+					game.transit.place_bus(vehicle, traffic_controller)
+					break
 		for vehicle: Dictionary in traffic_controller.vehicles:
 			if not vehicle.node.visible:
 				continue
@@ -4322,7 +4692,8 @@ func tick_logistics_vehicles(delta: float) -> void:
 					allowed_distance = traffic_controller.service_travel_distance(
 						current_position, proposed_position, delta, str(vehicle.get("id", "")), false, "", "delivery_truck"
 					)
-			if traffic_controller != null and not traffic_controller.external_vehicle_step_is_clear(current_position, current_position.move_toward(proposed_position, allowed_distance), 0.78, 0.52, str(vehicle.get("id", ""))):
+			var truck_half_extents := logistics_vehicle_half_extents(direction)
+			if traffic_controller != null and not traffic_controller.external_vehicle_step_is_clear(current_position, current_position.move_toward(proposed_position, allowed_distance), truck_half_extents.x, truck_half_extents.y, str(vehicle.get("id", "")), direction):
 				allowed_distance = 0.0
 			var moved_fraction := clampf(allowed_distance / intended_distance, 0.0, 1.0) if intended_distance > 0.0001 else 0.0
 			# Commit only the part that physically moved. Previously `progress`
@@ -4334,6 +4705,8 @@ func tick_logistics_vehicles(delta: float) -> void:
 			truck.position = current_position.move_toward(proposed_position, allowed_distance)
 			truck.rotation.y = atan2(direction.x, direction.z)
 			set_logistics_traffic_blocker(str(vehicle.get("id", "")), truck.position, logistics_vehicle_half_extents(direction), direction)
+			if traffic_controller != null:
+				traffic_controller.release_external_reservations_for_vehicle(str(vehicle.get("id", "")), truck.position)
 			break
 
 func building_effect(kind: String, level_value: int) -> String:

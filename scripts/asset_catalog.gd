@@ -12,6 +12,7 @@ const TYPES = {
 	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 220, "footprint": Vector2(9, 9)},
 	"logistics_center": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/logistics_center.tscn", "cost": 900, "footprint": Vector2(9.6, 9.6)},
 	"warehouse": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/warehouse.tscn", "cost": 380, "footprint": Vector2(9, 9)},
+	"supermarket": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/cafe.tscn", "cost": 220, "income": 12, "footprint": Vector2(9, 9)},
 	"delivery_truck": {"scene": "res://scenes/visuals/delivery_truck.tscn", "footprint": Vector2(2.4, 4.4)},
 	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "cost": 260, "footprint": Vector2(9, 9)},
 	"police_station": {"scene": "res://scenes/visuals/police_station.tscn", "cost": 240, "footprint": Vector2(9, 9)},
@@ -65,7 +66,7 @@ const ALTERNATIVES = {
 	"repair_van": "res://scenes/visuals/repair_van_alternate.tscn"
 }
 const UNLOCK_LEVELS = {
-	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1,
+	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1, "supermarket": 2,
 	"logistics_center": 6, "warehouse": 6,
 	"elite_residence": 4, "business_tower": 5,
 	"police_station": 2, "hospital": 3,

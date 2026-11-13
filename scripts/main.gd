@@ -131,6 +131,9 @@ var catalog_drag_moved: bool = false
 var selected_vehicle_type: String = ""
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
+var territory_building_state_signature: String = ""
+var territory_full_redraw_count: int = 0
+var territory_state_update_count: int = 0
 var grid_selected_id: String = ""
 var last_quality: float = -1
 var quality_trend: String = "→"
@@ -968,14 +971,65 @@ func update_fog_overlay() -> void:
 		multi.set_instance_transform(index, transforms[index])
 	fog_visuals.multimesh = multi
 
-func redraw_territory() -> void:
+func territory_visual_buildings_data() -> Array:
+	var result: Array = []
+	for entry: Dictionary in game.territory.buildings:
+		result.append({
+			"instance_id": str(entry.get("instance_id", "")),
+			"type_id": str(entry.get("type_id", "")),
+			"col": int(entry.get("col", -1)), "row": int(entry.get("row", -1)),
+			"width": int(entry.get("width", 1)), "height": int(entry.get("height", 1)),
+			"level": int(entry.get("level", 1)), "shanty": bool(entry.get("shanty", false)),
+			"arch_axis": str(entry.get("arch_axis", "")), "arch_offset": int(entry.get("arch_offset", 0))})
+	return result
+
+func territory_structure_signature_value() -> String:
+	var territory_data: Dictionary = game.territory.data()
+	var payload := {
+		"cells": territory_data.get("cells", []),
+		"buildings": territory_visual_buildings_data(),
+		"revealed": territory_data.get("revealed", []),
+		"expansion_cols": territory_data.get("expansion_cols", []),
+		"expansion_rows": territory_data.get("expansion_rows", []),
+		"quality_mode": quality_mode,
+		"language": game.language,
+		"signal_fixed": game.signal_fixed,
+	}
+	# In the quality overlay, damage changes the visible lot colour. Ordinary
+	# play updates fire effects separately and must not rebuild the whole map.
+	if quality_mode:
+		payload["fire_damage"] = game.fire_damage
+	return JSON.stringify(payload)
+
+func territory_building_state_signature_value() -> String:
 	var neglect_stages: Dictionary = {}
 	for identifier in game.housing_neglect:
 		neglect_stages[str(identifier)] = int(float(game.housing_neglect[identifier]) / 25.0)
-	var signature := JSON.stringify(game.territory.data()) + JSON.stringify(game.fire_ruins) + JSON.stringify(game.fire_damage) + JSON.stringify(neglect_stages) + str([quality_mode, game.language, game.signal_fixed, game.transit.active, game.transit.funded, game.transit.stops])
+	return JSON.stringify({"fire_ruins": game.fire_ruins, "neglect_stages": neglect_stages})
+
+func update_territory_building_states() -> void:
+	territory_state_update_count += 1
+	for entry: Dictionary in game.territory.buildings:
+		var object := territory_visuals.get_node_or_null(NodePath(str(entry.get("instance_id", ""))))
+		if object == null:
+			continue
+		var identifier := str(entry.get("instance_id", ""))
+		if not game.is_ruined(identifier):
+			object.set_shanty(bool(entry.get("shanty", false)))
+		object.set_ruined(game.is_ruined(identifier))
+		object.set_neglect_percent(game.housing_neglect_percent(identifier))
+
+func redraw_territory() -> void:
+	var signature := territory_structure_signature_value()
+	var building_state_signature := territory_building_state_signature_value()
 	if signature == territory_signature:
+		if building_state_signature != territory_building_state_signature:
+			update_territory_building_states()
+			territory_building_state_signature = building_state_signature
 		return
 	territory_signature = signature
+	territory_building_state_signature = building_state_signature
+	territory_full_redraw_count += 1
 	clear_children(territory_visuals)
 	if game.has_city_hall():
 		for guide_name in ["CityHallSiteGuide", "CityHallSiteLabel"]:

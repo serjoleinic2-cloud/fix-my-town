@@ -167,6 +167,16 @@ func tick(delta: float, traffic: Node3D, grid: RefCounted = null) -> void:
 	var bus: Dictionary = traffic.vehicles[2]
 	bus.managed = true
 	bus.node.visible = true
+	if bus.get("manual_backoff", false):
+		var backoff: Dictionary = traffic.step_managed_backoff(bus, bus_position, delta)
+		bus_position = backoff.get("position", bus_position)
+		if backoff.get("completed", false) and grid != null:
+			var start_cell: Vector2i = grid.nearest_road(bus_position)
+			var target_cell: Vector2i = stop_cell(stops[current_target], grid)
+			set_leg(route_between(grid, start_cell, target_cell), current_target)
+			bus_position = backoff.get("position", bus_position)
+		place_bus(bus, traffic)
+		return
 	if route_points.is_empty() and grid != null:
 		if make_leg(grid, 0 if current_target == 1 else 1, current_target) and legacy_route_pending:
 			var saved_position := Vector3(LEGACY_ROAD_X, 0.18, coordinate)
@@ -217,6 +227,9 @@ func tick(delta: float, traffic: Node3D, grid: RefCounted = null) -> void:
 				route_index += 1
 		if moved < SPEED * delta:
 			delay += delta
+			bus.stalled_time = float(bus.get("stalled_time", 0.0)) + delta
+		else:
+			bus.stalled_time = 0.0
 		if route_index >= route_points.size() - 1 and bus_position.distance_to(route_points.back()) < 0.1:
 			trips += 1
 			last_delay = delay

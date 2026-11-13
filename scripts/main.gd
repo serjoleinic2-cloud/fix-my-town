@@ -143,6 +143,7 @@ var catalog_drag_start := Vector2.ZERO
 var catalog_drag_last := Vector2.ZERO
 var catalog_drag_moved: bool = false
 var selected_vehicle_type: String = ""
+var selected_vehicle_id: String = ""
 var territory_cell := Vector2i(-1, -1)
 var territory_signature: String = ""
 var territory_building_state_signature: String = ""
@@ -1544,6 +1545,7 @@ func select_vehicle_at(point: Vector2) -> bool:
 	if best == null:
 		return false
 	selected_vehicle_type = best.type_id
+	selected_vehicle_id = str(best.instance_id)
 	audio.play_vehicle_select(str(best.type_id))
 	if best.type_id == "fire_engine":
 		for assignment: Dictionary in game.fire_assignments():
@@ -2787,7 +2789,7 @@ func build_sheet() -> void:
 	elif selection_kind == "stop_place":
 		build_stop_placement_sheet()
 	elif selection_kind == "vehicle":
-		action_height = 230
+		action_height = 305
 		if selected_vehicle_type == "civilian_car":
 			header(tr_text("Городской поток", "City traffic"), "pin")
 			label(20, sheet_column, tr_text("Легковые автомобили едут по дорожной сети автоматически. Поручения им не назначаются.", "Civilian cars follow the road network automatically; they do not receive assignments."))
@@ -2798,6 +2800,7 @@ func build_sheet() -> void:
 			header(t(selected_vehicle_type) if TEXT.has(selected_vehicle_type) else tr_text("Транспорт", "Vehicle"))
 			var busy_text := tr_text("В пути по поручению", "On assignment") if game.job != "" and selected_vehicle_type in ["repair_van", "fire_engine"] else tr_text("Ожидает поручения", "Waiting for an assignment")
 			label(20, sheet_column, busy_text)
+		add_manual_traffic_control_action()
 	elif selection_kind == "traffic_jam":
 		action_height = 300
 		header(tr_text("Затор у пожарной машины", "Fire engine roadblock"))
@@ -4315,13 +4318,31 @@ func build_transit_sheet() -> void:
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 func build_bus_sheet() -> void:
-	action_height = 360
+	action_height = 430
 	header(tr_text("Городской автобус", "City bus"), "pin")
 	var metrics: Dictionary = game.transit_metrics()
 	label(21, sheet_column, tr_text("Маршрут: %d остановки · охват %d жителей\nПолезные связи: %d · загрузка %d/%d\nЗадержка: %.0f сек.", "Route: %d stops · coverage %d residents\nUseful links: %d · load %d/%d\nDelay: %.0f sec.") % [game.transit.stops.size(), metrics.covered, metrics.served, metrics.load, metrics.capacity, maxf(game.transit.delay, game.transit.last_delay)])
 	for index in range(game.transit.stops.size()):
 		label(18, sheet_column, tr_text("Остановка %d · дорога %s" % [index + 1, stop_label(game.transit.stops[index])], "Stop %d · road %s" % [index + 1, stop_label(game.transit.stops[index])]))
+	add_manual_traffic_control_action()
 	button(sheet_column, tr_text("Открыть транспорт", "Open transit"), open_transit)
+
+func add_manual_traffic_control_action() -> void:
+	if selected_vehicle_id == "" or scenery == null or scenery.traffic_controller == null:
+		return
+	if not scenery.traffic_controller.manual_backoff_available(selected_vehicle_id):
+		return
+	var control := button(sheet_column, tr_text("Разрулить затор", "Clear the gridlock"), request_selected_vehicle_backoff, true)
+	control.name = "ManualTrafficControlButton"
+	var note := label(16, sheet_column, tr_text("Машина безопасно сдаст назад и перестроит путь.", "The vehicle will reverse safely and choose another route."))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+func request_selected_vehicle_backoff() -> void:
+	if selected_vehicle_id == "" or scenery == null or scenery.traffic_controller == null:
+		return
+	if scenery.traffic_controller.request_manual_backoff(selected_vehicle_id):
+		audio.play_ui("success")
+		close_sheet()
 
 func build_stop_sheet() -> void:
 	action_height = 290

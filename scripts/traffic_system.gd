@@ -34,6 +34,7 @@ var last_states: Dictionary = {}
 var deadlock_cycles: Dictionary = {}
 var deadlock_reroutes: Dictionary = {}
 var recovery_vehicle_id := ""
+var manual_backoff_vehicle_id := ""
 var route_rng := RandomNumberGenerator.new()
 var grid: RefCounted
 var grid_roads: Array[Vector2i] = []
@@ -684,6 +685,7 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 		deadlock_cycles.clear()
 		deadlock_reroutes.clear()
 		recovery_vehicle_id = ""
+		manual_backoff_vehicle_id = ""
 		for vehicle: Dictionary in vehicles:
 			vehicle.erase("waiting_next")
 			vehicle.erase("turn_exit_cell")
@@ -692,6 +694,10 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			vehicle.erase("stalled_time")
 			vehicle.erase("recovery_mode")
 			vehicle.erase("recovery_remaining")
+			vehicle.erase("manual_backoff")
+			vehicle.erase("manual_backoff_target")
+			vehicle.erase("manual_backoff_cell")
+			vehicle.erase("manual_backoff_front_cell")
 	if roads.is_empty() or (desired <= 0 and not bus_active):
 		for car in cars:
 			remove_child(car)
@@ -751,6 +757,9 @@ func step_grid(delta: float) -> void:
 			stalled_time = 0.0
 		vehicle.last_position = current
 		vehicle.stalled_time = stalled_time
+		if vehicle.get("manual_backoff", false):
+			_step_manual_backoff(vehicle, delta)
+			continue
 		# Red-light waits, dead-end roads and queues do not trigger recovery by
 		# elapsed time alone. _update_deadlock_recovery() requires a stalled cycle.
 		if current.distance_to(target) < 0.08:
@@ -836,6 +845,156 @@ func step_grid(delta: float) -> void:
 		vehicle.node.rotation.y = PI / 2 * vehicle.direction if vehicle.axis == "H" else (0.0 if vehicle.direction > 0 else PI)
 		release_grid_reservations_for_vehicle(vehicle)
 	_update_deadlock_recovery(delta)
+
+func _vehicle_by_id(identifier: String) -> Dictionary:
+	for vehicle: Dictionary in vehicles:
+		if str(vehicle.get("id", "")) == identifier:
+			return vehicle
+	return {}
+
+func _moving_blocker_by_id(identifier: String) -> Dictionary:
+	for blocker: Dictionary in blocking_positions:
+		if str(blocker.get("id", "")) == identifier and blocker.get("moving_vehicle", false):
+			return blocker
+	return {}
+
+func _is_opposing_wait(vehicle: Dictionary, other_id: String) -> bool:
+	var other := _vehicle_by_id(other_id)
+	if not other.is_empty():
+		return str(other.get("axis", "")) == str(vehicle.get("axis", "")) and int(other.get("direction", 0)) == -int(vehicle.get("direction", 0))
+	var blocker := _moving_blocker_by_id(other_id)
+	return not blocker.is_empty() and str(blocker.get("axis", "")) == str(vehicle.get("axis", "")) and int(blocker.get("direction", 0)) == -int(vehicle.get("direction", 0))
+
+func _tail_reaches_head_on(vehicle: Dictionary) -> bool:
+	var visited: Dictionary = {}
+	var current := vehicle
+	while not current.is_empty() and visited.size() <= vehicles.size():
+		var current_id := str(current.get("id", ""))
+		if visited.has(current_id) or float(current.get("stalled_time", 0.0)) < 2.0:
+			return false
+		visited[current_id] = true
+		var next_id := str(current.get("waiting_on", ""))
+		if next_id == "":
+			return false
+		if _is_opposing_wait(current, next_id):
+			return true
+		current = _vehicle_by_id(next_id)
+	return false
+
+func _road_degree(cell: Vector2i) -> int:
+	if grid == null:
+		return 0
+	var result := 0
+	for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		if grid.state_at(cell.x + offset.x, cell.y + offset.y) == "road":
+			result += 1
+	return result
+
+func _backoff_plan(vehicle: Dictionary) -> Dictionary:
+	if grid == null or not vehicle.has("cell"):
+		return {}
+	var front_cell: Vector2i = vehicle.get("cell", Vector2i(-1, -1))
+	var retreat_cell: Vector2i = vehicle.get("previous", Vector2i(-1, -1))
+	if retreat_cell == Vector2i(-1, -1):
+		var reverse := Vector2i(-int(vehicle.get("direction", 1)), 0) if str(vehicle.get("axis", "H")) == "H" else Vector2i(0, -int(vehicle.get("direction", 1)))
+		retreat_cell = front_cell + reverse
+	if grid.state_at(retreat_cell.x, retreat_cell.y) != "road":
+		return {}
+	# Never reverse into the conflict area itself. If the immediately previous
+	# cell is a junction, retreat one more connected road cell away from it.
+	if _road_degree(retreat_cell) >= 3:
+		var candidates: Array[Vector2i] = []
+		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var candidate := retreat_cell + offset
+			if candidate != front_cell and grid.state_at(candidate.x, candidate.y) == "road":
+				candidates.append(candidate)
+		if candidates.size() != 1:
+			return {}
+		front_cell = retreat_cell
+		retreat_cell = candidates[0]
+	if _road_degree(retreat_cell) == 0:
+		return {}
+	for other: Dictionary in vehicles:
+		if str(other.get("id", "")) != str(vehicle.get("id", "")) and other.node.visible and other.node.position.distance_to(grid.cell_world(retreat_cell.x, retreat_cell.y)) < TerritoryGrid.CELL_SIZE * 0.42:
+			return {}
+	var center: Vector3 = grid.cell_world(retreat_cell.x, retreat_cell.y)
+	return {"target": grid_lane_position(center, str(vehicle.get("axis", "H")), int(vehicle.get("direction", 1))), "cell": retreat_cell, "front_cell": front_cell}
+
+func manual_backoff_available(actor_id: String) -> bool:
+	if manual_backoff_vehicle_id != "":
+		return false
+	var vehicle := _vehicle_by_id(actor_id)
+	if vehicle.is_empty() or not vehicle.node.visible or vehicle.get("manual_backoff", false):
+		return false
+	# Only the tail may reverse: no visible participant may be queued behind it.
+	for other: Dictionary in vehicles:
+		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
+			return false
+	return _tail_reaches_head_on(vehicle) and not _backoff_plan(vehicle).is_empty()
+
+func request_manual_backoff(actor_id: String) -> bool:
+	if not manual_backoff_available(actor_id):
+		return false
+	var vehicle := _vehicle_by_id(actor_id)
+	var plan := _backoff_plan(vehicle)
+	vehicle.manual_backoff = true
+	vehicle.manual_backoff_target = plan.target
+	vehicle.manual_backoff_cell = plan.cell
+	vehicle.manual_backoff_front_cell = plan.front_cell
+	vehicle.erase("waiting_on")
+	vehicle.waiting_reason = "manual_backoff"
+	manual_backoff_vehicle_id = actor_id
+	return true
+
+func _backoff_step_clear(vehicle: Dictionary, proposed: Vector3) -> bool:
+	var own := grid_half_extents(vehicle)
+	for other: Dictionary in vehicles:
+		if str(other.get("id", "")) == str(vehicle.get("id", "")) or not other.node.visible:
+			continue
+		var sum := own + grid_half_extents(other) + Vector2(0.18, 0.18)
+		if absf(proposed.x - other.node.position.x) < sum.x and absf(proposed.z - other.node.position.z) < sum.y:
+			return false
+	for blocker: Dictionary in blocking_positions:
+		if str(blocker.get("id", "")) == str(vehicle.get("id", "")):
+			continue
+		var block_position: Vector3 = blocker.get("position", Vector3.ZERO)
+		var block_half: Vector2 = blocker.get("half_extents", Vector2(0.85, 0.85))
+		if absf(proposed.x - block_position.x) < own.x + block_half.x + 0.18 and absf(proposed.z - block_position.z) < own.y + block_half.y + 0.18:
+			return false
+	return true
+
+func _step_manual_backoff(vehicle: Dictionary, delta: float) -> Dictionary:
+	var current: Vector3 = vehicle.node.position
+	var target: Vector3 = vehicle.get("manual_backoff_target", current)
+	var proposed := current.move_toward(target, minf(current.distance_to(target), 2.2 * delta))
+	if _backoff_step_clear(vehicle, proposed):
+		vehicle.node.position = proposed
+	if vehicle.node.position.distance_to(target) > 0.08:
+		return {"active": true, "position": vehicle.node.position, "completed": false}
+	var old_cell: Vector2i = vehicle.get("cell", Vector2i(-1, -1))
+	var retreat_cell: Vector2i = vehicle.get("manual_backoff_cell", old_cell)
+	vehicle.cell = retreat_cell
+	vehicle.previous = vehicle.get("manual_backoff_front_cell", old_cell)
+	vehicle.direction = -int(vehicle.get("direction", 1))
+	var center: Vector3 = grid.cell_world(retreat_cell.x, retreat_cell.y)
+	vehicle.road = center.z if str(vehicle.axis) == "H" else center.x
+	vehicle.target = grid_lane_position(center, str(vehicle.axis), int(vehicle.direction))
+	vehicle.coordinate = vehicle.node.position.x if str(vehicle.axis) == "H" else vehicle.node.position.z
+	vehicle.erase("waiting_on")
+	vehicle.waiting_reason = ""
+	vehicle.stalled_time = 0.0
+	vehicle.erase("manual_backoff")
+	vehicle.erase("manual_backoff_target")
+	vehicle.erase("manual_backoff_cell")
+	vehicle.erase("manual_backoff_front_cell")
+	manual_backoff_vehicle_id = ""
+	return {"active": false, "position": vehicle.node.position, "completed": true}
+
+func step_managed_backoff(vehicle: Dictionary, current: Vector3, delta: float) -> Dictionary:
+	if not vehicle.get("manual_backoff", false):
+		return {"active": false, "position": current, "completed": false}
+	vehicle.node.position = current
+	return _step_manual_backoff(vehicle, delta)
 
 func _waiting_cycle(start_id: String) -> Array[String]:
 	var path: Array[String] = []

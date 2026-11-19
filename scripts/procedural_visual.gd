@@ -28,6 +28,9 @@ func _ready() -> void:
 		shanty(seed_value)
 	elif visual_type == "cafe":
 		cafe()
+		cafe_character(seed_value)
+	elif visual_type == "supermarket":
+		supermarket()
 	elif visual_type == "depot":
 		depot()
 		parked_service_vehicle("work_vehicle")
@@ -261,6 +264,47 @@ func cafe() -> void:
 			Art.box(self, Vector3(x + dx, 0.85, 3.35), Vector3(0.5, 0.6, 0.08), Color("927e60"))
 		Art.cylinder(self, Vector3(x * 1.65, 0.4, 1.5), 0.3, 0.7, Color("a58b66"), 1.2)
 		Art.tree(self, Vector3(x * 1.65, 0.4, 1.5), 0.35, false, 1)
+
+func cafe_character(seed_value: int) -> void:
+	# Stable per-building facade details; no randomization on reload.
+	var style := posmod(seed_value, 3)
+	if style == 0:
+		# Corner coffee house: projecting copper roof and lanterns.
+		Art.box(self, Vector3(0, 4.16, 1.1), Vector3(6.2, 0.18, 1.25), Color("9b684a"))
+		for x in [-2.65, 2.65]:
+			Art.cylinder(self, Vector3(x, 2.7, 2.3), 0.13, 0.4, Color("f3cf80"))
+	elif style == 1:
+		# Bakery terrace: planter edge and warm canopy.
+		Art.box(self, Vector3(0, 0.25, 3.6), Vector3(5.9, 0.32, 0.42), Color("ad8266"))
+		for x in [-2.4, 0, 2.4]:
+			Art.box(self, Vector3(x, 0.62, 3.55), Vector3(0.55, 0.55, 0.55), Color("b56e52"))
+			Art.sphere(self, Vector3(x, 1.0, 3.55), 0.42, Color("5d9965"))
+	else:
+		# Roadside diner: broad side sign and striped parapet.
+		Art.box(self, Vector3(2.72, 2.8, -0.7), Vector3(0.18, 1.15, 2.4), Color("d7a54f"))
+		for x in [-2.2, -1.1, 0, 1.1, 2.2]:
+			Art.box(self, Vector3(x, 4.14, -0.8), Vector3(0.3, 0.26, 4.1), Color("f3eee0"))
+
+func supermarket() -> void:
+	# Distinct flat-roof grocery store; unlike the cafe it has a loading bay,
+	# shopping-cart shelter and a wide glazed entrance.
+	Art.box(self, Vector3(0, 0.16, 0), Vector3(8.1, 0.28, 8.2), Color("b7b7a9"))
+	Art.box(self, Vector3(0, 1.65, -0.8), Vector3(7.2, 3.1, 5.5), Color("e2ded2"))
+	Art.box(self, Vector3(0, 3.35, -0.8), Vector3(7.7, 0.35, 5.9), Color("4b7880"))
+	Art.box(self, Vector3(0, 2.9, 2.02), Vector3(6.9, 0.72, 0.16), Color("e4aa55"))
+	for x in [-2.6, -1.35, 1.35, 2.6]:
+		Art.box(self, Vector3(x, 1.35, 2.04), Vector3(1.12, 2.0, 0.1), Color("65969c"))
+	Art.box(self, Vector3(0, 1.15, 2.12), Vector3(1.75, 2.3, 0.13), Color("8fc5c7"))
+	Art.box(self, Vector3(0, 1.16, 2.2), Vector3(0.08, 2.3, 0.13), Color("e9e9db"))
+	# Rear loading dock, visible from the isometric view.
+	Art.box(self, Vector3(-2.35, 0.45, -3.5), Vector3(2.2, 0.55, 1.1), Color("8b9692"))
+	Art.box(self, Vector3(-2.35, 1.55, -3.58), Vector3(1.8, 1.85, 0.1), Color("65767b"))
+	# Cart shelter and parking markings distinguish this from a restaurant.
+	Art.box(self, Vector3(2.7, 1.28, 3.38), Vector3(1.9, 0.12, 1.25), Color("668c91"))
+	for x in [2.0, 3.4]:
+		Art.box(self, Vector3(x, 0.67, 3.38), Vector3(0.09, 1.25, 0.09), Color("697778"))
+	for x in [-2.7, -1.4, 0, 1.4]:
+		Art.box(self, Vector3(x, 0.32, 3.5), Vector3(0.06, 0.03, 0.75), Color("f5f0d9"))
 
 func service_building_shell(wall: Color, roof: Color, foundation: Color) -> void:
 	# L-shaped plan leaves the front-right corner open as a real vehicle court.
@@ -699,7 +743,9 @@ func set_serviced(value: bool) -> void:
 
 func set_language(language: String) -> void:
 	for sign: Label3D in signs:
-		if visual_type == "cafe":
+		if visual_type == "supermarket":
+			sign.text = "МАГАЗИН" if language == "ru" else "MARKET"
+		elif visual_type == "cafe":
 			sign.text = "КАФЕ" if language == "ru" else "CAFE"
 		elif visual_type == "city_hall":
 			sign.text = "МЭРИЯ" if language == "ru" else "CITY HALL"

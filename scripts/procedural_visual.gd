@@ -31,6 +31,7 @@ func _ready() -> void:
 		cafe_character(seed_value)
 	elif visual_type == "supermarket":
 		supermarket()
+		shop_character(seed_value)
 	elif visual_type == "depot":
 		depot()
 		parked_service_vehicle("work_vehicle")
@@ -284,6 +285,32 @@ func cafe_character(seed_value: int) -> void:
 		Art.box(self, Vector3(2.72, 2.8, -0.7), Vector3(0.18, 1.15, 2.4), Color("d7a54f"))
 		for x in [-2.2, -1.1, 0, 1.1, 2.2]:
 			Art.box(self, Vector3(x, 4.14, -0.8), Vector3(0.3, 0.26, 4.1), Color("f3eee0"))
+
+func shop_character(seed_value: int) -> void:
+	# Three readable low-rise retail exteriors: grocery, mini-market, village store.
+	var style := posmod(seed_value, 3)
+	if style == 0:
+		# Grocery: produce stands and a broad green entrance canopy.
+		Art.box(self, Vector3(0, 3.32, 2.45), Vector3(5.8, 0.16, 1.1), Color("60956a"))
+		for x in [-2.5, 2.5]:
+			Art.box(self, Vector3(x, 0.62, 3.15), Vector3(0.9, 0.8, 0.65), Color("a98156"))
+			for z in [2.9, 3.2]:
+				Art.sphere(self, Vector3(x, 1.13, z), 0.2, Color("77a44d"))
+	elif style == 1:
+		# Mini-market: blue roof stripe, bicycle stand and compact front kiosk.
+		Art.box(self, Vector3(0, 3.65, -0.8), Vector3(7.9, 0.2, 5.9), Color("3e789d"))
+		Art.box(self, Vector3(2.7, 1.0, 3.0), Vector3(1.35, 1.8, 0.65), Color("e9d5a4"))
+		Art.box(self, Vector3(2.7, 2.0, 3.0), Vector3(1.55, 0.22, 0.85), Color("4a92ad"))
+		for x in [-2.8, -2.1]:
+			Art.cylinder(self, Vector3(x, 0.44, 3.25), 0.3, 0.06, Color("626e76"))
+	else:
+		# Village general store: timber front, porch posts and pitched sign silhouette.
+		Art.box(self, Vector3(0, 3.7, 2.0), Vector3(7.4, 0.35, 1.35), Color("9c6d49"))
+		for x in [-3.1, 3.1]:
+			Art.box(self, Vector3(x, 1.55, 2.8), Vector3(0.2, 3.0, 0.2), Color("936747"))
+		for x in [-2.9, -1.75, 1.75, 2.9]:
+			Art.box(self, Vector3(x, 2.1, 2.15), Vector3(0.16, 1.2, 0.16), Color("9c704e"))
+		Art.box(self, Vector3(0, 3.95, 2.2), Vector3(2.7, 0.5, 0.18), Color("d8b57a"))
 
 func supermarket() -> void:
 	# Distinct flat-roof grocery store; unlike the cafe it has a loading bay,

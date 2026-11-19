@@ -61,8 +61,10 @@ func route_for(grid: RefCounted, from_index: int, to_index: int) -> Array[Vector
 		return []
 	return route_between(grid, start, finish)
 
-func route_between(grid: RefCounted, start: Vector2i, finish: Vector2i) -> Array[Vector3]:
-	var cells: Array[Vector2i] = grid.road_path(start, finish)
+func route_between(grid: RefCounted, start: Vector2i, finish: Vector2i, avoid: Array = []) -> Array[Vector3]:
+	var cells: Array[Vector2i] = grid.road_path_avoiding(start, finish, avoid) if not avoid.is_empty() else grid.road_path(start, finish)
+	if cells.is_empty() and not avoid.is_empty():
+		cells = grid.road_path(start, finish)
 	var result: Array[Vector3] = []
 	for cell: Vector2i in cells:
 		result.append(grid.cell_world(cell.x, cell.y) + Vector3(0, 0.18, 0))
@@ -173,7 +175,8 @@ func tick(delta: float, traffic: Node3D, grid: RefCounted = null) -> void:
 		if backoff.get("completed", false) and grid != null:
 			var start_cell: Vector2i = grid.nearest_road(bus_position)
 			var target_cell: Vector2i = stop_cell(stops[current_target], grid)
-			set_leg(route_between(grid, start_cell, target_cell), current_target)
+			var avoided: Array = bus.get("banned_cells", [])
+			set_leg(route_between(grid, start_cell, target_cell, avoided), current_target)
 			bus_position = backoff.get("position", bus_position)
 		place_bus(bus, traffic)
 		return

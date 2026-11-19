@@ -34,6 +34,10 @@ var last_states: Dictionary = {}
 var deadlock_cycles: Dictionary = {}
 var deadlock_reroutes: Dictionary = {}
 var recovery_vehicle_id := ""
+const BACKOFF_MIN_STALL := 3.0
+const BACKOFF_MAX_CELLS := 12
+const BACKOFF_SPEED := 3.0
+const BACKOFF_BAN_SECONDS := 120.0
 var manual_backoff_vehicle_id := ""
 var route_rng := RandomNumberGenerator.new()
 var grid: RefCounted
@@ -698,6 +702,11 @@ func configure_grid(source: RefCounted, desired: int, bus_active: bool, signal_n
 			vehicle.erase("manual_backoff_target")
 			vehicle.erase("manual_backoff_cell")
 			vehicle.erase("manual_backoff_front_cell")
+			vehicle.erase("manual_backoff_path")
+			vehicle.erase("manual_backoff_tap_cell")
+			vehicle.erase("manual_backoff_blocked")
+			vehicle.erase("banned_cells")
+			vehicle.erase("banned_until")
 	if roads.is_empty() or (desired <= 0 and not bus_active):
 		for car in cars:
 			remove_child(car)
@@ -778,6 +787,13 @@ func step_grid(delta: float) -> void:
 						options.append(candidate)
 				if options.size() > 1:
 					options.erase(vehicle.previous)
+				if vehicle.has("banned_cells"):
+					var allowed_options: Array[Vector2i] = []
+					for option_cell: Vector2i in options:
+						if not vehicle_cell_banned(vehicle, option_cell):
+							allowed_options.append(option_cell)
+					if not allowed_options.is_empty():
+						options = allowed_options
 				if options.is_empty():
 					vehicle.waiting_reason = "no_road_exit"
 					vehicle.waiting_on = ""
@@ -866,6 +882,7 @@ func _is_opposing_wait(vehicle: Dictionary, other_id: String) -> bool:
 	return not blocker.is_empty() and str(blocker.get("axis", "")) == str(vehicle.get("axis", "")) and int(blocker.get("direction", 0)) == -int(vehicle.get("direction", 0))
 
 func _tail_reaches_head_on(vehicle: Dictionary) -> bool:
+	# Kept for the deadlock tests: true when the wait chain ends in an opposing car.
 	var visited: Dictionary = {}
 	var current := vehicle
 	while not current.is_empty() and visited.size() <= vehicles.size():
@@ -881,6 +898,20 @@ func _tail_reaches_head_on(vehicle: Dictionary) -> bool:
 		current = _vehicle_by_id(next_id)
 	return false
 
+# A car is the tail of a jam when it has been standing for a while because of
+# something ahead of it (a queued car, a fixed blocker) and nobody waits for it.
+func _is_jam_tail(vehicle: Dictionary) -> bool:
+	if float(vehicle.get("stalled_time", 0.0)) < BACKOFF_MIN_STALL:
+		return false
+	var reason := str(vehicle.get("waiting_reason", ""))
+	if reason == "signal" or reason == "no_road_exit" or reason == "manual_backoff":
+		return false
+	if str(vehicle.get("waiting_on", "")) == "":
+		return false
+	if vehicle.has("turn_exit_cell"):
+		return false
+	return true
+
 func _road_degree(cell: Vector2i) -> int:
 	if grid == null:
 		return 0
@@ -891,34 +922,43 @@ func _road_degree(cell: Vector2i) -> int:
 	return result
 
 func _backoff_plan(vehicle: Dictionary) -> Dictionary:
-	if grid == null or not vehicle.has("cell"):
+	if grid == null:
 		return {}
+	if vehicle.get("managed", false):
+		var managed_cell: Vector2i = grid.nearest_road(vehicle.node.position)
+		if managed_cell.x < 0:
+			return {}
+		vehicle.cell = managed_cell
+	if not vehicle.has("cell"):
+		return {}
+	var axis := str(vehicle.get("axis", "H"))
+	var direction := int(vehicle.get("direction", 1))
+	var reverse := Vector2i(-direction, 0) if axis == "H" else Vector2i(0, -direction)
 	var front_cell: Vector2i = vehicle.get("cell", Vector2i(-1, -1))
-	var retreat_cell: Vector2i = vehicle.get("previous", Vector2i(-1, -1))
-	if retreat_cell == Vector2i(-1, -1):
-		var reverse := Vector2i(-int(vehicle.get("direction", 1)), 0) if str(vehicle.get("axis", "H")) == "H" else Vector2i(0, -int(vehicle.get("direction", 1)))
-		retreat_cell = front_cell + reverse
-	if grid.state_at(retreat_cell.x, retreat_cell.y) != "road":
+	var path: Array[Vector2i] = []
+	var cursor := front_cell
+	for _step in range(BACKOFF_MAX_CELLS):
+		var next := cursor + reverse
+		if grid.state_at(next.x, next.y) != "road":
+			break
+		path.append(next)
+		cursor = next
+		# Stop at the first free intersection: from there the car picks a new route.
+		if _road_degree(next) >= 3:
+			break
+	if path.is_empty() or _road_degree(path[path.size() - 1]) <= 1:
 		return {}
-	# Never reverse into the conflict area itself. If the immediately previous
-	# cell is a junction, retreat one more connected road cell away from it.
-	if _road_degree(retreat_cell) >= 3:
-		var candidates: Array[Vector2i] = []
-		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-			var candidate := retreat_cell + offset
-			if candidate != front_cell and grid.state_at(candidate.x, candidate.y) == "road":
-				candidates.append(candidate)
-		if candidates.size() != 1:
-			return {}
-		front_cell = retreat_cell
-		retreat_cell = candidates[0]
-	if _road_degree(retreat_cell) == 0:
-		return {}
+	var own_id := str(vehicle.get("id", ""))
 	for other: Dictionary in vehicles:
-		if str(other.get("id", "")) != str(vehicle.get("id", "")) and other.node.visible and other.node.position.distance_to(grid.cell_world(retreat_cell.x, retreat_cell.y)) < TerritoryGrid.CELL_SIZE * 0.42:
-			return {}
-	var center: Vector3 = grid.cell_world(retreat_cell.x, retreat_cell.y)
-	return {"target": grid_lane_position(center, str(vehicle.get("axis", "H")), int(vehicle.get("direction", 1))), "cell": retreat_cell, "front_cell": front_cell}
+		if str(other.get("id", "")) == own_id or not other.node.visible:
+			continue
+		for cell: Vector2i in path:
+			if other.node.position.distance_to(grid.cell_world(cell.x, cell.y)) < TerritoryGrid.CELL_SIZE * 0.42:
+				return {}
+	var last: Vector2i = path[path.size() - 1]
+	var before_last: Vector2i = path[path.size() - 2] if path.size() > 1 else front_cell
+	var center: Vector3 = grid.cell_world(last.x, last.y)
+	return {"target": grid_lane_position(center, axis, direction), "cell": last, "front_cell": before_last, "path": path, "tap_cell": front_cell}
 
 func manual_backoff_available(actor_id: String) -> bool:
 	if manual_backoff_vehicle_id != "":
@@ -930,7 +970,24 @@ func manual_backoff_available(actor_id: String) -> bool:
 	for other: Dictionary in vehicles:
 		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
 			return false
-	return _tail_reaches_head_on(vehicle) and not _backoff_plan(vehicle).is_empty()
+	if not (_is_jam_tail(vehicle) or _tail_reaches_head_on(vehicle)):
+		return false
+	return not _backoff_plan(vehicle).is_empty()
+
+# Reason shown to the player when the tapped car cannot reverse: "not_tail",
+# "not_stuck", "no_room" or "" when it can.
+func manual_backoff_block_reason(actor_id: String) -> String:
+	var vehicle := _vehicle_by_id(actor_id)
+	if vehicle.is_empty() or not vehicle.node.visible:
+		return "not_stuck"
+	for other: Dictionary in vehicles:
+		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
+			return "not_tail"
+	if not (_is_jam_tail(vehicle) or _tail_reaches_head_on(vehicle)):
+		return "not_stuck"
+	if _backoff_plan(vehicle).is_empty():
+		return "no_room"
+	return ""
 
 func request_manual_backoff(actor_id: String) -> bool:
 	if not manual_backoff_available(actor_id):
@@ -941,10 +998,24 @@ func request_manual_backoff(actor_id: String) -> bool:
 	vehicle.manual_backoff_target = plan.target
 	vehicle.manual_backoff_cell = plan.cell
 	vehicle.manual_backoff_front_cell = plan.front_cell
+	vehicle.manual_backoff_path = plan.path
+	vehicle.manual_backoff_tap_cell = plan.tap_cell
+	vehicle.manual_backoff_blocked = 0.0
 	vehicle.erase("waiting_on")
 	vehicle.waiting_reason = "manual_backoff"
 	manual_backoff_vehicle_id = actor_id
 	return true
+
+func _clear_backoff_state(vehicle: Dictionary) -> void:
+	vehicle.erase("manual_backoff")
+	vehicle.erase("manual_backoff_target")
+	vehicle.erase("manual_backoff_cell")
+	vehicle.erase("manual_backoff_front_cell")
+	vehicle.erase("manual_backoff_path")
+	vehicle.erase("manual_backoff_tap_cell")
+	vehicle.erase("manual_backoff_blocked")
+	if manual_backoff_vehicle_id == str(vehicle.get("id", "")):
+		manual_backoff_vehicle_id = ""
 
 func _backoff_step_clear(vehicle: Dictionary, proposed: Vector3) -> bool:
 	var own := grid_half_extents(vehicle)
@@ -963,32 +1034,67 @@ func _backoff_step_clear(vehicle: Dictionary, proposed: Vector3) -> bool:
 			return false
 	return true
 
+func vehicle_spot_clear(vehicle: Dictionary) -> bool:
+	return _backoff_step_clear(vehicle, vehicle.node.position)
+
 func _step_manual_backoff(vehicle: Dictionary, delta: float) -> Dictionary:
 	var current: Vector3 = vehicle.node.position
 	var target: Vector3 = vehicle.get("manual_backoff_target", current)
-	var proposed := current.move_toward(target, minf(current.distance_to(target), 2.2 * delta))
+	var proposed := current.move_toward(target, minf(current.distance_to(target), BACKOFF_SPEED * delta))
 	if _backoff_step_clear(vehicle, proposed):
 		vehicle.node.position = proposed
-	if vehicle.node.position.distance_to(target) > 0.08:
-		return {"active": true, "position": vehicle.node.position, "completed": false}
-	var old_cell: Vector2i = vehicle.get("cell", Vector2i(-1, -1))
-	var retreat_cell: Vector2i = vehicle.get("manual_backoff_cell", old_cell)
+		vehicle.manual_backoff_blocked = 0.0
+	else:
+		vehicle.manual_backoff_blocked = float(vehicle.get("manual_backoff_blocked", 0.0)) + delta
+		if float(vehicle.manual_backoff_blocked) > 6.0:
+			# Something moved into the lane behind: give up and let normal rules apply.
+			vehicle.waiting_reason = ""
+			vehicle.stalled_time = 0.0
+			_clear_backoff_state(vehicle)
+			return {"active": false, "position": vehicle.node.position, "completed": false}
+	var position_now: Vector3 = vehicle.node.position
+	var path: Array = vehicle.get("manual_backoff_path", [])
+	for index in range(path.size()):
+		var path_cell: Vector2i = path[index]
+		if position_now.distance_to(grid.cell_world(path_cell.x, path_cell.y)) < TerritoryGrid.CELL_SIZE * 0.5:
+			vehicle.cell = path_cell
+			vehicle.previous = path[index - 1] if index > 0 else vehicle.get("manual_backoff_tap_cell", path_cell)
+			break
+	vehicle.coordinate = position_now.x if str(vehicle.axis) == "H" else position_now.z
+	if position_now.distance_to(target) > 0.08:
+		return {"active": true, "position": position_now, "completed": false}
+	var retreat_cell: Vector2i = vehicle.get("manual_backoff_cell", vehicle.get("cell", Vector2i(-1, -1)))
+	# The route is changed: cells of the jam (including the tapped one) are
+	# forbidden for a while, so the car never drives back into the same place.
+	var banned: Array[Vector2i] = []
+	var tap_cell: Vector2i = vehicle.get("manual_backoff_tap_cell", retreat_cell)
+	banned.append(tap_cell)
+	for banned_cell: Vector2i in path:
+		if banned_cell != retreat_cell:
+			banned.append(banned_cell)
+	vehicle.banned_cells = banned
+	vehicle.banned_until = clock + BACKOFF_BAN_SECONDS
 	vehicle.cell = retreat_cell
-	vehicle.previous = vehicle.get("manual_backoff_front_cell", old_cell)
+	vehicle.previous = vehicle.get("manual_backoff_front_cell", tap_cell)
 	vehicle.direction = -int(vehicle.get("direction", 1))
 	var center: Vector3 = grid.cell_world(retreat_cell.x, retreat_cell.y)
 	vehicle.road = center.z if str(vehicle.axis) == "H" else center.x
 	vehicle.target = grid_lane_position(center, str(vehicle.axis), int(vehicle.direction))
-	vehicle.coordinate = vehicle.node.position.x if str(vehicle.axis) == "H" else vehicle.node.position.z
+	vehicle.erase("waiting_next")
 	vehicle.erase("waiting_on")
 	vehicle.waiting_reason = ""
 	vehicle.stalled_time = 0.0
-	vehicle.erase("manual_backoff")
-	vehicle.erase("manual_backoff_target")
-	vehicle.erase("manual_backoff_cell")
-	vehicle.erase("manual_backoff_front_cell")
-	manual_backoff_vehicle_id = ""
+	_clear_backoff_state(vehicle)
 	return {"active": false, "position": vehicle.node.position, "completed": true}
+
+func vehicle_cell_banned(vehicle: Dictionary, cell: Vector2i) -> bool:
+	if not vehicle.has("banned_cells"):
+		return false
+	if clock >= float(vehicle.get("banned_until", 0.0)):
+		vehicle.erase("banned_cells")
+		vehicle.erase("banned_until")
+		return false
+	return cell in vehicle.banned_cells
 
 func step_managed_backoff(vehicle: Dictionary, current: Vector3, delta: float) -> Dictionary:
 	if not vehicle.get("manual_backoff", false):

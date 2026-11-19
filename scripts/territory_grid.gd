@@ -458,6 +458,9 @@ func road_distance_between_buildings(source: Dictionary, destination: Dictionary
 	return route.size() - 1 if not route.is_empty() else -1
 
 func road_path(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
+	return road_path_avoiding(start, goal, [])
+
+func road_path_avoiding(start: Vector2i, goal: Vector2i, avoid: Array) -> Array[Vector2i]:
 	if state_at(start.x, start.y) != "road" or state_at(goal.x, goal.y) != "road":
 		return []
 	var queue: Array[Vector2i] = [start]
@@ -474,7 +477,7 @@ func road_path(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
 			return result
 		for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var next := current + offset
-			if state_at(next.x, next.y) == "road" and not previous.has(next):
+			if state_at(next.x, next.y) == "road" and not previous.has(next) and (next == goal or not avoid.has(next)):
 				previous[next] = current
 				queue.append(next)
 	return []

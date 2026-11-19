@@ -102,6 +102,11 @@ var state_button: Button
 var transit_visuals: Node3D
 var logistics_visuals: Node3D
 var logistics_vehicles: Array[Dictionary] = []
+var backoff_sheet_state := "?"
+var road_police: Dictionary = {}
+var road_police_queue: Array = []
+var road_police_vanished: Array = []
+var backoff_refresh_timer := 0.0
 var logistics_visual_signature: String = ""
 var stop_candidate_visuals: Node3D
 var transit_signature: String = ""
@@ -3487,6 +3492,12 @@ func _process(delta: float) -> void:
 		if game.start_fire():
 			refresh()
 	update_mission_visibility()
+	if selection_kind == "vehicle" and selected_vehicle_type in ["civilian_car", "delivery_truck", "city_bus"]:
+		backoff_refresh_timer += delta
+		if backoff_refresh_timer >= 0.5:
+			backoff_refresh_timer = 0.0
+			if backoff_state_key() != backoff_sheet_state:
+				refresh()
 	if selection_kind == "city_problem" and is_instance_valid(city_problem_timer_label) and game.incidents.has(selected_problem_id):
 		city_problem_timer_label.text = city_problem_time_text(game.incidents[selected_problem_id])
 	if OS.is_debug_build() and OS.has_feature("android"):
@@ -3499,6 +3510,7 @@ func _process(delta: float) -> void:
 	scenery.traffic_controller.service_active = game.job != "" and game.job != "fire" and car != null
 	scenery.traffic_controller.blocking_positions.clear()
 	tick_logistics_vehicles(delta)
+	tick_road_police(delta)
 	sync_construction_site()
 	var fire_motion: Dictionary = {}
 	for assignment: Dictionary in game.fire_assignments():
@@ -4331,20 +4343,50 @@ func build_bus_sheet() -> void:
 	add_manual_traffic_control_action()
 	button(sheet_column, tr_text("Открыть транспорт", "Open transit"), open_transit)
 
+func manual_backoff_reason(identifier: String) -> String:
+	if identifier == "" or scenery == null or scenery.traffic_controller == null:
+		return "not_stuck"
+	if selected_vehicle_type == "delivery_truck":
+		return logistics_backoff_reason(identifier)
+	if scenery.traffic_controller.manual_backoff_vehicle_id != "":
+		return "busy"
+	return scenery.traffic_controller.manual_backoff_block_reason(identifier)
+
 func add_manual_traffic_control_action() -> void:
 	if selected_vehicle_id == "" or scenery == null or scenery.traffic_controller == null:
 		return
-	if not scenery.traffic_controller.manual_backoff_available(selected_vehicle_id):
+	if selected_vehicle_type not in ["civilian_car", "delivery_truck", "city_bus"]:
 		return
-	var control := button(sheet_column, tr_text("Разрулить затор", "Clear the gridlock"), request_selected_vehicle_backoff, true)
-	control.name = "ManualTrafficControlButton"
-	var note := label(16, sheet_column, tr_text("Машина безопасно сдаст назад и перестроит путь.", "The vehicle will reverse safely and choose another route."))
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var reason := manual_backoff_reason(selected_vehicle_id)
+	backoff_sheet_state = backoff_state_key()
+	if reason == "":
+		var control := button(sheet_column, tr_text("Разрулить затор", "Clear the gridlock"), request_selected_vehicle_backoff, true)
+		control.name = "ManualTrafficControlButton"
+		var note := label(16, sheet_column, tr_text("Машина сдаст назад до свободного перекрёстка и поедет другим путём, не возвращаясь на это место.", "The vehicle will reverse to a free intersection and take another route, never returning to this spot."))
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		add_road_police_action()
+		return
+	var hint := tr_text("Откат работает у последней машины в пробке. Нажмите на ту, что стоит в хвосте.", "Backing off works on the last vehicle of a jam. Tap the one at the tail.")
+	if reason == "not_stuck":
+		hint = tr_text("Эта машина сейчас едет или стоит недолго. Откат доступен, когда она застряла в пробке.", "This vehicle is moving or has only just stopped. Backing off unlocks once it is stuck in a jam.")
+	elif reason == "no_room":
+		hint = tr_text("Позади нет свободного места для отката. Вызовите полицию.", "There is no free road behind it. Call the police.")
+	elif reason == "busy":
+		hint = tr_text("Другая машина уже сдаёт назад.", "Another vehicle is already reversing.")
+	var hint_label := label(16, sheet_column, hint)
+	hint_label.name = "ManualTrafficHint"
+	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_road_police_action()
 
 func request_selected_vehicle_backoff() -> void:
 	if selected_vehicle_id == "" or scenery == null or scenery.traffic_controller == null:
 		return
-	if scenery.traffic_controller.request_manual_backoff(selected_vehicle_id):
+	var accepted := false
+	if selected_vehicle_type == "delivery_truck":
+		accepted = request_logistics_backoff(selected_vehicle_id)
+	else:
+		accepted = scenery.traffic_controller.request_manual_backoff(selected_vehicle_id)
+	if accepted:
 		audio.play_ui("success")
 		close_sheet()
 
@@ -4680,6 +4722,15 @@ func tick_logistics_vehicles(delta: float) -> void:
 		var routes: Array = vehicle.routes
 		if routes.is_empty():
 			continue
+		var last_truck_position: Vector3 = vehicle.get("last_position", truck.position)
+		vehicle.stalled_time = float(vehicle.get("stalled_time", 0.0)) + delta if truck.position.distance_to(last_truck_position) < 0.02 else 0.0
+		vehicle.last_position = truck.position
+		if float(vehicle.get("backoff_remaining", 0.0)) > 0.0:
+			step_logistics_backoff(vehicle, delta, traffic_controller)
+			continue
+		if float(vehicle.get("backoff_hold", 0.0)) > 0.0:
+			vehicle.backoff_hold = maxf(0.0, float(vehicle.backoff_hold) - delta)
+			continue
 		var previous_route_index: int = int(vehicle.route_index)
 		var previous_progress: float = float(vehicle.progress)
 		var requested_advance: float = delta * float(vehicle.speed)
@@ -4744,6 +4795,288 @@ func tick_logistics_vehicles(delta: float) -> void:
 			if traffic_controller != null:
 				traffic_controller.release_external_reservations_for_vehicle(str(vehicle.get("id", "")), truck.position)
 			break
+
+const LOGISTICS_BACKOFF_DISTANCE := 14.4
+const LOGISTICS_BACKOFF_SPEED := 2.6
+const LOGISTICS_BACKOFF_HOLD := 14.0
+
+func logistics_vehicle_by_id(identifier: String) -> Dictionary:
+	for vehicle: Dictionary in logistics_vehicles:
+		if str(vehicle.get("id", "")) == identifier:
+			return vehicle
+	return {}
+
+# A delivery truck is the tail of a jam when it has been standing for a few
+# seconds and no other vehicle is queued right behind it.
+func logistics_backoff_reason(identifier: String) -> String:
+	var vehicle := logistics_vehicle_by_id(identifier)
+	var truck: Node3D = vehicle.get("object") if not vehicle.is_empty() else null
+	if truck == null or not is_instance_valid(truck):
+		return "not_stuck"
+	if float(vehicle.get("backoff_remaining", 0.0)) > 0.0 or float(vehicle.get("backoff_hold", 0.0)) > 0.0:
+		return "busy"
+	if float(vehicle.get("stalled_time", 0.0)) < 3.0:
+		return "not_stuck"
+	var heading := Vector3(sin(truck.rotation.y), 0, cos(truck.rotation.y))
+	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
+	var probe: Vector3 = truck.position - heading * 3.6
+	var half := logistics_vehicle_half_extents(heading)
+	if traffic_controller != null:
+		if not traffic_controller.external_vehicle_step_is_clear(truck.position, probe, half.x, half.y, identifier, heading):
+			return "not_tail"
+	for other: Dictionary in logistics_vehicles:
+		var other_truck: Node3D = other.get("object")
+		if other_truck == null or str(other.get("id", "")) == identifier or not is_instance_valid(other_truck):
+			continue
+		if other_truck.position.distance_to(probe) < 2.4:
+			return "not_tail"
+	return ""
+
+func request_logistics_backoff(identifier: String) -> bool:
+	if logistics_backoff_reason(identifier) != "":
+		return false
+	var vehicle := logistics_vehicle_by_id(identifier)
+	vehicle.backoff_remaining = LOGISTICS_BACKOFF_DISTANCE
+	vehicle.stalled_time = 0.0
+	return true
+
+func step_logistics_backoff(vehicle: Dictionary, delta: float, traffic_controller: Variant) -> void:
+	var truck: Node3D = vehicle.get("object")
+	var routes: Array = vehicle.routes
+	var route_index := posmod(int(vehicle.route_index), routes.size())
+	var progress := float(vehicle.progress)
+	var step := minf(LOGISTICS_BACKOFF_SPEED * delta, float(vehicle.backoff_remaining))
+	progress -= step
+	while progress < 0.0:
+		route_index = posmod(route_index - 1, routes.size())
+		var previous_length := logistics_route_length(routes[route_index])
+		if previous_length <= 0.01:
+			progress = 0.0
+			break
+		progress += previous_length
+	var pose := logistics_route_pose(routes[route_index], progress)
+	var proposed: Vector3 = pose.position + Vector3(0, -0.10, 0)
+	var heading: Vector3 = pose.direction
+	var half := logistics_vehicle_half_extents(heading)
+	if traffic_controller != null and not traffic_controller.external_vehicle_step_is_clear(truck.position, proposed, half.x, half.y, str(vehicle.get("id", "")), heading):
+		# Something is behind the truck: stop reversing and wait out the jam.
+		vehicle.backoff_remaining = 0.0
+		vehicle.backoff_hold = LOGISTICS_BACKOFF_HOLD
+		return
+	truck.position = proposed
+	vehicle.route_index = route_index
+	vehicle.progress = progress
+	vehicle.backoff_remaining = maxf(0.0, float(vehicle.backoff_remaining) - step)
+	set_logistics_traffic_blocker(str(vehicle.get("id", "")), truck.position, half, heading)
+	if float(vehicle.backoff_remaining) <= 0.0:
+		vehicle.backoff_hold = LOGISTICS_BACKOFF_HOLD
+
+const ROAD_POLICE_SPEED := 7.0
+const ROAD_POLICE_CLEAR_RADIUS := 11.0
+const ROAD_POLICE_VANISH_INTERVAL := 0.8
+const ROAD_POLICE_RESPAWN := 9.0
+const ROAD_POLICE_QUEUE_LIMIT := 5
+
+func selected_vehicle_world_position() -> Vector3:
+	if selected_vehicle_type == "delivery_truck":
+		var truck_entry := logistics_vehicle_by_id(selected_vehicle_id)
+		var truck: Node3D = truck_entry.get("object") if not truck_entry.is_empty() else null
+		return truck.position if truck != null and is_instance_valid(truck) else Vector3.INF
+	for vehicle: Dictionary in scenery.traffic_controller.vehicles:
+		if str(vehicle.get("id", "")) == selected_vehicle_id and vehicle.node.visible:
+			return vehicle.node.position
+	return Vector3.INF
+
+func road_jam_stalled_vehicles(center: Vector3, radius: float) -> Array:
+	var result: Array = []
+	if scenery == null or scenery.traffic_controller == null:
+		return result
+	for vehicle: Dictionary in scenery.traffic_controller.vehicles:
+		if not vehicle.node.visible or vehicle.get("managed", false) or vehicle.get("manual_backoff", false):
+			continue
+		if float(vehicle.get("stalled_time", 0.0)) < 3.0 or str(vehicle.get("waiting_reason", "")) in ["signal", "manual_backoff"]:
+			continue
+		if vehicle.node.position.distance_to(center) <= radius:
+			result.append({"kind": "car", "vehicle": vehicle, "position": vehicle.node.position})
+	for entry: Dictionary in logistics_vehicles:
+		var truck: Node3D = entry.get("object")
+		if truck == null or not is_instance_valid(truck) or not truck.visible:
+			continue
+		if float(entry.get("stalled_time", 0.0)) >= 3.0 and truck.position.distance_to(center) <= radius:
+			result.append({"kind": "truck", "vehicle": entry, "position": truck.position})
+	return result
+
+func road_jam_here(center: Vector3) -> bool:
+	return center != Vector3.INF and road_jam_stalled_vehicles(center, 16.0).size() >= 3
+
+func backoff_state_key() -> String:
+	var jam := "0"
+	if selected_vehicle_id != "" and scenery != null and scenery.traffic_controller != null:
+		jam = "1" if road_jam_here(selected_vehicle_world_position()) else "0"
+	return manual_backoff_reason(selected_vehicle_id) + "|" + jam + "|" + str(road_police.is_empty())
+
+func road_police_station_position() -> Vector3:
+	for type_id in ["police_station", "depot"]:
+		for entry: Dictionary in game.territory.buildings:
+			if entry.type_id == type_id:
+				return game.territory.building_center(entry)
+	return Vector3.INF
+
+func add_road_police_action() -> void:
+	var center := selected_vehicle_world_position()
+	if not road_jam_here(center):
+		return
+	var has_station := road_police_station_position() != Vector3.INF
+	var queued := road_police_queue.size()
+	var text := tr_text("Вызвать полицию", "Call police")
+	if queued > 0 or not road_police.is_empty():
+		text = tr_text("Вызвать полицию · в очереди %d", "Call police · queued %d") % (queued + (1 if not road_police.is_empty() else 0))
+	var police_button := button(sheet_column, text if has_station else tr_text("Нужен участок полиции", "A police station is needed"), call_police_for_road_jam, true)
+	police_button.name = "CallRoadPolice"
+	police_button.disabled = not has_station or queued >= ROAD_POLICE_QUEUE_LIMIT
+	var police_note := label(16, sheet_column, tr_text("Патруль подъедет по очереди и уберёт машины перед собой и рядом.", "A patrol arrives in turn and removes the cars ahead and beside it."))
+	police_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+func call_police_for_road_jam() -> void:
+	var center := selected_vehicle_world_position()
+	if not road_jam_here(center) or road_police_queue.size() >= ROAD_POLICE_QUEUE_LIMIT or road_police_station_position() == Vector3.INF:
+		audio.play_ui("deny")
+		return
+	road_police_queue.append(center)
+	audio.play_ui("success")
+	close_sheet()
+
+func start_road_police(target: Vector3) -> bool:
+	var station := road_police_station_position()
+	if station == Vector3.INF:
+		return false
+	var start: Vector2i = game.territory.nearest_road(station)
+	var finish: Vector2i = game.territory.nearest_road(target)
+	var path: Array[Vector2i] = game.territory.road_path(start, finish)
+	if path.is_empty():
+		return false
+	var route: Array = []
+	for cell: Vector2i in path:
+		route.append(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 0.18, 0))
+	road_police = {"phase": "travel", "route": route, "index": 0, "position": route[0], "target": target, "vanish_left": 0.0, "clear_left": 45.0, "station": route[0]}
+	return true
+
+func road_police_node() -> Node3D:
+	var node := world.get_node_or_null("RoadPolice") as Node3D
+	if node == null and not road_police.is_empty():
+		node = create_object(world, "police_car", "RoadPolice", road_police.position)
+		node.name = "RoadPolice"
+	return node
+
+func tick_road_police(delta: float) -> void:
+	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
+	if traffic_controller == null:
+		return
+	# Vanished vehicles reappear once the spot is free again.
+	for index in range(road_police_vanished.size() - 1, -1, -1):
+		var item: Dictionary = road_police_vanished[index]
+		item.left = float(item.left) - delta
+		if float(item.left) > 0.0:
+			continue
+		if item.kind == "car":
+			var vehicle: Dictionary = item.vehicle
+			if traffic_controller.vehicle_spot_clear(vehicle):
+				vehicle.node.show()
+				vehicle.stalled_time = 0.0
+				vehicle.erase("waiting_on")
+				road_police_vanished.remove_at(index)
+		else:
+			var truck_entry: Dictionary = item.vehicle
+			var truck: Node3D = truck_entry.get("object")
+			if truck == null or not is_instance_valid(truck):
+				road_police_vanished.remove_at(index)
+			else:
+				var heading := Vector3(sin(truck.rotation.y), 0, cos(truck.rotation.y))
+				var half := logistics_vehicle_half_extents(heading)
+				if traffic_controller.external_vehicle_step_is_clear(truck.position, truck.position, half.x, half.y, str(truck_entry.get("id", "")), heading):
+					truck.show()
+					truck_entry.stalled_time = 0.0
+					road_police_vanished.remove_at(index)
+	if road_police.is_empty():
+		if road_police_queue.is_empty() or game.police_job.size() > 0:
+			sync_road_police_node(false)
+			return
+		var next_target: Vector3 = road_police_queue.pop_front()
+		if road_jam_stalled_vehicles(next_target, 22.0).is_empty() or not start_road_police(next_target):
+			return
+	var phase := str(road_police.phase)
+	var position_value: Vector3 = road_police.position
+	if phase == "travel" or phase == "return":
+		var route: Array = road_police.route
+		var index := int(road_police.index)
+		if index >= route.size():
+			if phase == "travel":
+				road_police.phase = "clearing"
+			else:
+				road_police = {}
+				sync_road_police_node(false)
+				return
+		else:
+			var point: Vector3 = route[index]
+			var step := delta * ROAD_POLICE_SPEED
+			if phase == "travel":
+				# Stop a little short of the tail so the patrol never needs a free lane.
+				if position_value.distance_to(road_police.target) < 7.0 and not road_jam_stalled_vehicles(position_value, ROAD_POLICE_CLEAR_RADIUS).is_empty():
+					road_police.phase = "clearing"
+					road_police.clear_left = 45.0
+					sync_road_police_node(true)
+					return
+				var allowed: float = traffic_controller.service_travel_distance(position_value, position_value.move_toward(point, step), delta, "road_police", true, "", "police_car")
+				step = minf(step, allowed) if allowed >= 0.0 else step
+			road_police.position = position_value.move_toward(point, step)
+			if road_police.position.distance_to(point) < 0.05:
+				road_police.index = index + 1
+	elif phase == "clearing":
+		road_police.clear_left = float(road_police.clear_left) - delta
+		road_police.vanish_left = float(road_police.vanish_left) - delta
+		var targets := road_jam_stalled_vehicles(position_value, ROAD_POLICE_CLEAR_RADIUS)
+		if targets.is_empty():
+			var ahead := road_jam_stalled_vehicles(position_value, 30.0)
+			if ahead.is_empty() or float(road_police.clear_left) <= 0.0:
+				road_police.route.reverse()
+				road_police.index = 0
+				road_police.phase = "return"
+			else:
+				ahead.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.distance_to(position_value) < b.position.distance_to(position_value))
+				road_police.position = position_value.move_toward(ahead[0].position, delta * 3.0)
+		elif float(road_police.vanish_left) <= 0.0:
+			targets.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.distance_to(position_value) < b.position.distance_to(position_value))
+			var victim: Dictionary = targets[0]
+			if victim.kind == "car":
+				victim.vehicle.node.hide()
+			else:
+				var vanished_truck: Node3D = victim.vehicle.get("object")
+				vanished_truck.hide()
+				traffic_controller.blocking_positions = traffic_controller.blocking_positions.filter(func(blocker: Dictionary) -> bool: return str(blocker.get("id", "")) != str(victim.vehicle.get("id", "")))
+			road_police_vanished.append({"kind": victim.kind, "vehicle": victim.vehicle, "left": ROAD_POLICE_RESPAWN + float(road_police_vanished.size()) * 0.3})
+			road_police.vanish_left = ROAD_POLICE_VANISH_INTERVAL
+	sync_road_police_node(true)
+	if not road_police.is_empty() and road_police.phase != "clearing":
+		traffic_controller.blocking_positions.append({"id": "road_police", "position": road_police.position, "half_extents": Vector2(1.2, 0.7)})
+
+func sync_road_police_node(active: bool) -> void:
+	if not active or road_police.is_empty():
+		var node := world.get_node_or_null("RoadPolice")
+		if node != null:
+			node.queue_free()
+		if audio != null:
+			audio.set_loop("road_police_siren", "siren", "Effects", false)
+		return
+	var police := road_police_node()
+	var route: Array = road_police.route
+	var index := mini(int(road_police.index), route.size() - 1)
+	var direction: Vector3 = route[index] - road_police.position
+	police.position = road_police.position
+	if direction.length() > 0.05:
+		police.rotation.y = atan2(direction.x, direction.z)
+	police.set_emergency_lights(road_police.phase != "return", elapsed)
+	if audio != null:
+		audio.set_loop("road_police_siren", "siren", "Effects", road_police.phase != "return", road_police.position, 0.3)
 
 func building_effect(kind: String, level_value: int) -> String:
 	var data := Catalog.level_data(kind, level_value)

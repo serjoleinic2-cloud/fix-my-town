@@ -11,13 +11,17 @@ const EXPANSION_ROWS := Vector2i(19, 27)
 const DISTRICT_ID := "pine_district"
 const CITY_HALL_TYPE := "city_hall"
 const CITY_HALL_SITE := Vector2i(12, 19)
-const BUILDINGS = ["city_hall", "house", "cafe", "supermarket", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
+const RIVER_COLS := Vector2i(45, 46)
+const BRIDGE_SITE := Vector2i(45, 19)
+const BUILDINGS = ["city_hall", "house", "cafe", "supermarket", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "bridge", "field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
 var expansion_cols: Vector2i = EXPANSION_COLS
 var expansion_rows: Vector2i = EXPANSION_ROWS
 var strict_building_frontier: bool = false
+var river_frontier_enabled: bool = false
+var bridge_built: bool = false
 var _expanded_level: int = -1
 var _expanded_cells: Array = []
 var _expanded_halls: Array = []
@@ -37,6 +41,8 @@ func reset() -> void:
 	expansion_cols = EXPANSION_COLS
 	expansion_rows = EXPANSION_ROWS
 	strict_building_frontier = false
+	river_frontier_enabled = false
+	bridge_built = false
 	cells.clear()
 	revealed.clear()
 	for row in range(HEIGHT):
@@ -104,6 +110,14 @@ func install_starting_city_hall() -> bool:
 	return place_building(CITY_HALL_SITE.x, CITY_HALL_SITE.y, CITY_HALL_TYPE)
 
 func set_expansion_level(level: int) -> void:
+	if level >= 11 and not river_frontier_enabled:
+		river_frontier_enabled = true
+		# Stage 11 exposes a compact riverbank and the bridge site. The far bank
+		# remains hidden until the bridge is completed.
+		for row in range(BRIDGE_SITE.y - 6, BRIDGE_SITE.y + 8):
+			for col in range(RIVER_COLS.x - 3, RIVER_COLS.y + 2):
+				if in_bounds(col, row):
+					revealed[row][col] = true
 	# Catalogue availability reads the level repeatedly. Re-reveal only when
 	# the level or actual land/hall layout changes, not for every UI query.
 	var halls: Array = []
@@ -129,6 +143,49 @@ func set_expansion_level(level: int) -> void:
 	_expanded_level = level
 	_expanded_cells = cells.duplicate(true)
 	_expanded_halls = halls
+
+func is_river_cell(col: int, row: int) -> bool:
+	if not river_frontier_enabled or not in_bounds(col, row) or col < RIVER_COLS.x or col > RIVER_COLS.y:
+		return false
+	if bridge_built and col in range(BRIDGE_SITE.x, BRIDGE_SITE.x + 2) and row in range(BRIDGE_SITE.y, BRIDGE_SITE.y + 2):
+		return false
+	# Never cover handcrafted content from an older save. The river claims only
+	# untouched natural/cleared cells when stage 11 is introduced.
+	return state_at(col, row) in ["forest", "free"]
+
+func bridge_site_ready() -> bool:
+	if not river_frontier_enabled or bridge_built:
+		return false
+	for dy in range(2):
+		for dx in range(2):
+			var col := BRIDGE_SITE.x + dx
+			var row := BRIDGE_SITE.y + dy
+			if not is_revealed(col, row) or state_at(col, row) not in ["forest", "free"]:
+				return false
+	return bridge_has_road_access()
+
+func bridge_has_road_access() -> bool:
+	for row in range(BRIDGE_SITE.y, BRIDGE_SITE.y + 2):
+		if connected_road(BRIDGE_SITE.x - 1, row):
+			return true
+	return false
+
+func place_bridge(col: int, row: int) -> bool:
+	if Vector2i(col, row) != BRIDGE_SITE or not bridge_site_ready():
+		return false
+	for dy in range(2):
+		for dx in range(2):
+			cells[row + dy][col + dx] = "road"
+	buildings.append({"type_id": "bridge", "instance_id": "pine_district_bridge", "col": col, "row": row, "width": 2, "height": 2, "level": 1, "inspected": false, "passable_road": true})
+	bridge_built = true
+	# Reveal a usable first farming pocket on the far bank. Future stages can
+	# widen it without changing the bridge or existing city.
+	for reveal_row in range(row - 8, row + 10):
+		for reveal_col in range(RIVER_COLS.y + 1, RIVER_COLS.y + 13):
+			if in_bounds(reveal_col, reveal_row):
+				revealed[reveal_row][reveal_col] = true
+	invalidate_routing_cache()
+	return true
 
 func migrate_legacy(legacy_buildings: Array) -> void:
 	for index in range(24):
@@ -266,6 +323,8 @@ func build_house(col: int, row: int) -> bool:
 func place_building(col: int, row: int, type_id: String) -> bool:
 	if type_id not in BUILDINGS:
 		return false
+	if type_id == "bridge":
+		return place_bridge(col, row)
 	if type_id == CITY_HALL_TYPE:
 		for existing: Dictionary in buildings:
 			if existing.type_id == CITY_HALL_TYPE:
@@ -637,6 +696,16 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 		for dx in range(footprint.x):
 			if not is_revealed(col + dx, row + dy):
 				return "outside"
+	if tool == "bridge":
+		if Vector2i(col, row) != BRIDGE_SITE:
+			return "bridge_site"
+		if not bridge_has_road_access():
+			return "no_road"
+		return "" if bridge_site_ready() else "clear_first"
+	for dy in range(footprint.y):
+		for dx in range(footprint.x):
+			if is_river_cell(col + dx, row + dy):
+				return "river"
 	if tool not in ["clear", "road", "landscaping"] and lot_alignment_reason(col, row, footprint, tool) != "":
 		return "misaligned"
 	if tool == "clear":
@@ -762,10 +831,14 @@ func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
 	return connected
 
 func data() -> Dictionary:
-	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true), "expansion_cols": [expansion_cols.x, expansion_cols.y], "expansion_rows": [expansion_rows.x, expansion_rows.y]}
+	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true), "expansion_cols": [expansion_cols.x, expansion_cols.y], "expansion_rows": [expansion_rows.x, expansion_rows.y], "river_frontier_enabled": river_frontier_enabled, "bridge_built": bridge_built}
 
 func restore(value: Variant) -> bool:
 	if not value is Dictionary or value.get("district_id", DISTRICT_ID) != DISTRICT_ID:
+		return false
+	if value.has("river_frontier_enabled") and typeof(value.river_frontier_enabled) != TYPE_BOOL:
+		return false
+	if value.has("bridge_built") and typeof(value.bridge_built) != TYPE_BOOL:
 		return false
 	var saved_width := int(value.get("width", 0))
 	var saved_height := int(value.get("height", 0))
@@ -865,10 +938,14 @@ func restore(value: Variant) -> bool:
 			for dx in range(expected_footprint.x):
 				var saved_state: String = str(new_cells[building.row + dy][building.col + dx])
 				var saved_road_slot := (saved_arch_axis == "horizontal" and dy in [1, 2] and saved_state == "road") or (saved_arch_axis == "vertical" and dx in [1, 2] and saved_state == "road")
+				if str(building.type_id) == "bridge" and bool(building.get("passable_road", false)) and saved_state == "road":
+					saved_road_slot = true
 				if saved_state != "occupied" and not saved_road_slot:
 					return false
 	cells = new_cells.duplicate(true)
 	buildings = new_buildings.duplicate(true)
+	river_frontier_enabled = bool(value.get("river_frontier_enabled", false))
+	bridge_built = bool(value.get("bridge_built", false)) or buildings.any(func(entry: Dictionary) -> bool: return str(entry.get("type_id", "")) == "bridge")
 	_expanded_level = -1
 	invalidate_routing_cache()
 	if new_revealed is Array and new_revealed.size() == HEIGHT and new_revealed.all(func(line): return line is Array and line.size() == WIDTH):

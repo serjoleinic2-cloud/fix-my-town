@@ -50,7 +50,7 @@ var job_vehicle_id: String = ""
 const FIRE_STATION_ID := "pine_district_fire_station"
 const FIRST_FIRE_TARGET := "pine_district_legacy_0"
 const FIRST_FIRE_NEIGHBOR := "pine_district_legacy_4"
-const LOGISTICS_TARGET_TYPES := ["house", "cafe", "park", "elite_residence", "business_tower", "farm", "fishery", "livestock_farm", "supermarket"]
+const LOGISTICS_TARGET_TYPES := ["house", "cafe", "park", "elite_residence", "business_tower", "field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse", "supermarket"]
 var fire_triggered: bool = false
 var fires: Dictionary = {}
 var fire_damage: Dictionary = {}
@@ -66,6 +66,9 @@ var incident_clock: float = 0.0
 var incident_rng := RandomNumberGenerator.new()
 var incidents: Dictionary = {}
 var incident_notification_serial: int = 0
+var last_incident_type: String = ""
+var incident_type_cooldowns: Dictionary = {}
+var fire_cooldown_left: float = 0.0
 var job_problem_id: String = ""
 var problem_test_hooks_enabled: bool = false
 var _logistics_coverage_cache_signature: int = -1
@@ -75,7 +78,8 @@ var _food_access_cache: Dictionary = {}
 var _food_access_stats: Dictionary = {"calls": 0, "hits": 0, "misses": 0, "buildings_checked": 0, "logistics_hits": 0, "logistics_misses": 0}
 var _service_assignment_cache_signature: int = -1
 var _service_assignment_cache: Dictionary = {}
-const PROBLEM_TYPES := ["leak", "supply", "neglect", "strike"]
+const PROBLEM_TYPES := ["leak", "supply", "electricity", "disease", "traffic_jam", "neglect", "strike"]
+const FIRE_COOLDOWN_SECONDS := 420.0
 const DISORDER_MINIMUM_SECONDS := 120.0
 var district_house_limit: int = 8
 var district_tasks: Array = [
@@ -162,6 +166,9 @@ func start_empty_city() -> void:
 	incidents.clear()
 	incident_notification_serial = 0
 	incident_clock = 0.0
+	last_incident_type = ""
+	incident_type_cooldowns.clear()
+	fire_cooldown_left = 0.0
 	fire_triggered = false
 	transit = Transit.new()
 	district_tasks = [
@@ -402,8 +409,8 @@ func campaign_level_count(type_id: String, minimum_level: int) -> int:
 
 func campaign_stage_title(stage: int = -1) -> String:
 	var value := campaign_stage if stage < 0 else stage
-	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего"]
-	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow"]
+	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой"]
+	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river"]
 	var index := clampi(value, 1, titles_ru.size() - 1)
 	return titles_ru[index] if language == "ru" else titles_en[index]
 
@@ -419,7 +426,8 @@ func campaign_stage_goal_met(stage: int = -1) -> bool:
 		7: return campaign_population_count("business_tower") >= 3 and happiness() >= 65
 		8: return campaign_population_count("business_tower") >= 4 and happiness() >= 72
 		9: return campaign_population_count("business_tower") >= 6 and happiness() >= 78
-		_: return campaign_population_count("business_tower") >= 8 and happiness() >= 85
+		10: return campaign_population_count("business_tower") >= 8 and happiness() >= 85
+		_: return territory.bridge_built
 
 func campaign_stage_progress() -> float:
 	match campaign_stage:
@@ -429,6 +437,7 @@ func campaign_stage_progress() -> float:
 		4: return minf(1.0, float(campaign_population_count("elite_residence")))
 		5: return minf(1.0, float(campaign_population_count("business_tower")))
 		6: return minf(1.0, float(mini(2, campaign_population_count("business_tower")) + mini(2, campaign_population_count("elite_residence")) + int(not logistics_center_entry().is_empty()) + mini(1, logistics_warehouse_count())) / 6.0)
+		11: return 1.0 if territory.bridge_built else 0.0
 		_:
 			var tower_goal := 3 if campaign_stage == 7 else (4 if campaign_stage == 8 else (6 if campaign_stage == 9 else 8))
 			var mood_goal := 65 if campaign_stage == 7 else (72 if campaign_stage == 8 else (78 if campaign_stage == 9 else 85))
@@ -441,7 +450,7 @@ func campaign_stars_for_time(seconds: float) -> int:
 
 func campaign_stage_reward(stage: int = -1) -> int:
 	var value := campaign_stage if stage < 0 else stage
-	if value < 1 or value > 10:
+	if value < 1 or value > 11:
 		return 0
 	match value:
 		1: return 400
@@ -450,10 +459,11 @@ func campaign_stage_reward(stage: int = -1) -> int:
 		4: return 1200
 		5: return 1500
 		6: return 1800
+		11: return 2500
 		_: return 1200 + maxi(0, value - 7) * 200
 
 func grant_campaign_stage_reward(stage: int) -> int:
-	if stage <= 0 or stage > 10 or campaign_reward_granted_stage >= stage:
+	if stage <= 0 or stage > 11 or campaign_reward_granted_stage >= stage:
 		return 0
 	var reward := campaign_stage_reward(stage)
 	budget = mini(1000000, budget + reward)
@@ -474,7 +484,7 @@ func continue_campaign() -> void:
 		return
 	# Backfill rewards for a saved completion created before stage payouts existed.
 	grant_campaign_stage_reward(campaign_completed_stage)
-	if campaign_completed_stage >= 10:
+	if campaign_completed_stage >= 11:
 		campaign_finished = true
 	else:
 		campaign_stage = campaign_completed_stage + 1
@@ -972,6 +982,8 @@ func start_legacy_construction(index: int, type_id: String) -> bool:
 func start_grid_construction(col: int, row: int, type_id: String) -> bool:
 	if not construction_job.is_empty() or budget < Catalog.cost(type_id):
 		return false
+	if Catalog.is_farm(type_id) and not territory.bridge_built:
+		return false
 	if not logistics_site_allowed(type_id, col, row):
 		return false
 	if not initial_building_allowed(col, row, type_id):
@@ -1266,6 +1278,8 @@ func build_grid_building(col: int, row: int, type_id: String, reserved: bool = f
 		return false
 	if not initial_building_allowed(col, row, type_id) or not logistics_site_allowed(type_id, col, row) or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
 		return false
+	if Catalog.is_farm(type_id) and not territory.bridge_built:
+		return false
 	var placement_kind := "landscaping" if Catalog.is_landscaping(type_id) else type_id
 	var price: int = Catalog.cost(type_id)
 	if (not reserved and budget < price) or territory.placement_reason(col, row, placement_kind) != "" or not territory.place_building(col, row, type_id):
@@ -1283,7 +1297,7 @@ func build_grid_service(col: int, row: int, type_id: String) -> bool:
 
 func can_demolish_grid_building(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if entry.is_empty() or entry.has("legacy_plot") or Catalog.is_service(entry.type_id) or entry.type_id == TerritoryGrid.CITY_HALL_TYPE:
+	if entry.is_empty() or entry.has("legacy_plot") or Catalog.is_service(entry.type_id) or entry.type_id in [TerritoryGrid.CITY_HALL_TYPE, "bridge"]:
 		return false
 	if entry.type_id == "logistics_center" and logistics_warehouse_count() > 0:
 		return false
@@ -1776,12 +1790,12 @@ func can_dispatch_fire(identifier: String) -> bool:
 
 func dispatch_to_building(identifier: String) -> bool:
 	var entry := territory.building_by_id(identifier)
-	if job != "" or entry.is_empty() or entry.type_id != "house" or entry.has("legacy_plot"):
+	if job != "" or entry.is_empty() or not is_residential_type(str(entry.type_id)) or entry.has("legacy_plot"):
 		return false
 	var matching_problem := ""
 	for problem_id in incidents:
 		var problem: Dictionary = incidents[problem_id]
-		if str(problem.get("target_id", "")) == identifier and str(problem.get("type", "")) in ["leak", "neglect"] and str(problem.get("state", "new")) != "resolved":
+		if str(problem.get("target_id", "")) == identifier and str(problem.get("type", "")) in ["leak", "neglect", "electricity"] and str(problem.get("state", "new")) != "resolved":
 			matching_problem = str(problem_id)
 			break
 	var service := service_assignment(identifier)
@@ -1896,6 +1910,10 @@ func dispatch_police(incident_id: String) -> bool:
 
 func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
+	if movement_allowed:
+		fire_cooldown_left = maxf(0.0, fire_cooldown_left - delta)
+		for cooldown_type in incident_type_cooldowns.keys():
+			incident_type_cooldowns[cooldown_type] = maxf(0.0, float(incident_type_cooldowns[cooldown_type]) - delta)
 	if movement_allowed and empty_city_mode:
 		housing_neglect_clock += maxf(0.0, delta)
 		if housing_neglect_clock >= 60.0:
@@ -2196,7 +2214,7 @@ func incident_is_valid(incident: Dictionary) -> bool:
 	if not (progress_value is int or progress_value is float) or not is_finite(float(progress_value)) or float(progress_value) < 0.0 or float(progress_value) > 1.0:
 		return false
 	for entry: Dictionary in all_buildings():
-		if entry.instance_id == target_id and str(entry.type_id) == "house" and not entry.has("legacy_plot") and not is_ruined(target_id):
+		if entry.instance_id == target_id and is_residential_type(str(entry.type_id)) and not entry.has("legacy_plot") and not is_ruined(target_id):
 			return true
 	return false
 
@@ -2239,29 +2257,42 @@ func problem_candidates() -> Array[Dictionary]:
 		# network. A maintenance depot improves response, but cannot prevent the
 		# underlying failure from occurring.
 		if not entry.has("legacy_plot") and housing_neglect_percent(str(entry.instance_id)) >= 20 and connected_to_residential_network(entry):
-			candidates.append({"type": "leak", "target": entry})
+			candidates.append({"type": "leak", "target": entry, "weight": 18.0 if not has_service_building("depot") else 12.0})
 			break
 	var shortage := food_shortage_target()
 	if not shortage.is_empty():
-		candidates.append({"type": "supply", "target": shortage})
+		candidates.append({"type": "supply", "target": shortage, "weight": 22.0})
+	if campaign_stage >= 3:
+		var electricity_target: Dictionary = homes[incident_rng.randi_range(0, homes.size() - 1)]
+		candidates.append({"type": "electricity", "target": electricity_target, "weight": 14.0 if not has_service_building("depot") else 8.0})
+		var disease_targets := homes.filter(func(home: Dictionary) -> bool: return record_quality(home).score < 70 or housing_neglect_percent(str(home.instance_id)) >= 10)
+		if not disease_targets.is_empty():
+			candidates.append({"type": "disease", "target": disease_targets[incident_rng.randi_range(0, disease_targets.size() - 1)], "weight": 13.0 if not has_service_building("hospital") else 7.0})
+	if campaign_stage >= 2 and homes.size() >= 3:
+		var traffic_target: Dictionary = homes[incident_rng.randi_range(0, homes.size() - 1)]
+		candidates.append({"type": "traffic_jam", "target": traffic_target, "weight": 12.0 if not has_service_building("police_station") else 8.0})
 	for entry: Dictionary in homes:
 		if entry.has("legacy_plot"):
 			continue
 		var score: float = record_quality(entry).score
 		if score < 55 and housing_neglect_percent(str(entry.instance_id)) >= 20:
-			candidates.append({"type": "neglect", "target": entry})
+			candidates.append({"type": "neglect", "target": entry, "weight": 10.0})
 			break
 	if public_discontent_clock >= DISORDER_MINIMUM_SECONDS and district_quality() >= 0 and district_quality() < 40:
 		for entry: Dictionary in homes:
 			if record_quality(entry).score < 40:
-				candidates.append({"type": "strike", "target": entry})
+				candidates.append({"type": "strike", "target": entry, "weight": 5.0})
 				break
 	var has_residences := not homes.is_empty()
-	if has_residences and fires.size() < 2:
+	if has_residences and fires.size() < 2 and fire_cooldown_left <= 0.0:
 		var fire_targets: Array = homes.filter(func(entry: Dictionary): return not entry.has("legacy_plot"))
 		if not fire_targets.is_empty():
-			candidates.append({"type": "fire", "target": fire_targets[incident_rng.randi_range(0, fire_targets.size() - 1)]})
-	return candidates
+			candidates.append({"type": "fire", "target": fire_targets[incident_rng.randi_range(0, fire_targets.size() - 1)], "weight": 2.0})
+	# A type never repeats immediately. Per-type cooldowns add variety without
+	# changing the global quiet interval or allowing an incident avalanche.
+	return candidates.filter(func(candidate: Dictionary) -> bool:
+		var kind := str(candidate.get("type", ""))
+		return kind != last_incident_type and float(incident_type_cooldowns.get(kind, 0.0)) <= 0.0)
 
 func create_problem(kind: String, target_id: String, forced: bool = false) -> bool:
 	if kind not in PROBLEM_TYPES or active_problem_count() >= 1:
@@ -2271,7 +2302,7 @@ func create_problem(kind: String, target_id: String, forced: bool = false) -> bo
 		if str(entry.instance_id) == target_id:
 			target = entry
 			break
-	if target.is_empty() or target.has("legacy_plot") or target.type_id != "house" or is_ruined(target_id):
+	if target.is_empty() or target.has("legacy_plot") or not is_residential_type(str(target.type_id)) or is_ruined(target_id):
 		return false
 	if kind == "leak" and (housing_neglect_percent(target_id) < 20 or not connected_to_residential_network(target)) and not forced:
 		return false
@@ -2281,12 +2312,16 @@ func create_problem(kind: String, target_id: String, forced: bool = false) -> bo
 		return false
 	if kind == "supply" and food_access_for(target) and not forced:
 		return false
+	if kind == "disease" and record_quality(target).score >= 70 and housing_neglect_percent(target_id) < 10 and not forced:
+		return false
 	incident_notification_serial += 1
 	var id := "problem_%d_%d" % [incident_rng.randi(), incident_notification_serial]
 	incidents[id] = {"id": id, "type": kind, "district_id": TerritoryGrid.DISTRICT_ID, "target_id": target_id,
-		"seed": incident_rng.randi(), "state": "new", "difficulty": clampi(campaign_stage, 1, 10),
+		"seed": incident_rng.randi(), "state": "new", "difficulty": clampi(campaign_stage, 1, 11),
 		"reward": 100 + campaign_stage * 50, "reaction_left": 75.0, "warning_left": 75.0,
 		"progress": 0.0, "consequence_clock": 0.0, "cause": problem_cause(kind), "created_at": campaign_elapsed_seconds}
+	last_incident_type = kind
+	incident_type_cooldowns[kind] = 180.0
 	save_game()
 	return true
 
@@ -2294,6 +2329,9 @@ func problem_cause(kind: String) -> String:
 	match kind:
 		"leak": return "overdue_maintenance_damaged_water_line"
 		"supply": return "no_reachable_food_shop_or_delivery"
+		"electricity": return "local_grid_overload_or_overdue_maintenance"
+		"disease": return "poor_conditions_and_delayed_medical_support"
+		"traffic_jam": return "road_demand_exceeded_local_capacity"
 		"neglect": return "low_housing_quality_and_overdue_maintenance"
 		"strike": return "unresolved_low_quality_and_public_complaints"
 	return "unknown"
@@ -2318,6 +2356,14 @@ func resolve_problem(identifier: String, reason: String) -> bool:
 	incidents[identifier].progress = 1.0
 	save_game()
 	return true
+
+func resolve_problem_with_service(identifier: String, service_type: String) -> bool:
+	if not incidents.has(identifier):
+		return false
+	var required := {"electricity": "depot", "disease": "hospital", "traffic_jam": "police_station"}.get(str(incidents[identifier].get("type", "")), "")
+	if required == "" or required != service_type or not has_service_building(service_type):
+		return false
+	return resolve_problem(identifier, service_type + "_response")
 
 func accept_problem(identifier: String) -> bool:
 	if not incidents.has(identifier) or str(incidents[identifier].get("state", "new")) != "new":
@@ -2356,8 +2402,8 @@ func tick_city_problems(delta: float) -> bool:
 				event.progress = minf(1.0, float(event.get("progress", 0.0)) + 0.1)
 				if kind == "leak":
 					fire_damage[target_id] = mini(99, int(fire_damage.get(target_id, 0)) + 1)
-				elif kind in ["supply", "neglect"]:
-						housing_neglect[target_id] = minf(100.0, float(housing_neglect.get(target_id, 0.0)) + (2.0 if kind == "supply" else 4.0))
+				elif kind in ["supply", "neglect", "disease", "electricity"]:
+					housing_neglect[target_id] = minf(100.0, float(housing_neglect.get(target_id, 0.0)) + (2.0 if kind == "supply" else 4.0))
 				changed = true
 		incidents[key] = event
 	return changed
@@ -2368,15 +2414,28 @@ func generate_incident() -> bool:
 	var candidates := problem_candidates()
 	if candidates.is_empty():
 		return false
-	var selected_problem: Dictionary = candidates[incident_rng.randi_range(0, candidates.size() - 1)]
+	var total_weight := 0.0
+	for candidate: Dictionary in candidates:
+		total_weight += maxf(0.0, float(candidate.get("weight", 1.0)))
+	var roll := incident_rng.randf() * total_weight
+	var selected_problem: Dictionary = candidates.back()
+	for candidate: Dictionary in candidates:
+		roll -= maxf(0.0, float(candidate.get("weight", 1.0)))
+		if roll <= 0.0:
+			selected_problem = candidate
+			break
 	if str(selected_problem.type) == "fire":
-		return start_fire(str(selected_problem.target.instance_id))
+		var started := start_fire(str(selected_problem.target.instance_id))
+		if started:
+			last_incident_type = "fire"
+			fire_cooldown_left = FIRE_COOLDOWN_SECONDS
+		return started
 	return create_problem(str(selected_problem.type), str(selected_problem.target.instance_id))
 
 func city_problem_interval() -> float:
 	# Early districts get longer quiet periods; later stages tighten the rhythm,
 	# while the single-incident cap and 75-second warning still prevent a pileup.
-	return maxf(90.0, 180.0 - float(clampi(campaign_stage, 1, 10)) * 9.0)
+	return maxf(90.0, 180.0 - float(clampi(campaign_stage, 1, 11)) * 9.0)
 
 func check_complete() -> void:
 	completed = completed or (leak_fixed and signal_fixed and (buildings.has("cafe") or buildings.has("park")))
@@ -2413,7 +2472,7 @@ func save_game() -> void:
 		encoded_police_job.route = police_points
 		var police_position: Vector3 = encoded_police_job.vehicle
 		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
-	var data := {"version": 11, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
+	var data := {"version": 12, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
 		"campaign_stage": campaign_stage, "campaign_elapsed_seconds": campaign_elapsed_seconds, "campaign_complete_pending": campaign_complete_pending,
 		"campaign_completed_stage": campaign_completed_stage, "campaign_star_rating": campaign_star_rating, "campaign_reward_granted_stage": campaign_reward_granted_stage, "campaign_finished": campaign_finished, "renewal_credits": renewal_credits,
 		"subsidy_debt": subsidy_debt, "subsidy_threshold": subsidy_threshold, "subsidy_installment": subsidy_installment, "subsidy_income_accumulated": subsidy_income_accumulated,
@@ -2423,6 +2482,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -2438,7 +2498,7 @@ func load_game() -> bool:
 	if file == null:
 		return false
 	var data = JSON.parse_string(file.get_as_text())
-	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
 		return false
 	for key in ["campaign_stage", "campaign_completed_stage", "campaign_star_rating", "renewal_credits", "campaign_reward_granted_stage"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
@@ -2448,11 +2508,22 @@ func load_game() -> bool:
 	for key in ["public_discontent_clock"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or float(data[key]) < 0.0 or float(data[key]) > 1000000000.0):
 			return false
+	if data.has("last_incident_type") and (not data.last_incident_type is String or str(data.last_incident_type) not in PROBLEM_TYPES + ["fire", ""]):
+		return false
+	if data.has("fire_cooldown_left") and (not (data.fire_cooldown_left is int or data.fire_cooldown_left is float) or not is_finite(float(data.fire_cooldown_left)) or float(data.fire_cooldown_left) < 0.0 or float(data.fire_cooldown_left) > 3600.0):
+		return false
+	if data.has("incident_type_cooldowns") and not data.incident_type_cooldowns is Dictionary:
+		return false
+	if data.get("incident_type_cooldowns", {}) is Dictionary:
+		for cooldown_type in data.get("incident_type_cooldowns", {}):
+			var cooldown_value: Variant = data.incident_type_cooldowns[cooldown_type]
+			if str(cooldown_type) not in PROBLEM_TYPES or not (cooldown_value is int or cooldown_value is float) or not is_finite(float(cooldown_value)) or float(cooldown_value) < 0.0 or float(cooldown_value) > 3600.0:
+				return false
 	if data.has("campaign_complete_pending") and typeof(data.campaign_complete_pending) != TYPE_BOOL:
 		return false
 	if data.has("campaign_finished") and typeof(data.campaign_finished) != TYPE_BOOL:
 		return false
-	if int(data.get("campaign_stage", 1)) not in range(1, 11) or int(data.get("campaign_star_rating", 0)) not in range(4):
+	if int(data.get("campaign_stage", 1)) not in range(1, 12) or int(data.get("campaign_star_rating", 0)) not in range(4):
 		return false
 	for key in ["subsidy_debt", "subsidy_threshold", "subsidy_installment", "subsidy_income_accumulated"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
@@ -2780,13 +2851,19 @@ func load_game() -> bool:
 	empty_city_mode = bool(data.get("empty_city_mode", false))
 	territory.strict_building_frontier = empty_city_mode
 	city_layout_version = int(data.get("city_layout_version", 0))
-	campaign_stage = clampi(int(data.get("campaign_stage", 1)), 1, 10)
+	campaign_stage = clampi(int(data.get("campaign_stage", 1)), 1, 11)
 	campaign_elapsed_seconds = maxf(0.0, float(data.get("campaign_elapsed_seconds", 0.0)))
 	campaign_complete_pending = bool(data.get("campaign_complete_pending", false))
-	campaign_completed_stage = clampi(int(data.get("campaign_completed_stage", 0)), 0, 10)
+	campaign_completed_stage = clampi(int(data.get("campaign_completed_stage", 0)), 0, 11)
 	campaign_star_rating = clampi(int(data.get("campaign_star_rating", 0)), 0, 3)
-	campaign_reward_granted_stage = clampi(int(data.get("campaign_reward_granted_stage", 0)), 0, 10)
+	campaign_reward_granted_stage = clampi(int(data.get("campaign_reward_granted_stage", 0)), 0, 11)
 	campaign_finished = bool(data.get("campaign_finished", false))
+	# Saves created when stage 10 was the finale reopen that completion and can
+	# continue to the river chapter without changing the existing city.
+	if campaign_finished and campaign_stage == 10:
+		campaign_finished = false
+		campaign_complete_pending = true
+		campaign_completed_stage = 10
 	renewal_credits = clampi(int(data.get("renewal_credits", 0)), 0, 1000000)
 	subsidy_debt = loaded_subsidy_debt
 	subsidy_threshold = loaded_subsidy_threshold
@@ -2816,6 +2893,16 @@ func load_game() -> bool:
 	construction_job = loaded_construction
 	incident_seed = int(data.get("incident_seed", 48291))
 	incident_clock = maxf(0.0, float(data.get("incident_clock", 0.0)))
+	last_incident_type = str(data.get("last_incident_type", ""))
+	if last_incident_type not in PROBLEM_TYPES + ["fire"]:
+		last_incident_type = ""
+	incident_type_cooldowns = {}
+	var raw_cooldowns: Variant = data.get("incident_type_cooldowns", {})
+	if raw_cooldowns is Dictionary:
+		for cooldown_type in raw_cooldowns:
+			if str(cooldown_type) in PROBLEM_TYPES and (raw_cooldowns[cooldown_type] is int or raw_cooldowns[cooldown_type] is float) and is_finite(float(raw_cooldowns[cooldown_type])):
+				incident_type_cooldowns[str(cooldown_type)] = clampf(float(raw_cooldowns[cooldown_type]), 0.0, 3600.0)
+	fire_cooldown_left = clampf(float(data.get("fire_cooldown_left", 0.0)), 0.0, 3600.0)
 	incidents = {}
 	var raw_incidents: Variant = data.get("incidents", {})
 	if raw_incidents is Dictionary:
@@ -2853,6 +2940,7 @@ func load_game() -> bool:
 			{"id": "first_home", "title": "Построить первый дом", "done": false},
 			{"id": "first_service", "title": "Построить первую службу", "done": false}
 		]
+	territory.set_expansion_level(campaign_stage)
 	check_complete()
 	if campaign_complete_pending and grant_campaign_stage_reward(campaign_completed_stage) > 0:
 		save_game()

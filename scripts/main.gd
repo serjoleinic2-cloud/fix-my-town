@@ -159,12 +159,13 @@ var last_quality: float = -1
 var quality_trend: String = "→"
 const QUALITY_COLORS = [Color("df6356"), Color("e9994f"), Color("d8bd57"), Color("9fc76e"), Color("59a675")]
 const QUALITY_NAMES = [["Критическое", "Неблагополучное", "Удовлетворительное", "Благополучное", "Отличное"], ["Critical", "Struggling", "Satisfactory", "Good", "Excellent"]]
-const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "landscaping"]
+const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "agriculture", "landscaping"]
 const CATALOG_ITEMS := {
 	"residential": ["house", "elite_residence"],
 	"commercial": ["cafe", "supermarket", "park", "business_tower"],
-	"infrastructure": ["clear", "logistics_center", "warehouse"],
+	"infrastructure": ["clear", "bridge", "logistics_center", "warehouse"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
+	"agriculture": ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
 const TEXT = {
@@ -184,6 +185,10 @@ const TEXT = {
 	"city_hall": ["Городской центр", "City Hall"],
 	"logistics_center": ["Логистический центр", "Logistics center"],
 	"warehouse": ["Склад", "Warehouse"],
+	"bridge": ["Городской мост", "City bridge"],
+	"field": ["Поле", "Field"], "barn": ["Амбар", "Barn"], "mill": ["Мельница", "Mill"],
+	"pasture": ["Пастбище", "Pasture"], "livestock_yard": ["Животноводческий двор", "Livestock yard"],
+	"farm_warehouse": ["Фермерский склад", "Farm warehouse"],
 	"elite_residence": ["Элитная резиденция", "Elite residence"], "business_tower": ["Деловая башня", "Business tower"],
 	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
@@ -272,6 +277,7 @@ const TEXT = {
 	"category_commercial": ["Коммерция", "Commercial"],
 	"category_infrastructure": ["Инфраструктура", "Infrastructure"],
 	"category_services": ["Службы", "Services"],
+	"category_agriculture": ["Фермерство", "Farming"],
 	"category_landscaping": ["Благоустройство", "Landscaping"],
 	"place_catalog_item": ["Разместить: %s", "Place: %s"],
 	"selected_cell": ["Выбрана клетка: %s", "Selected cell: %s"],
@@ -1002,6 +1008,8 @@ func territory_structure_signature_value() -> String:
 		"revealed": territory_data.get("revealed", []),
 		"expansion_cols": territory_data.get("expansion_cols", []),
 		"expansion_rows": territory_data.get("expansion_rows", []),
+		"river_frontier_enabled": territory_data.get("river_frontier_enabled", false),
+		"bridge_built": territory_data.get("bridge_built", false),
 		"quality_mode": quality_mode,
 		"language": game.language,
 		"signal_fixed": game.signal_fixed,
@@ -1082,6 +1090,14 @@ func redraw_territory() -> void:
 				continue
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
+			if game.territory.is_river_cell(col, row):
+				Art.box(tile_visuals, center + Vector3(0, 0.035, 0), Vector3(TerritoryGrid.CELL_SIZE + 0.08, 0.07, TerritoryGrid.CELL_SIZE + 0.08), Color("4d91b8"))
+				# A light bank edge keeps the water readable in the isometric view.
+				if col == TerritoryGrid.RIVER_COLS.x:
+					Art.box(tile_visuals, center + Vector3(-2.32, 0.08, 0), Vector3(0.18, 0.16, TerritoryGrid.CELL_SIZE), Color("c8b27c"))
+				elif col == TerritoryGrid.RIVER_COLS.y:
+					Art.box(tile_visuals, center + Vector3(2.32, 0.08, 0), Vector3(0.18, 0.16, TerritoryGrid.CELL_SIZE), Color("c8b27c"))
+				continue
 			if state == "forest":
 				var hall_site: bool = col in range(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.x + 2) and row in range(TerritoryGrid.CITY_HALL_SITE.y, TerritoryGrid.CITY_HALL_SITE.y + 2)
 				if game.empty_city_mode and not game.has_city_hall() and hall_site:
@@ -1647,7 +1663,7 @@ func update_city_problem_visuals() -> void:
 	for problem_id in game.incidents:
 		var incident: Dictionary = game.incidents[problem_id]
 		var kind := str(incident.get("type", ""))
-		if kind not in ["leak", "supply", "neglect", "strike"] or str(incident.get("state", "new")) == "resolved":
+		if kind not in ["leak", "supply", "electricity", "disease", "traffic_jam", "neglect", "strike"] or str(incident.get("state", "new")) == "resolved":
 			continue
 		var target_id := str(incident.get("target_id", ""))
 		var marker := problem_markers.get(str(problem_id)) as Sprite3D
@@ -1661,7 +1677,7 @@ func update_city_problem_visuals() -> void:
 			world.add_child(marker)
 			problem_markers[str(problem_id)] = marker
 		marker.position = game.building_world_for_id(target_id) + Vector3(0, 5.6 + sin(elapsed * 2.4) * 0.14, 0)
-		marker.modulate = {"leak": Color("45a7df"), "supply": Color("e7ad44"), "neglect": Color("9b7559"), "strike": Color("d65a4a")}.get(kind, Color.WHITE)
+		marker.modulate = {"leak": Color("45a7df"), "supply": Color("e7ad44"), "electricity": Color("e6c84f"), "disease": Color("72b78a"), "traffic_jam": Color("d68149"), "neglect": Color("9b7559"), "strike": Color("d65a4a")}.get(kind, Color.WHITE)
 		active_ids[str(problem_id)] = true
 		if not notified_problem_ids.has(str(problem_id)):
 			notified_problem_ids[str(problem_id)] = true
@@ -1681,6 +1697,9 @@ func city_problem_notice(kind: String) -> String:
 	match kind:
 		"leak": return tr_text("Диспетчер · Утечка у дома. Ремонтная бригада готова к вызову.", "Dispatch · Water leak at a home. A repair crew can be sent.")
 		"supply": return tr_text("Диспетчер · Жителям не хватает продовольствия. Нужна доступная торговля или доставка.", "Dispatch · Residents lack food. Add an accessible shop or delivery coverage.")
+		"electricity": return tr_text("Диспетчер · Перегрузка электросети у жилого дома. Нужна коммунальная бригада.", "Dispatch · A residential power fault needs a maintenance crew.")
+		"disease": return tr_text("Диспетчер · В доме растёт заболеваемость. Нужна больница.", "Dispatch · Illness is rising in a home. A hospital is needed.")
+		"traffic_jam": return tr_text("Диспетчер · Перегружена улица у жилого квартала. Полиция может помочь потоку.", "Dispatch · A street near housing is congested. Police can assist traffic.")
 		"neglect": return tr_text("Диспетчер · Дом ветшает из-за низкого качества и отсутствия обслуживания.", "Dispatch · A home is deteriorating from poor conditions and overdue maintenance.")
 		"strike": return tr_text("Диспетчер · Беспорядки у жилого дома. Полиция может восстановить порядок.", "Dispatch · Disorder near a home. Police can restore public order.")
 	return ""
@@ -1850,6 +1869,10 @@ func catalog_requirement(type_id: String) -> String:
 		return t("catalog_requirement_logistics_center")
 	if type_id == "warehouse":
 		return t("catalog_requirement_warehouse")
+	if type_id == "bridge":
+		return tr_text("Специальный участок на реке; открывается после этапа 10", "Dedicated river site; unlocks after stage 10")
+	if Catalog.is_farm(type_id):
+		return tr_text("Участок 2×2 за рекой; сначала завершите мост", "A 2×2 lot beyond the river; complete the bridge first")
 	if type_id == "road":
 		return t("catalog_requirement_road")
 	if Catalog.is_landscaping(type_id):
@@ -1864,6 +1887,8 @@ func catalog_item_unlocked(type_id: String) -> bool:
 	if game.empty_city_mode and not game.has_city_hall() and type_id not in ["city_hall", "clear"]:
 		return false
 	if type_id in ["logistics_center", "warehouse"] and not game.logistics_building_allowed(type_id):
+		return false
+	if Catalog.is_farm(type_id) and not game.territory.bridge_built:
 		return false
 	return maxi(game.city_level(), game.campaign_stage) >= Catalog.unlock_level(type_id)
 
@@ -2482,6 +2507,8 @@ func placement_hint(reason: String) -> String:
 		"city_hall_site": return tr_text("Городской центр строится только на отмеченном центральном участке.", "City Hall can only be built on the highlighted central site.")
 		"not_forest": return tr_text("Здесь уже нет леса. Выберите зелёную клетку.", "No forest here. Select a green cell.")
 		"clear_first": return tr_text("Сначала расчистите весь отмеченный участок.", "Clear the entire highlighted footprint first.")
+		"bridge_site": return tr_text("Мост строится только на отмеченном участке через реку.", "The bridge can only be built on the highlighted river crossing.")
+		"river": return tr_text("На воде можно разместить только мост.", "Only a bridge can be placed on water.")
 		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
 		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
 		"locked": return tr_text("Это здание ещё не открыто.", "This building is still locked.")
@@ -2677,7 +2704,8 @@ func campaign_goal_text(stage: int) -> String:
 		7: return tr_text("3 башни и настроение не ниже 65", "3 towers and happiness of at least 65")
 		8: return tr_text("4 башни и настроение не ниже 72", "4 towers and happiness of at least 72")
 		9: return tr_text("6 башен и настроение не ниже 78", "6 towers and happiness of at least 78")
-		_: return tr_text("8 башен и настроение не ниже 85", "8 towers and happiness of at least 85")
+		10: return tr_text("8 башен и настроение не ниже 85", "8 towers and happiness of at least 85")
+		_: return tr_text("постройте мост и откройте землю за рекой", "build the bridge and unlock land across the river")
 
 func format_duration(seconds: float) -> String:
 	var whole := maxi(0, floori(seconds))
@@ -2740,9 +2768,11 @@ func update_campaign_completion() -> void:
 	var unlocked := label(17, content, tr_text("Новые здания и более высокий этап застройки открыты.", "New buildings and a higher development stage are unlocked."))
 	unlocked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	unlocked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var next_caption := tr_text("Продолжить развитие", "Continue developing") if stage < 10 else tr_text("Продолжить свободную игру", "Continue sandbox")
+	var next_caption := tr_text("Продолжить развитие", "Continue developing") if stage < 11 else tr_text("Продолжить свободную игру", "Continue sandbox")
 	var next := flat_button(content, next_caption, func():
 		game.continue_campaign()
+		if game.campaign_stage == 11:
+			set_camera_focus(game.territory.cell_world(TerritoryGrid.BRIDGE_SITE.x, TerritoryGrid.BRIDGE_SITE.y) + Vector3(4.8, 0, 4.8))
 		campaign_dialog.queue_free()
 		campaign_dialog = null
 		refresh(), true)
@@ -3265,7 +3295,7 @@ func act_on_city_problem() -> void:
 	var incident: Dictionary = game.incidents[selected_problem_id]
 	var kind := str(incident.get("type", ""))
 	var target_id := str(incident.get("target_id", ""))
-	if kind in ["leak", "neglect"]:
+	if kind in ["leak", "neglect", "electricity"]:
 		if not game.has_service_building("depot"):
 			open_service_catalog("depot")
 			return
@@ -3276,6 +3306,18 @@ func act_on_city_problem() -> void:
 		refresh()
 	elif kind == "supply":
 		open_food_access_catalog()
+	elif kind == "disease":
+		if not game.has_service_building("hospital"):
+			open_service_catalog("hospital")
+			return
+		game.resolve_problem_with_service(selected_problem_id, "hospital")
+		close_sheet()
+	elif kind == "traffic_jam":
+		if not game.has_service_building("police_station"):
+			open_service_catalog("police_station")
+			return
+		game.resolve_problem_with_service(selected_problem_id, "police_station")
+		close_sheet()
 	elif kind == "strike":
 		if not game.has_service_building("police_station"):
 			open_service_catalog("police_station")
@@ -3297,6 +3339,9 @@ func build_city_problem_sheet() -> void:
 	var names := {
 		"leak": tr_text("Протечка", "Water leak"),
 		"supply": tr_text("Нехватка снабжения", "Supply shortage"),
+		"electricity": tr_text("Поломка электросети", "Power fault"),
+		"disease": tr_text("Заболевание", "Illness"),
+		"traffic_jam": tr_text("Пробка", "Traffic jam"),
 		"neglect": tr_text("Дом ветшает", "Home deterioration"),
 		"strike": tr_text("Беспорядки", "Public disorder")
 	}
@@ -3308,6 +3353,9 @@ func build_city_problem_sheet() -> void:
 	match kind:
 		"leak": explanation = tr_text("Утечка возникла на подключённой жилой сети после износа. У вас есть время вызвать коммунальную бригаду; без ремонта ущерб начнёт расти постепенно.", "A leak has developed on the connected residential network after wear. You have time to call maintenance; damage will grow gradually if it is left unresolved.")
 		"supply": explanation = tr_text("Поблизости нет подключённого к дороге магазина, а доставка не покрывает дом. Постройте магазин или кафе у дороги либо подключите логистику.", "There is no nearby grocery store connected to roads, and deliveries do not cover this home. Build a roadside shop/café or connect logistics.")
+		"electricity": explanation = tr_text("Локальная электросеть перегружена. Коммунальная служба ускорит восстановление; без неё состояние дома постепенно ухудшается.", "The local power grid is overloaded. Maintenance speeds recovery; without it the home gradually deteriorates.")
+		"disease": explanation = tr_text("Плохие условия вызвали рост заболеваемости. Больница устраняет угрозу, а качество и снабжение уменьшают риск повторения.", "Poor conditions have caused illness. A hospital resolves the threat, while quality and supply reduce recurrence.")
+		"traffic_jam": explanation = tr_text("Нагрузка на улицу превысила её пропускную способность. Полиция помогает восстановить поток, не отменяя обычные правила движения.", "Street demand exceeded capacity. Police help restore flow without disabling normal traffic rules.")
 		"neglect": explanation = tr_text("Низкое качество и накопившееся обслуживание ухудшают дом. Коммунальная бригада может провести обслуживание; улучшите и окружение, чтобы причина не вернулась.", "Poor conditions and overdue maintenance are damaging this home. Send a maintenance crew and improve its surroundings to prevent recurrence.")
 		"strike": explanation = tr_text("Продолжительное недовольство вызвало беспорядки. Полиция снижает опасность и восстанавливает порядок, но качество жизни и причину недовольства нужно исправлять отдельно.", "Prolonged dissatisfaction has caused disorder. Police reduce the danger and restore order, but the underlying quality-of-life issue still needs attention.")
 	var detail := label(19, sheet_column, explanation)
@@ -3317,13 +3365,17 @@ func build_city_problem_sheet() -> void:
 	var action_text := ""
 	if kind == "supply":
 		action_text = tr_text("Открыть коммерческие здания", "Open commercial buildings")
+	elif kind == "disease":
+		action_text = tr_text("Медицинская помощь", "Medical response") if game.has_service_building("hospital") else tr_text("Построить больницу", "Build a hospital")
+	elif kind == "traffic_jam":
+		action_text = tr_text("Вызвать полицию", "Call police") if game.has_service_building("police_station") else tr_text("Построить полицейский участок", "Build a police station")
 	elif kind == "strike":
 		action_text = tr_text("Вызвать полицию", "Call police") if game.has_service_building("police_station") else tr_text("Построить полицейский участок", "Build a police station")
 	else:
 		action_text = tr_text("Вызвать коммунальную бригаду", "Dispatch maintenance") if game.has_service_building("depot") else tr_text("Построить дом рабочих", "Build a maintenance depot")
 	var action_button := button(sheet_column, action_text, act_on_city_problem, true)
 	action_button.name = "ResolveCityProblem"
-	if kind in ["leak", "neglect"]:
+	if kind in ["leak", "neglect", "electricity"]:
 		action_button.disabled = game.has_service_building("depot") and (game.job != "" or game.service_route(target_id).is_empty())
 	elif kind == "strike":
 		action_button.disabled = game.has_service_building("police_station") and (not game.police_job.is_empty() or not game.incidents.has(selected_problem_id))

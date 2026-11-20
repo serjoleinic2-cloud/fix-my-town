@@ -12,6 +12,13 @@ const TYPES = {
 	"depot": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/depot.tscn", "cost": 220, "footprint": Vector2(9, 9)},
 	"logistics_center": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/logistics_center.tscn", "cost": 900, "footprint": Vector2(9.6, 9.6)},
 	"warehouse": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/warehouse.tscn", "cost": 380, "footprint": Vector2(9, 9)},
+	"bridge": {"icon": "res://assets/icons/catalog_road.svg", "scene": "res://scenes/visuals/bridge.tscn", "cost": 3200, "footprint": Vector2(9.6, 9.6)},
+	"field": {"icon": "res://assets/icons/lawn.svg", "scene": "res://scenes/visuals/field.tscn", "cost": 180, "income": 8, "footprint": Vector2(9.6, 9.6)},
+	"barn": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/barn.tscn", "cost": 420, "income": 14, "footprint": Vector2(9.6, 9.6)},
+	"mill": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/mill.tscn", "cost": 680, "income": 22, "footprint": Vector2(9.6, 9.6)},
+	"pasture": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/pasture.tscn", "cost": 240, "income": 9, "footprint": Vector2(9.6, 9.6)},
+	"livestock_yard": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/livestock_yard.tscn", "cost": 760, "income": 25, "footprint": Vector2(9.6, 9.6)},
+	"farm_warehouse": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/farm_warehouse.tscn", "cost": 520, "income": 12, "footprint": Vector2(9.6, 9.6)},
 	"supermarket": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/supermarket.tscn", "cost": 220, "income": 12, "footprint": Vector2(9, 9)},
 	"delivery_truck": {"scene": "res://scenes/visuals/delivery_truck.tscn", "footprint": Vector2(2.4, 4.4)},
 	"fire_station": {"icon": "res://assets/icons/fire_station.svg", "scene": "res://scenes/visuals/fire_station.tscn", "cost": 260, "footprint": Vector2(9, 9)},
@@ -69,11 +76,13 @@ const UNLOCK_LEVELS = {
 	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1, "supermarket": 2,
 	"logistics_center": 6, "warehouse": 6,
 	"elite_residence": 4, "business_tower": 5,
+	"bridge": 11, "field": 11, "barn": 11, "mill": 11, "pasture": 11, "livestock_yard": 11, "farm_warehouse": 11,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
 }
 const LANDSCAPING_TYPES = ["lawn", "flower_bed", "street_tree", "bush"]
 const SERVICE_TYPES = ["fire_station", "police_station", "hospital", "depot"]
+const FARM_TYPES = ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"]
 
 static func unlock_level(type_id: String) -> int:
 	return int(UNLOCK_LEVELS.get(type_id, 1))
@@ -83,6 +92,9 @@ static func is_service(type_id: String) -> bool:
 
 static func is_landscaping(type_id: String) -> bool:
 	return type_id in LANDSCAPING_TYPES
+
+static func is_farm(type_id: String) -> bool:
+	return type_id in FARM_TYPES
 
 static func footprint_cells(type_id: String) -> Vector2i:
 	return Vector2i.ONE if is_landscaping(type_id) else Vector2i(2, 2)

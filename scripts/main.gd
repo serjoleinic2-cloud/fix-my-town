@@ -1371,11 +1371,6 @@ func map_input(event: InputEvent) -> void:
 			stop_preview_cell = stop_marker_cells[candidate_row]
 			refresh()
 		return
-	if selection_kind not in ["territory", "stop_place"]:
-		var tapped_stop := tapped_existing_stop(point)
-		if tapped_stop >= 0:
-			open_stop_card(tapped_stop)
-			return
 	for identifier in game.fires:
 		# Fire markers are Node3D containers with an AnimatedSprite3D child.
 		# Typing the container as Sprite3D aborted touch handling on a burning
@@ -1402,6 +1397,13 @@ func map_input(event: InputEvent) -> void:
 			return
 	if selection_kind != "territory" and select_vehicle_at(point):
 		return
+	if selection_kind not in ["territory", "stop_place"]:
+		# A stopped bus or car can overlap the stop marker. Prefer its smaller
+		# projected body; tapping beside it still opens the stop card.
+		var tapped_stop := tapped_existing_stop(point)
+		if tapped_stop >= 0:
+			open_stop_card(tapped_stop)
+			return
 	if selection_kind != "territory" and select_projected_building(point):
 		return
 	var hit = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
@@ -1555,6 +1557,16 @@ func select_vehicle_at(point: Vector2) -> bool:
 		return false
 	selected_vehicle_type = best.type_id
 	selected_vehicle_id = str(best.instance_id)
+	# Manual traffic control uses stable traffic IDs, not the scene node's
+	# runtime instance ID. The mismatch made the card appear without an action.
+	for traffic_vehicle: Dictionary in scenery.traffic_controller.vehicles:
+		if traffic_vehicle.node == best:
+			selected_vehicle_id = str(traffic_vehicle.get("id", best.instance_id))
+			break
+	for delivery: Dictionary in logistics_vehicles:
+		if delivery.get("object") == best:
+			selected_vehicle_id = str(delivery.get("id", best.instance_id))
+			break
 	audio.play_vehicle_select(str(best.type_id))
 	if best.type_id == "fire_engine":
 		for assignment: Dictionary in game.fire_assignments():
@@ -4819,6 +4831,8 @@ func logistics_backoff_reason(identifier: String) -> String:
 		return "not_stuck"
 	var heading := Vector3(sin(truck.rotation.y), 0, cos(truck.rotation.y))
 	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
+	if traffic_controller == null or not traffic_controller.confirmed_head_on_near(truck.position, heading, 18.0):
+		return "not_stuck"
 	var probe: Vector3 = truck.position - heading * 3.6
 	var half := logistics_vehicle_half_extents(heading)
 	if traffic_controller != null:

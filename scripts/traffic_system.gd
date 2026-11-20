@@ -941,11 +941,12 @@ func _backoff_plan(vehicle: Dictionary) -> Dictionary:
 		var next := cursor + reverse
 		if grid.state_at(next.x, next.y) != "road":
 			break
-		path.append(next)
-		cursor = next
-		# Stop at the first free intersection: from there the car picks a new route.
+		# Never reverse into or through an intersection. Stop on the final safe
+		# lane cell before it, then turn away from the blocked approach.
 		if _road_degree(next) >= 3:
 			break
+		path.append(next)
+		cursor = next
 	if path.is_empty() or _road_degree(path[path.size() - 1]) <= 1:
 		return {}
 	var own_id := str(vehicle.get("id", ""))
@@ -970,7 +971,7 @@ func manual_backoff_available(actor_id: String) -> bool:
 	for other: Dictionary in vehicles:
 		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
 			return false
-	if not (_is_jam_tail(vehicle) or _tail_reaches_head_on(vehicle)):
+	if not _tail_reaches_head_on(vehicle):
 		return false
 	return not _backoff_plan(vehicle).is_empty()
 
@@ -983,11 +984,36 @@ func manual_backoff_block_reason(actor_id: String) -> String:
 	for other: Dictionary in vehicles:
 		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
 			return "not_tail"
-	if not (_is_jam_tail(vehicle) or _tail_reaches_head_on(vehicle)):
+	if not _tail_reaches_head_on(vehicle):
 		return "not_stuck"
 	if _backoff_plan(vehicle).is_empty():
 		return "no_room"
 	return ""
+
+func confirmed_head_on_near(center: Vector3, heading: Vector3, radius: float) -> bool:
+	var axis := "H" if absf(heading.x) >= absf(heading.z) else "V"
+	var participants: Array[Dictionary] = []
+	for vehicle: Dictionary in vehicles:
+		if not vehicle.node.visible or str(vehicle.get("axis", "")) != axis:
+			continue
+		if vehicle.node.position.distance_to(center) <= radius:
+			participants.append({"position": vehicle.node.position, "direction": int(vehicle.get("direction", 0))})
+	for blocker: Dictionary in blocking_positions:
+		if not blocker.get("moving_vehicle", false) or str(blocker.get("axis", "")) != axis:
+			continue
+		var position: Vector3 = blocker.get("position", Vector3.INF)
+		if position.distance_to(center) <= radius:
+			participants.append({"position": position, "direction": int(blocker.get("direction", 0))})
+	for first_index in range(participants.size()):
+		for second_index in range(first_index + 1, participants.size()):
+			var first: Dictionary = participants[first_index]
+			var second: Dictionary = participants[second_index]
+			if int(first.direction) == 0 or int(first.direction) != -int(second.direction):
+				continue
+			var lateral := absf(float(first.position.z) - float(second.position.z)) if axis == "H" else absf(float(first.position.x) - float(second.position.x))
+			if lateral < 1.8 and Vector3(first.position).distance_to(Vector3(second.position)) < 12.0:
+				return true
+	return false
 
 func request_manual_backoff(actor_id: String) -> bool:
 	if not manual_backoff_available(actor_id):

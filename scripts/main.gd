@@ -30,6 +30,7 @@ var selected_fire_id: String = ""
 var fire_markers: Dictionary = {}
 var problem_markers: Dictionary = {}
 var notified_problem_ids: Dictionary = {}
+var traffic_problem_absent_since: Dictionary = {}
 var selected_problem_id: String = ""
 var city_problem_timer_label: Label
 var notified_fire_ids: Dictionary = {}
@@ -39,6 +40,7 @@ var fire_notice_left: float = 0.0
 var subsidy_dialog: Control
 var rewarded_dialog: Control
 var campaign_dialog: Control
+var campaign_intro_dialog: Control
 var jam_notice_cooldown: float = 0.0
 var signal_object: Node3D
 var leak_effect: Node3D
@@ -851,9 +853,29 @@ func make_marker(marker_name: String, point: Vector3) -> void:
 	marker.no_depth_test = true
 	world.add_child(marker)
 
+func incident_building_exists(building_id: String) -> bool:
+	if building_id == "":
+		return false
+	for entry: Dictionary in game.all_buildings():
+		if str(entry.get("instance_id", "")) == building_id:
+			return true
+	return false
+
+func city_problem_marker_texture(kind: String) -> Texture2D:
+	var path: String = str({
+		"leak": "res://assets/icons/ui_drop.svg",
+		"supply": "res://assets/icons/cafe.svg",
+		"electricity": "res://assets/icons/ui_hammer.svg",
+		"disease": "res://assets/icons/hospital.svg",
+		"traffic_jam": "res://assets/icons/problem_marker.svg",
+		"neglect": "res://assets/icons/house.svg",
+		"strike": "res://assets/icons/police_station.svg",
+	}.get(kind, "res://assets/icons/problem_marker.svg"))
+	return load(path) as Texture2D
+
 func update_fire_visuals() -> void:
 	for identifier in fire_markers.keys():
-		if not game.fires.has(identifier):
+		if not game.fires.has(identifier) or not incident_building_exists(str(identifier)):
 			var old_marker: Node = fire_markers[identifier]
 			if is_instance_valid(old_marker):
 				old_marker.queue_free()
@@ -893,6 +915,9 @@ func update_fire_visuals() -> void:
 				Art.box(perimeter, Vector3(side * footprint.x * 0.5, 0.32, 0), Vector3(0.18, 0.12, footprint.y), red)
 			world.add_child(marker)
 		fire_markers[identifier] = marker
+		marker.set_meta("incident_id", identifier)
+		marker.set_meta("building_id", identifier)
+		marker.set_meta("incident_type", "fire")
 		if not notified_fire_ids.has(identifier):
 			notified_fire_ids[identifier] = true
 			fire_notice_left = 4.0
@@ -1038,6 +1063,161 @@ func update_territory_building_states() -> void:
 		object.set_ruined(game.is_ruined(identifier))
 		object.set_neglect_percent(game.housing_neglect_percent(identifier))
 
+func road_cell_touches_river(col: int, row: int) -> bool:
+	for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		if game.territory.is_river_cell(col + offset.x, row + offset.y):
+			return true
+	return false
+
+func draw_northern_boundary(parent: Node3D) -> void:
+	# Low-poly hills close the northern horizon without becoming buildable land.
+	# They live outside row zero and never enter territory placement or routing.
+	for col in range(0, TerritoryGrid.WIDTH, 4):
+		var seed: int = col * 37 + 11
+		var base: Vector3 = game.territory.cell_world(col, 0) + Vector3(0, 0, -6.5 - float(seed % 3))
+		var height: float = 9.0 + float(seed % 5)
+		Art.cylinder(parent, base + Vector3(0, height * 0.5 - 0.2, 0), 6.2 + float(seed % 4), height, Color("66785c"), 0.0, 7)
+		Art.cylinder(parent, base + Vector3(5.0, height * 0.38 - 0.3, -2.2), 4.8, height * 0.76, Color("778765"), 0.0, 7)
+
+func draw_riverfront_cell(parent: Node3D, center: Vector3, col: int, row: int) -> void:
+	# Water is generated for every river-column cell, including below the bridge.
+	# Road, pavement and furniture are generated separately on dry/bridge cells.
+	Art.box(parent, center + Vector3(0, 0.035, 0), Vector3(TerritoryGrid.CELL_SIZE + 0.08, 0.07, TerritoryGrid.CELL_SIZE + 0.08), Color("4d91b8"))
+
+func draw_riverbank_edge(parent: Node3D, center: Vector3, col: int, row: int) -> void:
+	if not game.territory.bridge_built or row == game.territory.bridge_site.y:
+		return
+	var river_side := 0.0
+	if col == game.territory.river_cols.x - 1:
+		river_side = 1.0
+	elif col == game.territory.river_cols.y + 1:
+		river_side = -1.0
+	else:
+		return
+	# The promenade belongs to the dry shore cell. Its rail is omitted at the
+	# bridge row, leaving one clean road opening with no crossing geometry.
+	Art.box(parent, center + Vector3(river_side * 2.0, 0.14, 0), Vector3(0.78, 0.22, TerritoryGrid.CELL_SIZE), Color("c9c2ad"))
+	Art.box(parent, center + Vector3(river_side * 2.36, 0.22, 0), Vector3(0.16, 0.30, TerritoryGrid.CELL_SIZE), Color("d9cfb3"))
+	var rail_x: float = river_side * 2.30
+	for z_offset in [-2.1, 0.0, 2.1]:
+		Art.box(parent, center + Vector3(rail_x, 0.72, z_offset), Vector3(0.12, 1.15, 0.12), Color("6d7776"))
+	for rail_height in [0.52, 0.94]:
+		Art.box(parent, center + Vector3(rail_x, rail_height, 0), Vector3(0.11, 0.10, TerritoryGrid.CELL_SIZE), Color("74807f"))
+	if posmod(row, 4) == 0:
+		Art.lamp(parent, center + Vector3(river_side * 1.72, 0.24, 0), 5.6, 0.0 if river_side < 0 else PI)
+
+func draw_farm_site_hint(parent: Node3D, center: Vector3, col: int, row: int) -> void:
+	if game.campaign_stage < 12 or not game.territory.is_farm_start_cell(col, row):
+		return
+	var green := Color("76d879")
+	for x in [-2.30, 2.30]:
+		Art.box(parent, center + Vector3(x, 0.25, 0), Vector3(0.08, 0.07, 4.55), green)
+	for z in [-2.30, 2.30]:
+		Art.box(parent, center + Vector3(0, 0.25, z), Vector3(4.55, 0.07, 0.08), green)
+
+func draw_road_cell(tile_visuals: Node3D, col: int, row: int, center: Vector3) -> void:
+	var links: Array[Vector2i] = []
+	for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+		if game.territory.state_at(col + offset.x, row + offset.y) == "road":
+			links.append(offset)
+	var topology := road_topology(links)
+	var asphalt := Color("777d80")
+	var concrete := Color("b6b2a3")
+	var markings := Color("e4e1d0")
+	var half_road := 1.4
+	# Each tile uses a topology-specific road surface. Turns and junctions
+	# are assembled from the connected arms instead of covering the tile.
+	if topology in ["corner", "tee", "cross"]:
+		Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, 2.8), asphalt)
+		for offset: Vector2i in links:
+			var arm_center := center + Vector3(offset.x * 1.35, 0.14, offset.y * 1.35)
+			var arm_size := Vector3(TerritoryGrid.CELL_SIZE * 0.5 + 0.7, 0.08, 2.8) if offset.x != 0 else Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE * 0.5 + 0.7)
+			Art.box(tile_visuals, arm_center, arm_size, asphalt)
+			# Sidewalks begin outside the central asphalt square. They never
+			# cut diagonally through the intersection.
+			if offset.x != 0:
+				for side in [-1.0, 1.0]:
+					Art.box(tile_visuals, center + Vector3(offset.x * 1.8, 0.16, side * 1.85), Vector3(1.2, 0.1, 0.9), concrete)
+			else:
+				for side in [-1.0, 1.0]:
+					Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, offset.y * 1.8), Vector3(0.9, 0.1, 1.2), concrete)
+			if topology in ["tee", "cross"] and not is_in_compact_road_square(col, row):
+				# Only the junction cell owns its crossings. Neighbouring road
+				# cells must not add a second STOP line at the same approach.
+				# Crosswalks sit at the outer edge, leaving the centre clear.
+				GroundRoadVisuals.junction_markings(tile_visuals, center, offset)
+		# Four small corner pads connect the split sidewalk segments.
+		for side_x in [-1.0, 1.0]:
+			for side_z in [-1.0, 1.0]:
+				Art.box(tile_visuals, center + Vector3(side_x * 1.85, 0.16, side_z * 1.85), Vector3(1.0, 0.1, 1.0), concrete)
+		if topology == "tee":
+			for missing: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				if missing in links:
+					continue
+				var cap_center := center + Vector3(missing.x * 1.58, 0.18, missing.y * 1.58)
+				var cap_size := Vector3(0.34, 0.18, 2.9) if missing.x != 0 else Vector3(2.9, 0.18, 0.34)
+				Art.box(tile_visuals, cap_center, cap_size, concrete)
+				var green_center := center + Vector3(missing.x * 2.12, 0.08, missing.y * 2.12)
+				var green_size := Vector3(0.72, 0.10, 4.5) if missing.x != 0 else Vector3(4.5, 0.10, 0.72)
+				Art.box(tile_visuals, green_center, green_size, Color("78965e"))
+	elif topology == "dead_end":
+		var direction: Vector2i = links[0] if not links.is_empty() else Vector2i.UP
+		var segment_center := center + Vector3(direction.x * 0.5, 0.14, direction.y * 0.5)
+		var segment_size := Vector3(3.8, 0.08, 2.8) if direction.x != 0 else Vector3(2.8, 0.08, 3.8)
+		Art.box(tile_visuals, segment_center, segment_size, asphalt)
+		for side in [-1.0, 1.0]:
+			var walk_offset := Vector3(0, 0, side * 1.85) if direction.x != 0 else Vector3(side * 1.85, 0, 0)
+			var walk_size := Vector3(3.8, 0.1, 0.9) if direction.x != 0 else Vector3(0.9, 0.1, 3.8)
+			Art.box(tile_visuals, segment_center + walk_offset + Vector3(0, 0.02, 0), walk_size, concrete)
+		var closed := -direction
+		var end_cap_center := center + Vector3(closed.x * 1.58, 0.18, closed.y * 1.58)
+		var end_cap_size := Vector3(0.38, 0.18, 4.55) if closed.x != 0 else Vector3(4.55, 0.18, 0.38)
+		Art.box(tile_visuals, end_cap_center, end_cap_size, concrete)
+		var end_green_center := center + Vector3(closed.x * 2.14, 0.08, closed.y * 2.14)
+		var end_green_size := Vector3(0.70, 0.10, 4.55) if closed.x != 0 else Vector3(4.55, 0.10, 0.70)
+		Art.box(tile_visuals, end_green_center, end_green_size, Color("78965e"))
+	elif Vector2i.LEFT in links or Vector2i.RIGHT in links:
+		Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, 2.8), asphalt)
+		for side in [-1.0, 1.0]:
+			Art.box(tile_visuals, center + Vector3(0, 0.16, side * 1.85), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.1, 0.9), concrete)
+	else:
+		Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE - 0.04), asphalt)
+		for side in [-1.0, 1.0]:
+			Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, 0), Vector3(0.9, 0.1, TerritoryGrid.CELL_SIZE - 0.04), concrete)
+	if game.territory.is_bridge_road_cell(col, row):
+		# Bridge rails use the same road cell and never add a second asphalt deck.
+		# They sit outside the continuous sidewalks and stop at the dry approaches.
+		for side in [-1.0, 1.0]:
+			for post_x in [-2.1, 0.0, 2.1]:
+				Art.box(tile_visuals, center + Vector3(post_x, 0.74, side * 2.34), Vector3(0.11, 1.12, 0.11), Color("6d7776"))
+			for rail_height in [0.56, 0.96]:
+				Art.box(tile_visuals, center + Vector3(0, rail_height, side * 2.34), Vector3(TerritoryGrid.CELL_SIZE, 0.10, 0.11), Color("74807f"))
+	# Fresh expansion streets use broken centre markings; the dashes
+	# continue into each arm of a bend and stop before crosswalks.
+	for offset: Vector2i in links:
+		# Junction arms already have their own crosswalk and STOP line.
+		# Do not draw the old centre-marking fan there: in isometric view
+		# it becomes a confusing white grid over the intersection.
+		if topology not in ["tee", "cross"]:
+			for dash in range(2):
+				var distance := 0.65 + dash * 1.05
+				var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)
+				var dash_size := Vector3(0.62, 0.018, 0.055) if offset.x != 0 else Vector3(0.055, 0.018, 0.62)
+				Art.box(tile_visuals, dash_center, dash_size, markings)
+	if topology in ["straight", "dead_end"] and posmod(col + row, 3) == 0 and not game.territory.is_river_column_cell(col, row):
+		if Vector2i.LEFT in links or Vector2i.RIGHT in links:
+			Art.lamp(tile_visuals, center + Vector3(0, 0.2, 3.05), 6.2)
+		else:
+			Art.lamp(tile_visuals, center + Vector3(3.05, 0.2, 0), 6.2, PI / 2)
+	if junction_has_signal(topology) and not game.territory.is_river_column_cell(col, row):
+		var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
+		var signal_model: Node = road_light.visual_root.get_child(0) if road_light.visual_root.get_child_count() > 0 else null
+		if signal_model != null and signal_model.has_method("configure_signal_links"):
+			signal_model.configure_signal_links(links)
+		road_light.set_meta("expansion_intersection", true)
+		road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
+		road_light.interaction_area.collision_layer = 0
+
 func redraw_territory() -> void:
 	var signature_started_usec := Time.get_ticks_usec()
 	var signature := territory_structure_signature_value()
@@ -1074,6 +1254,7 @@ func redraw_territory() -> void:
 		ground.material_override = ground_material
 		ground.position = TerritoryGrid.ORIGIN + Vector3((TerritoryGrid.WIDTH - 1) * TerritoryGrid.CELL_SIZE * 0.5, -0.015, (TerritoryGrid.HEIGHT - 1) * TerritoryGrid.CELL_SIZE * 0.5)
 		tile_visuals.add_child(ground)
+		draw_northern_boundary(tile_visuals)
 	# Старый квартал нарисован DistrictWorld исторически. Закрываем газоном удалённые сегменты, чтобы карта совпадала с сеткой.
 	var row_range := range(TerritoryGrid.HEIGHT) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
 	var col_range := range(TerritoryGrid.WIDTH) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1)
@@ -1090,13 +1271,9 @@ func redraw_territory() -> void:
 				continue
 			var state: String = game.territory.state_at(col, row)
 			var center: Vector3 = game.territory.cell_world(col, row)
+			if game.territory.is_river_column_cell(col, row):
+				draw_riverfront_cell(tile_visuals, center, col, row)
 			if game.territory.is_river_cell(col, row):
-				Art.box(tile_visuals, center + Vector3(0, 0.035, 0), Vector3(TerritoryGrid.CELL_SIZE + 0.08, 0.07, TerritoryGrid.CELL_SIZE + 0.08), Color("4d91b8"))
-				# A light bank edge keeps the water readable in the isometric view.
-				if col == TerritoryGrid.RIVER_COLS.x:
-					Art.box(tile_visuals, center + Vector3(-2.32, 0.08, 0), Vector3(0.18, 0.16, TerritoryGrid.CELL_SIZE), Color("c8b27c"))
-				elif col == TerritoryGrid.RIVER_COLS.y:
-					Art.box(tile_visuals, center + Vector3(2.32, 0.08, 0), Vector3(0.18, 0.16, TerritoryGrid.CELL_SIZE), Color("c8b27c"))
 				continue
 			if state == "forest":
 				var hall_site: bool = col in range(TerritoryGrid.CITY_HALL_SITE.x, TerritoryGrid.CITY_HALL_SITE.x + 2) and row in range(TerritoryGrid.CITY_HALL_SITE.y, TerritoryGrid.CITY_HALL_SITE.y + 2)
@@ -1122,76 +1299,21 @@ func redraw_territory() -> void:
 				# and the player can immediately read it as a future work site.
 			elif state == "free":
 				GroundRoadVisuals.cleared_tile(tile_visuals, center, col, row)
+				draw_farm_site_hint(tile_visuals, center, col, row)
 			elif state == "road":
-				var links: Array[Vector2i] = []
-				for offset: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-					if game.territory.state_at(col + offset.x, row + offset.y) == "road":
-						links.append(offset)
-				var topology := road_topology(links)
-				var asphalt := Color("777d80")
-				var concrete := Color("b6b2a3")
-				var markings := Color("e4e1d0")
-				var half_road := 1.4
-				# Each tile uses a topology-specific road surface. Turns and junctions
-				# are assembled from the connected arms instead of covering the tile.
-				if topology in ["corner", "tee", "cross"]:
-					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, 2.8), asphalt)
-					for offset: Vector2i in links:
-						var arm_center := center + Vector3(offset.x * 1.35, 0.14, offset.y * 1.35)
-						var arm_size := Vector3(TerritoryGrid.CELL_SIZE * 0.5 + 0.7, 0.08, 2.8) if offset.x != 0 else Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE * 0.5 + 0.7)
-						Art.box(tile_visuals, arm_center, arm_size, asphalt)
-						# Sidewalks begin outside the central asphalt square. They never
-						# cut diagonally through the intersection.
-						if offset.x != 0:
-							for side in [-1.0, 1.0]:
-								Art.box(tile_visuals, center + Vector3(offset.x * 1.8, 0.16, side * 1.85), Vector3(1.2, 0.1, 0.9), concrete)
-						else:
-							for side in [-1.0, 1.0]:
-								Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, offset.y * 1.8), Vector3(0.9, 0.1, 1.2), concrete)
-						if topology in ["tee", "cross"] and not is_in_compact_road_square(col, row):
-							# Only the junction cell owns its crossings. Neighbouring road
-							# cells must not add a second STOP line at the same approach.
-							# Crosswalks sit at the outer edge, leaving the centre clear.
-							GroundRoadVisuals.junction_markings(tile_visuals, center, offset)
-					# Four small corner pads connect the split sidewalk segments.
-					for side_x in [-1.0, 1.0]:
-						for side_z in [-1.0, 1.0]:
-							Art.box(tile_visuals, center + Vector3(side_x * 1.85, 0.16, side_z * 1.85), Vector3(1.0, 0.1, 1.0), concrete)
-				elif Vector2i.LEFT in links or Vector2i.RIGHT in links:
-					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.08, 2.8), asphalt)
-					for side in [-1.0, 1.0]:
-						Art.box(tile_visuals, center + Vector3(0, 0.16, side * 1.85), Vector3(TerritoryGrid.CELL_SIZE - 0.04, 0.1, 0.9), concrete)
-				else:
-					Art.box(tile_visuals, center + Vector3(0, 0.14, 0), Vector3(2.8, 0.08, TerritoryGrid.CELL_SIZE - 0.04), asphalt)
-					for side in [-1.0, 1.0]:
-						Art.box(tile_visuals, center + Vector3(side * 1.85, 0.16, 0), Vector3(0.9, 0.1, TerritoryGrid.CELL_SIZE - 0.04), concrete)
-				# Fresh expansion streets use broken centre markings; the dashes
-				# continue into each arm of a bend and stop before crosswalks.
-				for offset: Vector2i in links:
-					# Junction arms already have their own crosswalk and STOP line.
-					# Do not draw the old centre-marking fan there: in isometric view
-					# it becomes a confusing white grid over the intersection.
-					if topology not in ["tee", "cross"]:
-						for dash in range(2):
-							var distance := 0.65 + dash * 1.05
-							var dash_center := center + Vector3(offset.x * distance, 0.205, offset.y * distance)
-							var dash_size := Vector3(0.62, 0.018, 0.055) if offset.x != 0 else Vector3(0.055, 0.018, 0.62)
-							Art.box(tile_visuals, dash_center, dash_size, markings)
-				if topology in ["straight", "dead_end"] and posmod(col + row, 3) == 0:
-					if Vector2i.LEFT in links or Vector2i.RIGHT in links:
-						Art.lamp(tile_visuals, center + Vector3(0, 0.2, 3.05), 6.2)
-					else:
-						Art.lamp(tile_visuals, center + Vector3(3.05, 0.2, 0), 6.2, PI / 2)
-				if junction_has_signal(topology):
-					var road_light := create_object(territory_visuals, "traffic_signal", "expansion_signal_%d_%d" % [col, row], center)
-					road_light.set_meta("expansion_intersection", true)
-					road_light.set_meta("signal_offset", float((col + row) % 3) * 2.0)
-					road_light.interaction_area.collision_layer = 0
+				draw_road_cell(tile_visuals, col, row, center)
+			draw_riverbank_edge(tile_visuals, center, col, row)
 	for entry: Dictionary in game.territory.buildings:
 		if not game.empty_city_mode and (entry.row < TerritoryGrid.EXPANSION_ROWS.x or entry.row > TerritoryGrid.EXPANSION_ROWS.y):
 			continue
+		if str(entry.get("type_id", "")) == "bridge":
+			# The bridge is rendered by the same road-cell generator as every
+			# connected street; a separate building scene would duplicate the deck.
+			continue
 		var position: Vector3 = game.territory.building_center(entry)
 		var object := create_object(territory_visuals, entry.type_id, entry.instance_id, position)
+		if Catalog.is_farm(str(entry.get("type_id", ""))):
+			object.rotation.y = farm_building_road_rotation(entry)
 		object.set_meta("grid_instance_id", entry.instance_id)
 		object.set_level(int(entry.get("level", 1)))
 		object.set_ruined(game.is_ruined(entry.instance_id))
@@ -1234,6 +1356,25 @@ func road_topology(links: Array[Vector2i]) -> String:
 func territory_building_visual_size(entry: Dictionary) -> Vector2:
 	return Vector2(float(entry.get("width", 1)) * TerritoryGrid.CELL_SIZE - 0.2,
 		float(entry.get("height", 1)) * TerritoryGrid.CELL_SIZE - 0.2)
+
+func farm_building_road_rotation(entry: Dictionary) -> float:
+	var col := int(entry.get("col", 0))
+	var row := int(entry.get("row", 0))
+	var width := int(entry.get("width", 2))
+	var height := int(entry.get("height", 2))
+	# Farm façades are authored toward local +Z. Turn that façade toward the
+	# shared access street instead of leaving doors facing another farm lot.
+	for edge_row in range(row, row + height):
+		if game.territory.state_at(col - 1, edge_row) == "road":
+			return -PI / 2.0
+		if game.territory.state_at(col + width, edge_row) == "road":
+			return PI / 2.0
+	for edge_col in range(col, col + width):
+		if game.territory.state_at(edge_col, row + height) == "road":
+			return 0.0
+		if game.territory.state_at(edge_col, row - 1) == "road":
+			return PI
+	return 0.0
 
 func set_camera_focus(point: Vector3) -> void:
 	focus_point = Vector3(clampf(point.x, -55, 65), 0, clampf(point.z, -80, 105))
@@ -1393,13 +1534,25 @@ func map_input(event: InputEvent) -> void:
 		# building before its fire card could open.
 		var marker: Node3D = fire_markers.get(identifier)
 		if marker != null and marker.visible and camera.unproject_position(marker.position).distance_to(point) < 42.0 * render_scale / viewport_container.stretch_shrink:
-			selected_fire_id = str(identifier)
+			var fire_incident_id := str(marker.get_meta("incident_id", ""))
+			var fire_building_id := str(marker.get_meta("building_id", ""))
+			if not game.fires.has(fire_incident_id) or fire_incident_id != fire_building_id or not incident_building_exists(fire_building_id):
+				continue
+			selected_fire_id = fire_building_id
 			select_problem("fire")
 			return
 	for problem_id in problem_markers:
 		var problem_marker := problem_markers[problem_id] as Sprite3D
 		if problem_marker != null and problem_marker.visible and camera.unproject_position(problem_marker.position).distance_to(point) < 40.0 * render_scale / viewport_container.stretch_shrink:
-			selected_problem_id = str(problem_id)
+			var incident_id := str(problem_marker.get_meta("incident_id", ""))
+			var building_id := str(problem_marker.get_meta("building_id", ""))
+			var incident_type := str(problem_marker.get_meta("incident_type", ""))
+			if not game.incidents.has(incident_id):
+				continue
+			var incident: Dictionary = game.incidents[incident_id]
+			if str(incident.get("state", "new")) == "resolved" or str(incident.get("target_id", "")) != building_id or str(incident.get("type", "")) != incident_type or not incident_building_exists(building_id):
+				continue
+			selected_problem_id = incident_id
 			game.accept_problem(selected_problem_id)
 			selection_kind = "city_problem"
 			selected = -1
@@ -1664,18 +1817,37 @@ func update_city_problem_visuals() -> void:
 		var incident: Dictionary = game.incidents[problem_id]
 		var kind := str(incident.get("type", ""))
 		if kind not in ["leak", "supply", "electricity", "disease", "traffic_jam", "neglect", "strike"] or str(incident.get("state", "new")) == "resolved":
+			traffic_problem_absent_since.erase(str(problem_id))
 			continue
 		var target_id := str(incident.get("target_id", ""))
+		if not incident_building_exists(target_id):
+			continue
+		if kind == "traffic_jam":
+			var jam_center := game.building_world_for_id(target_id)
+			if not road_jam_here(jam_center):
+				# Procedural demand used to create a building marker without a
+				# visible stopped queue. Hide it immediately, then retire the stale
+				# saved incident after the traffic scene has had time to initialize.
+				if not traffic_problem_absent_since.has(str(problem_id)):
+					traffic_problem_absent_since[str(problem_id)] = elapsed
+				elif elapsed - float(traffic_problem_absent_since[str(problem_id)]) >= 3.0:
+					game.resolve_problem(str(problem_id), "traffic_cleared")
+				continue
+			traffic_problem_absent_since.erase(str(problem_id))
 		var marker := problem_markers.get(str(problem_id)) as Sprite3D
 		if marker == null or not is_instance_valid(marker):
 			marker = Sprite3D.new()
 			marker.name = "CityProblem_" + str(problem_id)
-			marker.texture = load("res://assets/icons/fire_marker.svg")
 			marker.pixel_size = 0.055
 			marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			marker.no_depth_test = true
 			world.add_child(marker)
 			problem_markers[str(problem_id)] = marker
+		if str(marker.get_meta("incident_type", "")) != kind:
+			marker.texture = city_problem_marker_texture(kind)
+		marker.set_meta("incident_id", str(problem_id))
+		marker.set_meta("building_id", target_id)
+		marker.set_meta("incident_type", kind)
 		marker.position = game.building_world_for_id(target_id) + Vector3(0, 5.6 + sin(elapsed * 2.4) * 0.14, 0)
 		marker.modulate = {"leak": Color("45a7df"), "supply": Color("e7ad44"), "electricity": Color("e6c84f"), "disease": Color("72b78a"), "traffic_jam": Color("d68149"), "neglect": Color("9b7559"), "strike": Color("d65a4a")}.get(kind, Color.WHITE)
 		active_ids[str(problem_id)] = true
@@ -1835,7 +2007,12 @@ func snap_placement_anchor(cell: Vector2i, type_id: String) -> Vector2i:
 	return first_aligned if first_aligned.x >= 0 else cell
 
 func catalog_items_for(category: String) -> Array:
-	return CATALOG_ITEMS.get(category, [])
+	var items: Array = CATALOG_ITEMS.get(category, [])
+	if category != "agriculture" or not game.empty_city_mode:
+		return items
+	# Future farming buildings stay out of the catalogue until their chapter;
+	# the stage briefing announces them immediately before they appear.
+	return items.filter(func(type_id: String) -> bool: return game.campaign_stage >= Catalog.unlock_level(type_id))
 
 func catalog_cost(type_id: String) -> int:
 	if type_id == "clear":
@@ -1872,7 +2049,7 @@ func catalog_requirement(type_id: String) -> String:
 	if type_id == "bridge":
 		return tr_text("Специальный участок на реке; открывается после этапа 10", "Dedicated river site; unlocks after stage 10")
 	if Catalog.is_farm(type_id):
-		return tr_text("Участок 2×2 за рекой; сначала завершите мост", "A 2×2 lot beyond the river; complete the bridge first")
+		return tr_text("Участок 2×2 в открытой фермерской зоне за рекой", "A 2×2 lot in the unlocked farming zone across the river")
 	if type_id == "road":
 		return t("catalog_requirement_road")
 	if Catalog.is_landscaping(type_id):
@@ -2098,6 +2275,8 @@ func build_catalog_sheet() -> void:
 		label(17, sheet_column, tr_text("Выберите направление строительства", "Choose a construction category"))
 		for category: String in CATALOG_CATEGORIES:
 			var count := catalog_items_for(category).size()
+			if count == 0:
+				continue
 			var category_button := flat_button(sheet_column, t("category_" + category) + "   ·   %d" % count, set_catalog_category.bind(category), true)
 			category_button.name = "CatalogCategory_" + category
 			category_button.custom_minimum_size.y = 64
@@ -2509,6 +2688,7 @@ func placement_hint(reason: String) -> String:
 		"clear_first": return tr_text("Сначала расчистите весь отмеченный участок.", "Clear the entire highlighted footprint first.")
 		"bridge_site": return tr_text("Мост строится только на отмеченном участке через реку.", "The bridge can only be built on the highlighted river crossing.")
 		"river": return tr_text("На воде можно разместить только мост.", "Only a bridge can be placed on water.")
+		"across_river": return tr_text("Фермерские здания размещаются только в открытой зоне за рекой.", "Farm buildings can only be placed in the unlocked zone across the river.")
 		"no_road": return tr_text("Нужна соседняя дорога, соединённая с городом.", "An adjacent road connected to the city is required.")
 		"budget": return tr_text("Недостаточно средств.", "Not enough funds.")
 		"locked": return tr_text("Это здание ещё не открыто.", "This building is still locked.")
@@ -2624,6 +2804,7 @@ func refresh() -> void:
 			maybe_offer_subsidy()
 			update_layout()
 			update_campaign_completion()
+			update_campaign_intro()
 			_profile_service_refresh_stage("layout_and_completion", layout_started)
 			_finish_service_refresh_profile()
 			return
@@ -2661,6 +2842,7 @@ func refresh() -> void:
 	sync_construction_site()
 	update_layout()
 	update_campaign_completion()
+	update_campaign_intro()
 	_profile_service_refresh_stage("construction_layout_and_completion", layout_started)
 	if service_catalog_baseline_profile:
 		service_catalog_baseline_profile_pending = false
@@ -2705,7 +2887,83 @@ func campaign_goal_text(stage: int) -> String:
 		8: return tr_text("4 башни и настроение не ниже 72", "4 towers and happiness of at least 72")
 		9: return tr_text("6 башен и настроение не ниже 78", "6 towers and happiness of at least 78")
 		10: return tr_text("8 башен и настроение не ниже 85", "8 towers and happiness of at least 85")
-		_: return tr_text("постройте мост и откройте землю за рекой", "build the bridge and unlock land across the river")
+		11:
+			if not game.territory.river_frontier_ready():
+				return ""
+			return tr_text("постройте мост и откройте землю за рекой", "build the bridge and unlock land across the river")
+		12: return tr_text("постройте поле и амбар", "build a field and a barn")
+		13: return tr_text("постройте мельницу и пастбище", "build a mill and a pasture")
+		14: return tr_text("постройте животноводческий двор", "build a livestock yard")
+		15: return tr_text("постройте фермерский склад", "build a farm warehouse")
+		_: return ""
+
+func campaign_stage_unlock_text(stage: int) -> String:
+	match stage:
+		11: return tr_text("Мост и набережная", "Bridge and riverfront")
+		12: return tr_text("Поле и амбар", "Field and barn")
+		13: return tr_text("Мельница и пастбище", "Mill and pasture")
+		14: return tr_text("Животноводческий двор", "Livestock yard")
+		15: return tr_text("Фермерский склад и логистика", "Farm warehouse and logistics")
+		_: return tr_text("Новые участки и развитие города", "New lots and city development")
+
+func campaign_stage_upgrade_text(stage: int) -> String:
+	if stage >= 12:
+		return tr_text("Расширяется территория за рекой; доступны улучшения уже построенных городских зданий.", "The land across the river expands; upgrades remain available for existing city buildings.")
+	if stage >= 2:
+		return tr_text("Открываются следующие уровни улучшения существующих зданий.", "The next upgrade levels for existing buildings become available.")
+	return tr_text("Базовое развитие жилых и городских объектов.", "Basic residential and civic development.")
+
+func close_campaign_intro() -> void:
+	game.acknowledge_campaign_intro()
+	if campaign_intro_dialog != null and is_instance_valid(campaign_intro_dialog):
+		campaign_intro_dialog.queue_free()
+	campaign_intro_dialog = null
+	update_mission_visibility()
+
+func update_campaign_intro() -> void:
+	var stage_land_ready: bool = game.campaign_stage != 12 or game.territory.farm_frontier_ready()
+	var should_show: bool = game.empty_city_mode and stage_land_ready and not game.campaign_complete_pending and not game.campaign_finished and game.campaign_intro_acknowledged_stage < game.campaign_stage
+	if not should_show:
+		if campaign_intro_dialog != null and is_instance_valid(campaign_intro_dialog):
+			campaign_intro_dialog.queue_free()
+		campaign_intro_dialog = null
+		return
+	if campaign_intro_dialog != null and is_instance_valid(campaign_intro_dialog):
+		return
+	var overlay := ColorRect.new()
+	overlay.name = "CampaignStageIntro"
+	overlay.color = Color(0.04, 0.09, 0.12, 0.58)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.add_child(overlay)
+	campaign_intro_dialog = overlay
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.offset_left = safe_left + 16
+	center.offset_right = -(safe_right + 16)
+	center.offset_top = safe_top + 20
+	center.offset_bottom = -(safe_bottom + 20)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size.x = minf(500, screen.size.x - safe_left - safe_right - 32)
+	panel.add_theme_stylebox_override("panel", style(Color("fbf9f4"), 18, Color("9cc7a5")))
+	center.add_child(panel)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 10)
+	panel.add_child(content)
+	var heading := label(27, content, tr_text("Этап %d · %s", "Stage %d · %s") % [game.campaign_stage, game.campaign_stage_title()], true)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var unlocks := label(19, content, tr_text("Откроется: %s", "Unlocks: %s") % campaign_stage_unlock_text(game.campaign_stage), true)
+	unlocks.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var buildings_text := label(18, content, tr_text("Доступные здания: %s", "Available buildings: %s") % campaign_stage_unlock_text(game.campaign_stage))
+	buildings_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var upgrades := label(17, content, campaign_stage_upgrade_text(game.campaign_stage))
+	upgrades.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var goal := label(20, content, tr_text("Главная цель: %s", "Main goal: %s") % campaign_goal_text(game.campaign_stage), true)
+	goal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var start := flat_button(content, tr_text("Начать развитие", "Start development"), close_campaign_intro, true)
+	start.name = "StartCampaignStage"
+	start.custom_minimum_size.y = 68
 
 func format_duration(seconds: float) -> String:
 	var whole := maxi(0, floori(seconds))
@@ -2768,11 +3026,11 @@ func update_campaign_completion() -> void:
 	var unlocked := label(17, content, tr_text("Новые здания и более высокий этап застройки открыты.", "New buildings and a higher development stage are unlocked."))
 	unlocked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	unlocked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var next_caption := tr_text("Продолжить развитие", "Continue developing") if stage < 11 else tr_text("Продолжить свободную игру", "Continue sandbox")
+	var next_caption := tr_text("Продолжить развитие", "Continue developing") if stage < Simulation.MAX_CAMPAIGN_STAGE else tr_text("Продолжить свободную игру", "Continue sandbox")
 	var next := flat_button(content, next_caption, func():
 		game.continue_campaign()
 		if game.campaign_stage == 11:
-			set_camera_focus(game.territory.cell_world(TerritoryGrid.BRIDGE_SITE.x, TerritoryGrid.BRIDGE_SITE.y) + Vector3(4.8, 0, 4.8))
+			set_camera_focus(game.territory.cell_world(game.territory.bridge_site.x, game.territory.bridge_site.y) + Vector3(4.8, 0, 4.8))
 		campaign_dialog.queue_free()
 		campaign_dialog = null
 		refresh(), true)
@@ -3598,19 +3856,23 @@ func _process(delta: float) -> void:
 			if intended_fire > 0.0001 and not bool(assignment.get("primary", false)):
 				fire_motion[fire_id] = scenery.traffic_controller.service_travel_distance(current_fire, proposed_fire, delta, str(assignment.vehicle_id), urgent_response, "", "fire_engine") / intended_fire
 	if not game.police_job.is_empty():
+		var police_actor_id := "police_" + str(game.police_job.get("depot_instance_id", ""))
 		if game.police_job.phase == "clearing":
-			scenery.traffic_controller.blocking_positions.append({"id": "police_" + str(game.police_job.get("depot_instance_id", "")), "position": map_position(game.police_job.vehicle)})
-		fire_motion["police"] = 1.0
-		if game.police_job.phase == "travel" and int(game.police_job.route_index) < game.police_job.route.size():
+			scenery.traffic_controller.blocking_positions.append({"id": police_actor_id, "position": map_position(game.police_job.vehicle), "half_extents": scenery.traffic_controller.service_half_extents("police_car", "H")})
+			fire_motion["police"] = 1.0
+		if game.police_job.phase in ["travel", "return"] and int(game.police_job.route_index) < game.police_job.route.size():
 			var police_current := map_position(game.police_job.vehicle)
 			var police_next := map_position(game.police_job.route[int(game.police_job.route_index)])
 			var police_delta := police_next - police_current
 			var police_axis := "H" if absf(police_delta.x) >= absf(police_delta.z) else "V"
 			var police_direction := int(signf(police_delta.x if police_axis == "H" else police_delta.z))
-			scenery.traffic_controller.blocking_positions.append({"id": "police", "position": police_current, "moving_vehicle": true, "emergency": true, "axis": police_axis, "direction": police_direction, "half_extents": scenery.traffic_controller.service_half_extents("police_car", police_axis)})
-			var police_intended := police_current.distance_to(police_next)
+			var urgent_police_call: bool = str(game.police_job.phase) == "travel"
+			scenery.traffic_controller.blocking_positions.append({"id": police_actor_id, "position": police_current, "moving_vehicle": true, "emergency": urgent_police_call, "axis": police_axis, "direction": police_direction, "half_extents": scenery.traffic_controller.service_half_extents("police_car", police_axis)})
+			var police_proposed := police_current.move_toward(police_next, delta * 2.8)
+			var police_intended := police_current.distance_to(police_proposed)
 			if police_intended > 0.0001:
-				fire_motion["police"] = scenery.traffic_controller.service_travel_distance(police_current, police_current.move_toward(police_next, delta * 2.8), delta, "police", true, str(game.police_job.incident_id), "police_car") / police_intended
+				var ignored_incident := str(game.police_job.get("incident_id", "")) if urgent_police_call else ""
+				fire_motion["police"] = scenery.traffic_controller.service_travel_distance(police_current, police_proposed, delta, police_actor_id, urgent_police_call, ignored_incident, "police_car") / police_intended
 	if scenery.traffic_controller.vehicles.size() > 2:
 		scenery.traffic_controller.vehicles[2].managed = game.transit.active
 	scenery.animate(elapsed)
@@ -5021,18 +5283,40 @@ func call_police_for_road_jam() -> void:
 	audio.play_ui("success")
 	close_sheet()
 
+func road_police_route(from_world: Vector3, to_world: Vector3) -> Array:
+	var start: Vector2i = game.territory.nearest_road(from_world)
+	var finish: Vector2i = game.territory.nearest_road(to_world)
+	if start.x < 0 or finish.x < 0:
+		return []
+	var path: Array[Vector2i] = game.territory.road_path(start, finish)
+	if path.is_empty():
+		return []
+	var route: Array = []
+	for cell: Vector2i in path:
+		route.append(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 0.18, 0))
+	return route
+
+func begin_road_police_return() -> bool:
+	if road_police.is_empty():
+		return false
+	var station := road_police_station_position()
+	if station == Vector3.INF:
+		return false
+	var route := road_police_route(road_police.position, station)
+	if route.is_empty():
+		return false
+	road_police.route = route
+	road_police.index = 0
+	road_police.phase = "return"
+	return true
+
 func start_road_police(target: Vector3) -> bool:
 	var station := road_police_station_position()
 	if station == Vector3.INF:
 		return false
-	var start: Vector2i = game.territory.nearest_road(station)
-	var finish: Vector2i = game.territory.nearest_road(target)
-	var path: Array[Vector2i] = game.territory.road_path(start, finish)
-	if path.is_empty():
+	var route := road_police_route(station, target)
+	if route.is_empty():
 		return false
-	var route: Array = []
-	for cell: Vector2i in path:
-		route.append(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 0.18, 0))
 	road_police = {"phase": "travel", "route": route, "index": 0, "position": route[0], "target": target, "vanish_left": 0.0, "clear_left": 45.0, "station": route[0]}
 	return true
 
@@ -5094,6 +5378,7 @@ func tick_road_police(delta: float) -> void:
 		else:
 			var point: Vector3 = route[index]
 			var step := delta * ROAD_POLICE_SPEED
+			var urgent_response := phase == "travel"
 			if phase == "travel":
 				# Stop a little short of the tail so the patrol never needs a free lane.
 				if position_value.distance_to(road_police.target) < 7.0 and not road_jam_stalled_vehicles(position_value, ROAD_POLICE_CLEAR_RADIUS).is_empty():
@@ -5101,7 +5386,10 @@ func tick_road_police(delta: float) -> void:
 					road_police.clear_left = 45.0
 					sync_road_police_node(true)
 					return
-				var allowed: float = traffic_controller.service_travel_distance(position_value, position_value.move_toward(point, step), delta, "road_police", true, "", "police_car")
+			var proposed := position_value.move_toward(point, step)
+			var intended := position_value.distance_to(proposed)
+			if intended > 0.0001:
+				var allowed: float = traffic_controller.service_travel_distance(position_value, proposed, delta, "road_police", urgent_response, "", "police_car")
 				step = minf(step, allowed) if allowed >= 0.0 else step
 			road_police.position = position_value.move_toward(point, step)
 			if road_police.position.distance_to(point) < 0.05:
@@ -5113,12 +5401,7 @@ func tick_road_police(delta: float) -> void:
 		if targets.is_empty():
 			var ahead := road_jam_stalled_vehicles(position_value, 30.0)
 			if ahead.is_empty() or float(road_police.clear_left) <= 0.0:
-				road_police.route.reverse()
-				road_police.index = 0
-				road_police.phase = "return"
-			else:
-				ahead.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.distance_to(position_value) < b.position.distance_to(position_value))
-				road_police.position = position_value.move_toward(ahead[0].position, delta * 3.0)
+				begin_road_police_return()
 		elif float(road_police.vanish_left) <= 0.0:
 			targets.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.distance_to(position_value) < b.position.distance_to(position_value))
 			var victim: Dictionary = targets[0]
@@ -5132,7 +5415,12 @@ func tick_road_police(delta: float) -> void:
 			road_police.vanish_left = ROAD_POLICE_VANISH_INTERVAL
 	sync_road_police_node(true)
 	if not road_police.is_empty() and road_police.phase != "clearing":
-		traffic_controller.blocking_positions.append({"id": "road_police", "position": road_police.position, "half_extents": Vector2(1.2, 0.7)})
+		var route: Array = road_police.route
+		var index := mini(int(road_police.index), route.size() - 1)
+		var route_delta: Vector3 = route[index] - road_police.position if not route.is_empty() else Vector3.FORWARD
+		var route_axis := "H" if absf(route_delta.x) >= absf(route_delta.z) else "V"
+		var route_direction := int(signf(route_delta.x if route_axis == "H" else route_delta.z))
+		traffic_controller.blocking_positions.append({"id": "road_police", "position": road_police.position, "moving_vehicle": true, "emergency": road_police.phase == "travel", "axis": route_axis, "direction": route_direction, "half_extents": traffic_controller.service_half_extents("police_car", route_axis)})
 
 func sync_road_police_node(active: bool) -> void:
 	if not active or road_police.is_empty():
@@ -5261,7 +5549,8 @@ func request_demolition(index: int) -> void:
 
 func update_mission_visibility() -> void:
 	if game.empty_city_mode:
-		mission.visible = not sheet.visible and not game.campaign_complete_pending
+		var stage_content_ready: bool = game.campaign_stage != 11 or game.territory.river_frontier_ready()
+		mission.visible = not sheet.visible and not game.campaign_complete_pending and stage_content_ready
 	else:
 		mission.visible = not sheet.visible and (not game.completed or completion_left > 0)
 

@@ -45,6 +45,11 @@ func run() -> void:
 	var loaded_again := Simulation.new(false)
 	loaded_again.save_path = path
 	check(loaded_again.load_game() and loaded_again.budget == 1036122, "A balance of 1,036,122 survives load-save-load unchanged")
+	var reward_probe := Simulation.new(false)
+	reward_probe.start_empty_city()
+	reward_probe.budget = 1036122
+	var stage_reward := reward_probe.grant_campaign_stage_reward(1)
+	check(stage_reward == 400 and reward_probe.budget == 1036522, "A campaign reward adds to a balance above one million instead of truncating it")
 
 	# Exercise the legacy pre-grid migration path on an isolated fixture.
 	var legacy_source := Simulation.new(true)

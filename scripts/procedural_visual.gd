@@ -90,14 +90,7 @@ func _ready() -> void:
 	elif visual_type == "fire_engine":
 		fire_engine()
 	elif visual_type == "police_car":
-		civilian_vehicle(false, seed_value)
-		Art.box(self, Vector3(0, 1.34, -0.25), Vector3(1.6, 0.14, 1.9), Color("315b88"))
-		var beacon_red := Art.box(self, Vector3(-0.23, 1.92, 0.2), Vector3(0.2, 0.12, 0.12), Color("dc4242"))
-		beacon_red.name = "BeaconRed"
-		beacon_red.set_meta("dynamic", true)
-		var beacon_blue := Art.box(self, Vector3(0.23, 1.92, 0.2), Vector3(0.2, 0.12, 0.12), Color("438ee8"))
-		beacon_blue.name = "BeaconBlue"
-		beacon_blue.set_meta("dynamic", true)
+		build_police_car_model(self)
 	elif visual_type == "traffic_signal":
 		make_signals()
 	elif visual_type == "bus_stop":
@@ -511,6 +504,10 @@ func parked_service_vehicle(kind: String, slot: int = 0) -> void:
 		build_fire_engine_model(vehicle)
 		Art.batch(vehicle)
 		return
+	if kind == "police_car":
+		build_police_car_model(vehicle)
+		Art.batch(vehicle)
+		return
 	var body_color := Color("d64f3e") if kind == "fire_engine" else (Color("f4f0df") if kind in ["police_car", "ambulance"] else Color("e5a932"))
 	var ambulance := kind == "ambulance"
 	var body_size := Vector3(1.95, 1.1, 2.75) if ambulance else Vector3(1.85, 0.62, 2.6)
@@ -535,12 +532,6 @@ func parked_service_vehicle(kind: String, slot: int = 0) -> void:
 			side_disc.rotation.z = PI / 2
 			Art.box(vehicle, Vector3(side * 1.03, 1.08, -0.2), Vector3(0.04, 0.10, 0.42), Color("d44343"))
 			Art.box(vehicle, Vector3(side * 1.03, 1.08, -0.2), Vector3(0.04, 0.36, 0.10), Color("d44343"))
-	elif kind == "police_car":
-		Art.box(vehicle, Vector3(0, 1.57, 0.15), Vector3(1.54, 0.12, 1.9), Color("315b88"))
-		for side in [-1.0, 1.0]:
-			var police_door := Art.box(vehicle, Vector3(side * 0.94, 0.95, 0.0), Vector3(0.06, 0.42, 1.05), Color("315b88"))
-			police_door.name = "PoliceLiveryDoor"
-			Art.sphere(vehicle, Vector3(side * 0.98, 0.97, 0.0), 0.12, Color("d7c884"))
 	else:
 		Art.box(vehicle, Vector3(0, 1.18, -0.64), Vector3(1.35, 0.42, 1.15), Color("d79626"))
 		var repair_vehicle_badge := Art.cylinder(vehicle, Vector3(0, 1.48, -0.64), 0.31, 0.06, Color("fffdf8"), 1.0, 16)
@@ -665,6 +656,36 @@ func build_fire_engine_model(parent: Node3D) -> void:
 		for z in [-1.55, 1.35]:
 			var wheel := Art.cylinder(parent, Vector3(x, 0.43, z), 0.4, 0.24, Color("3a3b3a"), 0.8, 12)
 			wheel.rotation.z = PI / 2
+
+func build_police_car_model(parent: Node3D) -> void:
+	# Matches TrafficSystem.SERVICE_VEHICLE_SIZES.police_car (1.8 x 3.0).
+	var white := Color("f4f3ed")
+	var police_blue := Color("285d91")
+	Art.box(parent, Vector3(0, 0.58, 0), Vector3(1.8, 0.62, 3.0), white)
+	Art.box(parent, Vector3(0, 1.08, -0.12), Vector3(1.58, 0.62, 1.48), white.darkened(0.03))
+	Art.box(parent, Vector3(0, 1.12, 0.64), Vector3(1.32, 0.4, 0.06), Color("9fc1ca"))
+	Art.box(parent, Vector3(0, 1.12, -0.89), Vector3(1.32, 0.4, 0.06), Color("7699a6"))
+	# A continuous blue belt and door panels make the patrol visually distinct
+	# from civilian white cars from every camera direction.
+	for side in [-1.0, 1.0]:
+		var belt := Art.box(parent, Vector3(side * 0.91, 0.72, 0), Vector3(0.07, 0.32, 2.7), police_blue)
+		belt.name = "PoliceLiverySide"
+		Art.sphere(parent, Vector3(side * 0.95, 0.78, 0.04), 0.13, Color("dfc95d"))
+	Art.box(parent, Vector3(0, 0.74, 1.42), Vector3(1.45, 0.28, 0.08), police_blue)
+	Art.box(parent, Vector3(0, 0.74, -1.42), Vector3(1.45, 0.28, 0.08), police_blue)
+	for side in [-1.0, 1.0]:
+		for z in [-0.92, 0.92]:
+			var wheel := Art.cylinder(parent, Vector3(side * 0.82, 0.34, z), 0.32, 0.18, Color("30383b"), 1.0, 10)
+			wheel.rotation.z = PI / 2
+	for side in [-1.0, 1.0]:
+		Art.box(parent, Vector3(side * 0.56, 0.65, 1.48), Vector3(0.22, 0.14, 0.08), Color("fff1bf"))
+		Art.box(parent, Vector3(side * 0.56, 0.51, -1.48), Vector3(0.18, 0.12, 0.08), Color("e45e4f"))
+	var beacon_red := Art.box(parent, Vector3(-0.24, 1.48, 0.08), Vector3(0.22, 0.12, 0.14), Color("dc4242"))
+	beacon_red.name = "BeaconRed"
+	beacon_red.set_meta("dynamic", true)
+	var beacon_blue := Art.box(parent, Vector3(0.24, 1.48, 0.08), Vector3(0.22, 0.12, 0.14), Color("438ee8"))
+	beacon_blue.name = "BeaconBlue"
+	beacon_blue.set_meta("dynamic", true)
 
 func fire_engine() -> void:
 	build_fire_engine_model(self)
@@ -995,6 +1016,7 @@ func business_tower() -> void:
 			Art.tree(self, Vector3(x, 0.1, z), 0.42, false, absi(roundi(x * 13 + z)))
 
 var signal_bulbs: MultiMesh
+var signal_bulb_transforms: Array[Transform3D] = []
 
 func make_signals() -> void:
 	signal_bulbs = MultiMesh.new()
@@ -1023,11 +1045,43 @@ func make_signals() -> void:
 		Art.box(pole, Vector3(0, 3.6, 0), Vector3(0.48, 1.2, 0.36), Color("858b90"))
 		for lamp in range(3):
 			var point: Vector3 = pole.transform * Vector3(0, 3.94 - lamp * 0.34, 0.22)
-			signal_bulbs.set_instance_transform(i * 3 + lamp, Transform3D(Basis(), point))
+			var bulb_transform := Transform3D(Basis(), point)
+			signal_bulb_transforms.append(bulb_transform)
+			signal_bulbs.set_instance_transform(i * 3 + lamp, bulb_transform)
 	var display := MultiMeshInstance3D.new()
 	display.multimesh = signal_bulbs
 	add_child(display)
 	set_signal_states("red", "red")
+
+func configure_signal_links(links: Array[Vector2i]) -> void:
+	if visual_type != "traffic_signal" or signal_bulbs == null or links.size() >= 4:
+		return
+	var active_poles := [true, true, true, true]
+	var directions: Array[Vector2i] = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
+	for direction in directions:
+		if direction in links:
+			continue
+		var hidden: Array[int] = []
+		if direction == Vector2i.LEFT:
+			hidden = [0, 3]
+		elif direction == Vector2i.RIGHT:
+			hidden = [1, 2]
+		elif direction == Vector2i.UP:
+			hidden = [1, 3]
+		else:
+			hidden = [0, 2]
+		for pole_index in hidden:
+			active_poles[pole_index] = false
+	for pole_index in range(4):
+		var pole := get_node_or_null("SignalPole%d" % pole_index) as Node3D
+		if pole != null:
+			pole.visible = bool(active_poles[pole_index])
+		for lamp in range(3):
+			var bulb_index := pole_index * 3 + lamp
+			var transform := signal_bulb_transforms[bulb_index]
+			if not bool(active_poles[pole_index]):
+				transform.basis = Basis().scaled(Vector3.ZERO)
+			signal_bulbs.set_instance_transform(bulb_index, transform)
 
 func set_signal_states(horizontal: String, vertical: String) -> void:
 	if signal_bulbs == null:
@@ -1094,14 +1148,17 @@ func bus_stop() -> void:
 		Art.box(platform, Vector3(0, 2, 2.1), Vector3(0.65, 0.8, 0.12), Color("328cb8"))
 
 func bridge() -> void:
-	# The saved bridge footprint remains a passable 2x2 road surface.
-	Art.box(self, Vector3(0, 0.28, 0), Vector3(9.2, 0.38, 7.2), Color("70777a"))
+	# The saved bridge footprint remains a passable 2x2 road surface. The deck
+	# spans the full two-cell river width and carries both roadway and sidewalks.
+	Art.box(self, Vector3(0, 0.28, 0), Vector3(9.55, 0.38, 7.2), Color("70777a"))
+	for sidewalk_z in [-3.05, 3.05]:
+		Art.box(self, Vector3(0, 0.53, sidewalk_z), Vector3(9.55, 0.22, 0.92), Color("c9c2ad"))
 	for side in [-1.0, 1.0]:
-		Art.box(self, Vector3(0, 0.75, side * 3.7), Vector3(9.2, 0.55, 0.28), Color("d7d0bb"))
+		Art.box(self, Vector3(0, 0.75, side * 3.7), Vector3(9.55, 0.55, 0.28), Color("d7d0bb"))
 		for x in [-3.6, -1.8, 0.0, 1.8, 3.6]:
 			Art.box(self, Vector3(x, 1.25, side * 3.7), Vector3(0.16, 1.2, 0.16), Color("56636a"))
-	for x in [-2.7, 0.0, 2.7]:
-		Art.box(self, Vector3(x, 0.5, 0), Vector3(0.12, 0.04, 6.5), Color("e7dfc5"))
+	for x in [-3.7, -1.85, 0.0, 1.85, 3.7]:
+		Art.box(self, Vector3(x, 0.5, 0), Vector3(0.92, 0.04, 0.10), Color("e7dfc5"))
 
 func farm_building(kind: String) -> void:
 	var soil := Color("9d875a") if kind in ["field", "pasture"] else Color("75945c")

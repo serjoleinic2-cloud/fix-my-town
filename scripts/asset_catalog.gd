@@ -76,7 +76,7 @@ const UNLOCK_LEVELS = {
 	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1, "supermarket": 2,
 	"logistics_center": 6, "warehouse": 6,
 	"elite_residence": 4, "business_tower": 5,
-	"bridge": 11, "field": 11, "barn": 11, "mill": 11, "pasture": 11, "livestock_yard": 11, "farm_warehouse": 11,
+	"bridge": 11, "field": 12, "barn": 12, "mill": 13, "pasture": 13, "livestock_yard": 14, "farm_warehouse": 15,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
 }

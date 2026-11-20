@@ -7,6 +7,7 @@ var territory = TerritoryGrid.new()
 const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
 const MAX_SAVED_BUDGET: int = 1000000000
+const MAX_CAMPAIGN_STAGE: int = 15
 
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
@@ -22,6 +23,7 @@ var campaign_completed_stage: int = 0
 var campaign_star_rating: int = 0
 var campaign_reward_granted_stage: int = 0
 var campaign_finished: bool = false
+var campaign_intro_acknowledged_stage: int = 0
 var renewal_credits: int = 0
 var subsidy_debt: int = 0
 var subsidy_threshold: int = 0
@@ -117,6 +119,7 @@ func start_empty_city() -> void:
 	campaign_star_rating = 0
 	campaign_reward_granted_stage = 0
 	campaign_finished = false
+	campaign_intro_acknowledged_stage = 0
 	renewal_credits = 0
 	subsidy_debt = 0
 	subsidy_threshold = 0
@@ -409,8 +412,8 @@ func campaign_level_count(type_id: String, minimum_level: int) -> int:
 
 func campaign_stage_title(stage: int = -1) -> String:
 	var value := campaign_stage if stage < 0 else stage
-	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой"]
-	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river"]
+	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой", "Первые фермы", "Зерно и пастбища", "Животноводство", "Фермерская логистика"]
+	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river", "First farms", "Grain and pastures", "Livestock", "Farm logistics"]
 	var index := clampi(value, 1, titles_ru.size() - 1)
 	return titles_ru[index] if language == "ru" else titles_en[index]
 
@@ -427,7 +430,12 @@ func campaign_stage_goal_met(stage: int = -1) -> bool:
 		8: return campaign_population_count("business_tower") >= 4 and happiness() >= 72
 		9: return campaign_population_count("business_tower") >= 6 and happiness() >= 78
 		10: return campaign_population_count("business_tower") >= 8 and happiness() >= 85
-		_: return territory.bridge_built
+		11: return territory.river_frontier_ready() and territory.bridge_built
+		12: return territory.farm_frontier_ready() and campaign_population_count("field") >= 1 and campaign_population_count("barn") >= 1
+		13: return campaign_population_count("mill") >= 1 and campaign_population_count("pasture") >= 1
+		14: return campaign_population_count("livestock_yard") >= 1
+		15: return campaign_population_count("farm_warehouse") >= 1
+		_: return false
 
 func campaign_stage_progress() -> float:
 	match campaign_stage:
@@ -437,7 +445,14 @@ func campaign_stage_progress() -> float:
 		4: return minf(1.0, float(campaign_population_count("elite_residence")))
 		5: return minf(1.0, float(campaign_population_count("business_tower")))
 		6: return minf(1.0, float(mini(2, campaign_population_count("business_tower")) + mini(2, campaign_population_count("elite_residence")) + int(not logistics_center_entry().is_empty()) + mini(1, logistics_warehouse_count())) / 6.0)
-		11: return 1.0 if territory.bridge_built else 0.0
+		11: return 1.0 if territory.river_frontier_ready() and territory.bridge_built else 0.0
+		12:
+			if not territory.farm_frontier_ready():
+				return 0.0
+			return minf(1.0, float(int(campaign_population_count("field") >= 1) + int(campaign_population_count("barn") >= 1)) / 2.0)
+		13: return minf(1.0, float(int(campaign_population_count("mill") >= 1) + int(campaign_population_count("pasture") >= 1)) / 2.0)
+		14: return minf(1.0, float(campaign_population_count("livestock_yard")))
+		15: return minf(1.0, float(campaign_population_count("farm_warehouse")))
 		_:
 			var tower_goal := 3 if campaign_stage == 7 else (4 if campaign_stage == 8 else (6 if campaign_stage == 9 else 8))
 			var mood_goal := 65 if campaign_stage == 7 else (72 if campaign_stage == 8 else (78 if campaign_stage == 9 else 85))
@@ -450,7 +465,7 @@ func campaign_stars_for_time(seconds: float) -> int:
 
 func campaign_stage_reward(stage: int = -1) -> int:
 	var value := campaign_stage if stage < 0 else stage
-	if value < 1 or value > 11:
+	if value < 1 or value > MAX_CAMPAIGN_STAGE:
 		return 0
 	match value:
 		1: return 400
@@ -460,13 +475,17 @@ func campaign_stage_reward(stage: int = -1) -> int:
 		5: return 1500
 		6: return 1800
 		11: return 2500
+		12: return 1400
+		13: return 1800
+		14: return 2200
+		15: return 2800
 		_: return 1200 + maxi(0, value - 7) * 200
 
 func grant_campaign_stage_reward(stage: int) -> int:
-	if stage <= 0 or stage > 11 or campaign_reward_granted_stage >= stage:
+	if stage <= 0 or stage > MAX_CAMPAIGN_STAGE or campaign_reward_granted_stage >= stage:
 		return 0
 	var reward := campaign_stage_reward(stage)
-	budget = mini(1000000, budget + reward)
+	budget = mini(MAX_SAVED_BUDGET, budget + reward)
 	campaign_reward_granted_stage = stage
 	return reward
 
@@ -484,13 +503,19 @@ func continue_campaign() -> void:
 		return
 	# Backfill rewards for a saved completion created before stage payouts existed.
 	grant_campaign_stage_reward(campaign_completed_stage)
-	if campaign_completed_stage >= 11:
+	if campaign_completed_stage >= MAX_CAMPAIGN_STAGE:
 		campaign_finished = true
 	else:
 		campaign_stage = campaign_completed_stage + 1
 	campaign_elapsed_seconds = 0.0
 	campaign_complete_pending = false
 	territory.set_expansion_level(campaign_stage)
+	save_game()
+
+func acknowledge_campaign_intro() -> void:
+	if campaign_intro_acknowledged_stage >= campaign_stage:
+		return
+	campaign_intro_acknowledged_stage = campaign_stage
 	save_game()
 
 func district_house_count() -> int:
@@ -1908,6 +1933,40 @@ func dispatch_police(incident_id: String) -> bool:
 	save_game()
 	return true
 
+func police_return_route(current_logical: Vector3, station_id: String) -> Array:
+	var station := territory.building_by_id(station_id)
+	if station.is_empty():
+		return []
+	var current_world := DistrictWorld.world_position(current_logical)
+	var start := territory.nearest_road(current_world)
+	var finish := territory.nearest_road(territory.building_center(station))
+	if start.x < 0 or finish.x < 0:
+		return []
+	var path := territory.road_path(start, finish)
+	if path.is_empty():
+		return []
+	return logical_route(path)
+
+func begin_police_return() -> bool:
+	if police_job.is_empty() or str(police_job.get("phase", "")) == "return":
+		return false
+	var return_route := police_return_route(police_job.vehicle, str(police_job.get("depot_instance_id", "")))
+	if return_route.is_empty():
+		return false
+	police_job.route = return_route
+	police_job.route_index = 0
+	police_job.phase = "return"
+	return true
+
+func police_target_still_active() -> bool:
+	if police_job.is_empty() or str(police_job.get("phase", "")) != "travel":
+		return true
+	var problem_id := str(police_job.get("problem_id", ""))
+	if problem_id != "":
+		return incidents.has(problem_id) and str(incidents[problem_id].get("state", "new")) != "resolved"
+	var incident_id := str(police_job.get("incident_id", ""))
+	return jam_cleared.has(incident_id) and not bool(jam_cleared.get(incident_id, false)) and not building_world_for_id(incident_id).is_equal_approx(Vector3.ZERO)
+
 func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
 	if movement_allowed:
@@ -2101,6 +2160,9 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 					changed = true
 		fire_jobs[identifier] = assignment
 	if not police_job.is_empty():
+		if not police_target_still_active():
+			if begin_police_return():
+				changed = true
 		if police_job.route_index < police_job.route.size():
 			if movement_allowed:
 				var police_target: Vector3 = police_job.route[int(police_job.route_index)]
@@ -2110,7 +2172,10 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 				if police_job.vehicle.distance_to(police_target) < 0.01:
 					police_job.route_index += 1
 					if int(police_job.route_index) >= police_job.route.size():
-						police_job.phase = "clearing"
+						if str(police_job.get("phase", "")) == "return":
+							police_job = {}
+						else:
+							police_job.phase = "clearing"
 						changed = true
 		else:
 			if police_job.phase == "travel":
@@ -2125,13 +2190,8 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 						incidents[cleared_problem_id].resolved_reason = "police_response"
 					else:
 						jam_cleared[police_job.incident_id] = true
-					police_job.route.reverse()
-					var return_station := territory.building_by_id(str(police_job.depot_instance_id))
-					if not return_station.is_empty():
-						police_job.route.append(DistrictWorld.logical_position(territory.building_center(return_station)))
-					police_job.route_index = 0
-					police_job.phase = "return"
-					changed = true
+					if begin_police_return():
+						changed = true
 			else:
 				police_job = {}
 				changed = true
@@ -2268,9 +2328,9 @@ func problem_candidates() -> Array[Dictionary]:
 		var disease_targets := homes.filter(func(home: Dictionary) -> bool: return record_quality(home).score < 70 or housing_neglect_percent(str(home.instance_id)) >= 10)
 		if not disease_targets.is_empty():
 			candidates.append({"type": "disease", "target": disease_targets[incident_rng.randi_range(0, disease_targets.size() - 1)], "weight": 13.0 if not has_service_building("hospital") else 7.0})
-	if campaign_stage >= 2 and homes.size() >= 3:
-		var traffic_target: Dictionary = homes[incident_rng.randi_range(0, homes.size() - 1)]
-		candidates.append({"type": "traffic_jam", "target": traffic_target, "weight": 12.0 if not has_service_building("police_station") else 8.0})
+	# Visible traffic jams are detected from stopped vehicles by the traffic
+	# scene. A population estimate alone must not create a marker on a random
+	# building when the road is visibly clear.
 	for entry: Dictionary in homes:
 		if entry.has("legacy_plot"):
 			continue
@@ -2360,7 +2420,7 @@ func resolve_problem(identifier: String, reason: String) -> bool:
 func resolve_problem_with_service(identifier: String, service_type: String) -> bool:
 	if not incidents.has(identifier):
 		return false
-	var required := {"electricity": "depot", "disease": "hospital", "traffic_jam": "police_station"}.get(str(incidents[identifier].get("type", "")), "")
+	var required: String = str({"electricity": "depot", "disease": "hospital", "traffic_jam": "police_station"}.get(str(incidents[identifier].get("type", "")), ""))
 	if required == "" or required != service_type or not has_service_building(service_type):
 		return false
 	return resolve_problem(identifier, service_type + "_response")
@@ -2474,7 +2534,7 @@ func save_game() -> void:
 		encoded_police_job.vehicle = [police_position.x, police_position.y, police_position.z]
 	var data := {"version": 12, "levels": levels, "completed": completed, "empty_city_mode": empty_city_mode, "city_layout_version": city_layout_version,
 		"campaign_stage": campaign_stage, "campaign_elapsed_seconds": campaign_elapsed_seconds, "campaign_complete_pending": campaign_complete_pending,
-		"campaign_completed_stage": campaign_completed_stage, "campaign_star_rating": campaign_star_rating, "campaign_reward_granted_stage": campaign_reward_granted_stage, "campaign_finished": campaign_finished, "renewal_credits": renewal_credits,
+		"campaign_completed_stage": campaign_completed_stage, "campaign_star_rating": campaign_star_rating, "campaign_reward_granted_stage": campaign_reward_granted_stage, "campaign_finished": campaign_finished, "campaign_intro_acknowledged_stage": campaign_intro_acknowledged_stage, "renewal_credits": renewal_credits,
 		"subsidy_debt": subsidy_debt, "subsidy_threshold": subsidy_threshold, "subsidy_installment": subsidy_installment, "subsidy_income_accumulated": subsidy_income_accumulated,
 		"city_id": "fix_my_town", "districts": {"pine_district": territory.data()}, "vehicle_type_id": "fire_engine" if job == "fire" else "repair_van", "target_type_id": target_type_id(), "budget": budget, "language": language, "leak_fixed": leak_fixed,
 		"signal_fixed": signal_fixed, "buildings": buildings, "job": job, "job_phase": job_phase, "route": points, "target_instance_id": target_instance_id, "depot_instance_id": depot_instance_id,
@@ -2500,7 +2560,7 @@ func load_game() -> bool:
 	var data = JSON.parse_string(file.get_as_text())
 	if not data is Dictionary or not (data.get("version") is int or data.get("version") is float) or int(data.get("version")) not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
 		return false
-	for key in ["campaign_stage", "campaign_completed_stage", "campaign_star_rating", "renewal_credits", "campaign_reward_granted_stage"]:
+	for key in ["campaign_stage", "campaign_completed_stage", "campaign_star_rating", "renewal_credits", "campaign_reward_granted_stage", "campaign_intro_acknowledged_stage"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
 			return false
 	if data.has("campaign_elapsed_seconds") and (not (data.campaign_elapsed_seconds is int or data.campaign_elapsed_seconds is float) or not is_finite(float(data.campaign_elapsed_seconds)) or float(data.campaign_elapsed_seconds) < 0 or float(data.campaign_elapsed_seconds) > 1000000000):
@@ -2523,7 +2583,7 @@ func load_game() -> bool:
 		return false
 	if data.has("campaign_finished") and typeof(data.campaign_finished) != TYPE_BOOL:
 		return false
-	if int(data.get("campaign_stage", 1)) not in range(1, 12) or int(data.get("campaign_star_rating", 0)) not in range(4):
+	if int(data.get("campaign_stage", 1)) not in range(1, MAX_CAMPAIGN_STAGE + 1) or int(data.get("campaign_star_rating", 0)) not in range(4):
 		return false
 	for key in ["subsidy_debt", "subsidy_threshold", "subsidy_installment", "subsidy_income_accumulated"]:
 		if data.has(key) and (not (data[key] is int or data[key] is float) or not is_finite(float(data[key])) or int(data[key]) != float(data[key]) or int(data[key]) < 0 or int(data[key]) > 1000000):
@@ -2851,19 +2911,25 @@ func load_game() -> bool:
 	empty_city_mode = bool(data.get("empty_city_mode", false))
 	territory.strict_building_frontier = empty_city_mode
 	city_layout_version = int(data.get("city_layout_version", 0))
-	campaign_stage = clampi(int(data.get("campaign_stage", 1)), 1, 11)
+	campaign_stage = clampi(int(data.get("campaign_stage", 1)), 1, MAX_CAMPAIGN_STAGE)
 	campaign_elapsed_seconds = maxf(0.0, float(data.get("campaign_elapsed_seconds", 0.0)))
 	campaign_complete_pending = bool(data.get("campaign_complete_pending", false))
-	campaign_completed_stage = clampi(int(data.get("campaign_completed_stage", 0)), 0, 11)
+	campaign_completed_stage = clampi(int(data.get("campaign_completed_stage", 0)), 0, MAX_CAMPAIGN_STAGE)
 	campaign_star_rating = clampi(int(data.get("campaign_star_rating", 0)), 0, 3)
-	campaign_reward_granted_stage = clampi(int(data.get("campaign_reward_granted_stage", 0)), 0, 11)
+	campaign_reward_granted_stage = clampi(int(data.get("campaign_reward_granted_stage", 0)), 0, MAX_CAMPAIGN_STAGE)
 	campaign_finished = bool(data.get("campaign_finished", false))
+	campaign_intro_acknowledged_stage = clampi(int(data.get("campaign_intro_acknowledged_stage", maxi(0, campaign_stage - 1))), 0, MAX_CAMPAIGN_STAGE)
 	# Saves created when stage 10 was the finale reopen that completion and can
 	# continue to the river chapter without changing the existing city.
 	if campaign_finished and campaign_stage == 10:
 		campaign_finished = false
 		campaign_complete_pending = true
 		campaign_completed_stage = 10
+	# Builds where stage 11 was the finale continue into the farming chapters.
+	elif campaign_finished and campaign_stage == 11 and territory.bridge_built:
+		campaign_finished = false
+		campaign_complete_pending = true
+		campaign_completed_stage = 11
 	renewal_credits = clampi(int(data.get("renewal_credits", 0)), 0, 1000000)
 	subsidy_debt = loaded_subsidy_debt
 	subsidy_threshold = loaded_subsidy_threshold
@@ -2890,6 +2956,14 @@ func load_game() -> bool:
 	fire_jobs = loaded_fire_jobs
 	jam_cleared = loaded_jam_cleared
 	police_job = loaded_police_job
+	# Older saves stored a return trip by reversing the outbound points and then
+	# appending the station centre. Rebuild it from the nearest road cells so a
+	# loaded patrol never cuts diagonally through the station or nearby lots.
+	if not police_job.is_empty() and str(police_job.get("phase", "")) == "return":
+		var normalized_police_return := police_return_route(police_job.vehicle, str(police_job.get("depot_instance_id", "")))
+		if not normalized_police_return.is_empty():
+			police_job.route = normalized_police_return
+			police_job.route_index = 0
 	construction_job = loaded_construction
 	incident_seed = int(data.get("incident_seed", 48291))
 	incident_clock = maxf(0.0, float(data.get("incident_clock", 0.0)))

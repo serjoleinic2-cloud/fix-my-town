@@ -4034,7 +4034,10 @@ func build_grid_house_sheet() -> void:
 				var restore_premium := button(sheet_column, (tr_text("Восстановить здание", "Restore building") if game.is_ruined(entry.instance_id) else tr_text("Устранить повреждения", "Repair damage")) + " · %d" % restoration_cost, func():
 					if game.repair_fire_damage(entry.instance_id):
 						audio.play_ui("success")
-					refresh(), true)
+						close_sheet()
+					else:
+						audio.play_ui("deny")
+						refresh(), true)
 				restore_premium.disabled = game.budget < restoration_cost or not game.construction_job.is_empty()
 		if Catalog.LEVELS.has(entry.type_id):
 			label(20, sheet_column, building_effect(entry.type_id, entry.level)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -4087,7 +4090,10 @@ func build_grid_house_sheet() -> void:
 			var grid_restore := button(sheet_column, (tr_text("Восстановить дом", "Rebuild home") if game.is_ruined(grid_selected_id) else tr_text("Восстановить дом", "Restore home")) + " · %d" % grid_repair_price, func():
 				if game.repair_fire_damage(grid_selected_id):
 					audio.play_ui("success")
-				refresh(), true)
+					close_sheet()
+				else:
+					audio.play_ui("deny")
+					refresh(), true)
 			grid_restore.name = "RestoreDamagedHouse"
 			grid_restore.disabled = game.budget < grid_repair_price
 	label(20, sheet_column, t("residents") % [game.record_residents(entry), Catalog.level_data("house", entry.level).income])
@@ -4200,7 +4206,10 @@ func build_building_sheet() -> void:
 				var restore := button(sheet_column, (tr_text("Восстановить дом", "Rebuild home") if game.is_ruined(house_id) else tr_text("Восстановить дом", "Restore home")) + " · %d" % repair_price, func():
 					if game.repair_fire_damage(house_id):
 						audio.play_ui("success")
-					refresh(), true)
+						close_sheet()
+					else:
+						audio.play_ui("deny")
+						refresh(), true)
 				restore.add_theme_font_size_override("font_size", 21 if screen.size.x < 420 else 24)
 				restore.disabled = game.budget < repair_price
 	else:

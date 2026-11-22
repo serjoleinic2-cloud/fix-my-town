@@ -1501,6 +1501,14 @@ func can_demolish_road(col: int, row: int) -> bool:
 				return false
 	return true
 
+# "" when the road can be demolished, otherwise why not: "stop", "access",
+# "route" (a crew, bus or fire engine is using it) or "not_road".
+func road_demolition_block_reason(col: int, row: int) -> String:
+	var blocker := territory.road_removal_blocker(col, row, transit)
+	if not blocker.is_empty():
+		return str(blocker.kind)
+	return "" if can_demolish_road(col, row) else "route"
+
 func demolish_road(col: int, row: int) -> bool:
 	if not can_demolish_road(col, row):
 		return false

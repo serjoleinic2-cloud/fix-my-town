@@ -2578,10 +2578,24 @@ func open_grid_road_card(cell: Vector2i) -> void:
 	refresh()
 
 func build_road_sheet() -> void:
-	action_height = 215
+	action_height = 300
 	header(t("road"))
-	var info := label(19, sheet_column, tr_text("Дороги формируются при размещении зданий и сохраняют общую сеть города. Снос дорог отключён, чтобы не разрывать подъезды к домам и службам.", "Roads are formed when buildings are placed and keep the city network connected."))
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var reason: String = game.road_demolition_block_reason(road_selected_cell.x, road_selected_cell.y)
+	if reason == "":
+		var info := label(19, sheet_column, tr_text("Эту дорогу можно снести: все здания сохранят подъезд к ратуше. На её месте можно сделать газон, клумбу или дерево.", "This road can be demolished: every building keeps its access to the city hall. You can plant a lawn, flower bed or tree there."))
+		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button(sheet_column, t("demolish_road"), request_road_demolition, true).name = "DemolishRoadButton"
+		return
+	var message := tr_text("Дорогу нельзя снести сейчас.", "This road cannot be demolished right now.")
+	if reason == "stop":
+		message = tr_text("Здесь стоит автобусная остановка. Сначала уберите остановку.", "A bus stop stands here. Remove the stop first.")
+	elif reason == "access":
+		message = tr_text("Без этой дороги одно из зданий потеряет подъезд к ратуше. Сначала проложите объезд или снесите здание.", "Without this road one building would lose its access to the city hall. Build a bypass or demolish that building first.")
+	elif reason == "route":
+		message = tr_text("По дороге сейчас едет бригада, автобус или пожарная машина. Попробуйте позже.", "A crew, bus or fire engine is using this road. Try again later.")
+	var blocked := label(19, sheet_column, message)
+	blocked.name = "RoadDemolitionBlocked"
+	blocked.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 func request_road_demolition() -> void:
 	if not game.can_demolish_road(road_selected_cell.x, road_selected_cell.y):

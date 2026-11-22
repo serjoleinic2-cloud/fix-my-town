@@ -1013,23 +1013,29 @@ func footprint_touches_connected_road(col: int, row: int, footprint: Vector2i) -
 					return true
 	return false
 
-func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
+# Why a road cell cannot be removed: {} when it can, otherwise {"kind": "stop"}
+# (a bus stop stands here) or {"kind": "access", "building": entry} (that
+# building would lose its connection to the city hall).
+func road_removal_blocker(col: int, row: int, transit: RefCounted = null) -> Dictionary:
 	if state_at(col, row) != "road":
-		return false
+		return {"kind": "not_road"}
 	if transit != null:
 		for stop in transit.stops:
 			if transit.stop_cell(stop, self) == Vector2i(col, row):
-				return false
+				return {"kind": "stop"}
 	cells[row][col] = "free"
-	var connected := true
+	var blocker: Dictionary = {}
 	for entry: Dictionary in buildings:
 		if entry.type_id in ["lawn", "flower_bed", "street_tree", "bush"]:
 			continue
 		if access_path(entry, Vector2i(12, 18)).is_empty():
-			connected = false
+			blocker = {"kind": "access", "building": entry}
 			break
 	cells[row][col] = "road"
-	return connected
+	return blocker
+
+func can_remove_road(col: int, row: int, transit: RefCounted = null) -> bool:
+	return road_removal_blocker(col, row, transit).is_empty()
 
 func data() -> Dictionary:
 	return {"district_id": DISTRICT_ID, "width": WIDTH, "height": HEIGHT, "cells": cells.duplicate(true), "buildings": buildings.duplicate(true), "revealed": revealed.duplicate(true), "expansion_cols": [expansion_cols.x, expansion_cols.y], "expansion_rows": [expansion_rows.x, expansion_rows.y], "river_frontier_enabled": river_frontier_enabled, "bridge_built": bridge_built, "river_cols": [river_cols.x, river_cols.y], "bridge_site": [bridge_site.x, bridge_site.y], "river_layout_version": river_layout_version}

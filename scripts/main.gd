@@ -106,6 +106,7 @@ var logistics_visuals: Node3D
 var logistics_vehicles: Array[Dictionary] = []
 var backoff_sheet_state := "?"
 var road_police: Dictionary = {}
+var ambulance_job: Dictionary = {}
 var road_police_queue: Array = []
 var road_police_vanished: Array = []
 var backoff_refresh_timer := 0.0
@@ -3582,7 +3583,12 @@ func act_on_city_problem() -> void:
 		if not game.has_service_building("hospital"):
 			open_service_catalog("hospital")
 			return
-		game.resolve_problem_with_service(selected_problem_id, "hospital")
+		if not ambulance_job.is_empty() or not start_ambulance(selected_problem_id):
+			audio.play_ui("deny")
+			refresh()
+			return
+		game.accept_problem(selected_problem_id)
+		audio.play("siren", "Effects", ambulance_job.position)
 		close_sheet()
 	elif kind == "traffic_jam":
 		if not game.has_service_building("police_station"):
@@ -3847,6 +3853,7 @@ func _process(delta: float) -> void:
 	scenery.traffic_controller.blocking_positions.clear()
 	tick_logistics_vehicles(delta)
 	tick_road_police(delta)
+	tick_ambulance(delta)
 	sync_construction_site()
 	var fire_motion: Dictionary = {}
 	for assignment: Dictionary in game.fire_assignments():
@@ -5234,6 +5241,82 @@ func step_logistics_backoff(vehicle: Dictionary, delta: float, traffic_controlle
 	set_logistics_traffic_blocker(str(vehicle.get("id", "")), truck.position, half, heading)
 	if float(vehicle.backoff_remaining) <= 0.0:
 		vehicle.backoff_hold = LOGISTICS_BACKOFF_HOLD
+
+const AMBULANCE_SPEED := 7.0
+const AMBULANCE_TREAT_SECONDS := 5.0
+
+func hospital_world_position() -> Vector3:
+	for entry: Dictionary in game.territory.buildings:
+		if str(entry.get("type_id", "")) == "hospital":
+			return game.territory.building_center(entry)
+	return Vector3.INF
+
+# The ambulance drives from the hospital to the sick home; treatment starts on
+# arrival and the problem is resolved only after it, then the crew drives back.
+func start_ambulance(problem_id: String) -> bool:
+	var incident: Dictionary = game.incidents.get(problem_id, {})
+	var station := hospital_world_position()
+	if incident.is_empty() or station == Vector3.INF:
+		return false
+	var home_id := str(incident.get("target_id", ""))
+	var home_position: Vector3 = game.building_world_for_id(home_id)
+	var path: Array[Vector2i] = game.territory.road_path(game.territory.nearest_road(station), game.territory.nearest_road(home_position))
+	if path.is_empty():
+		return false
+	var route: Array = []
+	for cell: Vector2i in path:
+		route.append(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 0.18, 0))
+	ambulance_job = {"problem_id": problem_id, "phase": "travel", "route": route, "index": 0, "position": route[0], "treat_left": AMBULANCE_TREAT_SECONDS}
+	return true
+
+func tick_ambulance(delta: float) -> void:
+	var node := world.get_node_or_null("Ambulance") as Node3D
+	if ambulance_job.is_empty():
+		if node != null:
+			node.queue_free()
+		return
+	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
+	var phase := str(ambulance_job.phase)
+	var position_value: Vector3 = ambulance_job.position
+	var route: Array = ambulance_job.route
+	if phase == "treat":
+		ambulance_job.treat_left = float(ambulance_job.treat_left) - delta
+		if float(ambulance_job.treat_left) <= 0.0:
+			game.resolve_problem_with_service(str(ambulance_job.problem_id), "hospital")
+			route.reverse()
+			ambulance_job.index = 0
+			ambulance_job.phase = "return"
+			refresh()
+	else:
+		var index := int(ambulance_job.index)
+		if index >= route.size():
+			if phase == "travel":
+				ambulance_job.phase = "treat"
+			else:
+				ambulance_job = {}
+				if node != null:
+					node.queue_free()
+				return
+		else:
+			var point: Vector3 = route[index]
+			var step := delta * AMBULANCE_SPEED
+			if traffic_controller != null and phase == "travel":
+				var allowed: float = traffic_controller.service_travel_distance(position_value, position_value.move_toward(point, step), delta, "ambulance", true, "", "ambulance")
+				step = minf(step, allowed) if allowed >= 0.0 else step
+			ambulance_job.position = position_value.move_toward(point, step)
+			if ambulance_job.position.distance_to(point) < 0.05:
+				ambulance_job.index = index + 1
+	if node == null:
+		node = create_object(world, "ambulance", "Ambulance", ambulance_job.position)
+		node.name = "Ambulance"
+	var index_now := mini(int(ambulance_job.index), route.size() - 1)
+	var heading: Vector3 = route[index_now] - ambulance_job.position
+	node.position = ambulance_job.position
+	if heading.length() > 0.05:
+		node.rotation.y = atan2(heading.x, heading.z)
+	node.set_emergency_lights(str(ambulance_job.phase) != "return", elapsed)
+	if traffic_controller != null and str(ambulance_job.phase) != "return":
+		traffic_controller.blocking_positions.append({"id": "ambulance", "position": ambulance_job.position, "half_extents": Vector2(1.2, 1.2)})
 
 const ROAD_POLICE_SPEED := 7.0
 const ROAD_POLICE_CLEAR_RADIUS := 11.0

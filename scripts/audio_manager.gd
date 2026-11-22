@@ -27,7 +27,7 @@ const BUILDING_AMBIENCE_SOUNDS := {
 const VEHICLE_SELECT_SOUNDS := {
 	"delivery_truck": "engine", "repair_van": "repair", "work_vehicle": "build",
 	"excavator": "build", "dump_truck": "engine", "fire_engine": "siren",
-	"police_car": "warning", "civilian_car": "engine", "city_bus": "engine"
+	"police_car": "warning", "ambulance": "siren", "civilian_car": "engine", "city_bus": "engine"
 }
 var levels: Dictionary = {"Ambience": 0.45, "Effects": 0.65, "Interface": 0.6, "Music": 0.4}
 var loops: Dictionary = {}

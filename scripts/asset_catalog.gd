@@ -36,6 +36,7 @@ const TYPES = {
 	"dump_truck": {"scene": "res://scenes/visuals/dump_truck.tscn", "footprint": Vector2(2.4, 4.4)},
 	"fire_engine": {"scene": "res://scenes/visuals/fire_engine.tscn", "footprint": Vector2(2.2, 4.2)},
 	"police_car": {"scene": "res://scenes/visuals/police_car.tscn", "footprint": Vector2(1.8, 3.0)},
+	"ambulance": {"scene": "res://scenes/visuals/ambulance.tscn", "footprint": Vector2(2.0, 3.0)},
 	"civilian_car": {"scene": "res://scenes/visuals/civilian_car.tscn", "footprint": Vector2(1.5, 2.6)},
 	"bus_stop": {"scene": "res://scenes/visuals/bus_stop.tscn", "cost": 40, "footprint": Vector2(8, 5)},
 	"city_bus": {"scene": "res://scenes/visuals/city_bus.tscn", "footprint": Vector2(1.8, 4.8)},

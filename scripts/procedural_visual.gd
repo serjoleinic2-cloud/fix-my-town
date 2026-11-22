@@ -91,6 +91,8 @@ func _ready() -> void:
 		fire_engine()
 	elif visual_type == "police_car":
 		build_police_car_model(self)
+	elif visual_type == "ambulance":
+		build_ambulance_model(self)
 	elif visual_type == "traffic_signal":
 		make_signals()
 	elif visual_type == "bus_stop":
@@ -684,6 +686,30 @@ func build_police_car_model(parent: Node3D) -> void:
 	beacon_red.name = "BeaconRed"
 	beacon_red.set_meta("dynamic", true)
 	var beacon_blue := Art.box(parent, Vector3(0.24, 1.48, 0.08), Vector3(0.22, 0.12, 0.14), Color("438ee8"))
+	beacon_blue.name = "BeaconBlue"
+	beacon_blue.set_meta("dynamic", true)
+
+func build_ambulance_model(parent: Node3D) -> void:
+	# Matches TrafficSystem.SERVICE_VEHICLE_SIZES.ambulance (2.0 x 3.0).
+	var white := Color("f6f5f0")
+	var red := Color("d8443c")
+	Art.box(parent, Vector3(0, 0.62, -0.1), Vector3(2.0, 0.78, 3.0), white)
+	Art.box(parent, Vector3(0, 1.28, -0.35), Vector3(1.84, 0.7, 2.3), white.darkened(0.03))
+	Art.box(parent, Vector3(0, 1.16, 1.0), Vector3(1.5, 0.42, 0.07), Color("9fc1ca"))
+	for side in [-1.0, 1.0]:
+		Art.box(parent, Vector3(side * 1.01, 0.74, -0.1), Vector3(0.06, 0.2, 2.8), red)
+		var cross_h := Art.box(parent, Vector3(side * 1.02, 1.28, -0.5), Vector3(0.05, 0.42, 0.14), red)
+		cross_h.name = "AmbulanceCrossVertical"
+		Art.box(parent, Vector3(side * 1.02, 1.28, -0.5), Vector3(0.05, 0.14, 0.42), red)
+		for z in [-1.0, 0.9]:
+			var wheel := Art.cylinder(parent, Vector3(side * 0.9, 0.34, z), 0.32, 0.18, Color("30383b"), 1.0, 10)
+			wheel.rotation.z = PI / 2
+		Art.box(parent, Vector3(side * 0.6, 0.66, 1.42), Vector3(0.22, 0.14, 0.08), Color("fff1bf"))
+		Art.box(parent, Vector3(side * 0.6, 0.55, -1.62), Vector3(0.18, 0.12, 0.08), Color("e45e4f"))
+	var beacon_red := Art.box(parent, Vector3(-0.28, 1.7, 0.45), Vector3(0.24, 0.12, 0.16), Color("dc4242"))
+	beacon_red.name = "BeaconRed"
+	beacon_red.set_meta("dynamic", true)
+	var beacon_blue := Art.box(parent, Vector3(0.28, 1.7, 0.45), Vector3(0.24, 0.12, 0.16), Color("438ee8"))
 	beacon_blue.name = "BeaconBlue"
 	beacon_blue.set_meta("dynamic", true)
 

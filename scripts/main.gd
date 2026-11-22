@@ -4261,7 +4261,7 @@ func toggle_quality() -> void:
 	refresh()
 
 func build_district_sheet() -> void:
-	action_height = 300
+	action_height = 380
 	header(t("district_name"))
 	var score: float = game.district_quality()
 	var condition := label(24, sheet_column, "● " + quality_name(score) + "  " + quality_trend, true)
@@ -4273,6 +4273,13 @@ func build_district_sheet() -> void:
 	bar.add_theme_stylebox_override("fill", style(quality_color(score) if score >= 0 else Color("a5acb0"), 6))
 	sheet_column.add_child(bar)
 	label(21, sheet_column, t("residents") % [game.population(), game.income()])
+	var mood_report: Dictionary = game.district_happiness_report()
+	if int(mood_report.score) >= 0:
+		label(20, sheet_column, tr_text("Радость жителей: %d", "Resident happiness: %d") % int(mood_report.score)).name = "DistrictHappiness"
+		for reason_key: String in mood_report.reasons:
+			var reason_label := label(16, sheet_column, "• " + game.happiness_label(reason_key))
+			reason_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			reason_label.add_theme_color_override("font_color", Color("b36b49"))
 	var task_done := game.district_task_progress()
 	label(18, sheet_column, tr_text("Построено домов: %d/%d", "Homes built: %d/%d") % [game.district_house_count(), game.district_house_limit])
 	label(18, sheet_column, tr_text("Заданий выполнено: %d/%d", "Tasks complete: %d/%d") % [task_done, game.district_tasks.size()])
@@ -4386,6 +4393,12 @@ func build_grid_house_sheet() -> void:
 	var data: Dictionary = game.record_quality(entry)
 	var condition := label(25, sheet_column, "● " + quality_name(data.score), true)
 	condition.add_theme_color_override("font_color", quality_color(data.score))
+	var resident_mood: Dictionary = game.house_happiness(entry)
+	label(20, sheet_column, tr_text("Радость жителей: %d", "Resident happiness: %d") % int(resident_mood.score)).name = "ResidentHappiness"
+	for issue_key: String in game.happiness_issues(resident_mood, 2):
+		var issue_label := label(16, sheet_column, "• " + game.happiness_label(issue_key))
+		issue_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		issue_label.add_theme_color_override("font_color", Color("b36b49"))
 	if bool(entry.get("shanty", false)):
 		label(20, sheet_column, tr_text("Лачуга: жители протестуют. Снесите её и постройте обычный дом заново.", "Shanty: residents are protesting. Demolish it and rebuild a regular home from the start.")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	elif game.housing_neglect_percent(entry.instance_id) > 0:

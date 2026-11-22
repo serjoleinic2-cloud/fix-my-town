@@ -881,6 +881,139 @@ func district_quality() -> float:
 		total += residents
 	return float(weighted) / total if total > 0 else -1.0
 
+# Resident happiness (0-100): computed per home from concrete, fixable causes.
+# It is separate from the mayor rating (happiness) and from the building quality.
+const HAPPINESS_MAX := {"base": 20, "food": 25, "home": 20, "utilities": 15, "safety": 10, "leisure": 15, "transit": 10, "work": 5}
+const HAPPINESS_LABELS := {
+	"base": ["Крыша над головой", "A roof overhead"],
+	"food": ["Нет еды рядом: привезите товар в магазин", "No food nearby: deliver goods to a shop"],
+	"home": ["Дом обветшал или повреждён: почините", "The home is worn or damaged: repair it"],
+	"utilities": ["Нет воды или связи", "No water or services"],
+	"safety": ["Мало служб: нужны пожарные, полиция, больница", "Few services: fire, police and hospital are needed"],
+	"leisure": ["Мало зелени и досуга рядом", "Little greenery and leisure nearby"],
+	"transit": ["Нет остановки рядом", "No transit stop nearby"],
+	"work": ["Нет работы рядом", "No work nearby"],
+	"shanty": ["Рядом палаточные места", "Shanties nearby"],
+	"fire": ["Недавний пожар", "A recent fire"],
+	"supply": ["Перебои со снабжением", "Supply interruptions"],
+}
+const HAPPINESS_JOB_TYPES := ["supermarket", "cafe", "warehouse", "logistics_center", "business_tower", "depot", "fire_station", "police_station", "hospital"]
+var _happiness_report_cache: Dictionary = {"msec": -100000, "report": {}}
+
+func house_happiness(entry: Dictionary) -> Dictionary:
+	var identifier := str(entry.get("instance_id", ""))
+	var point: Vector3 = entry.position
+	var quality := record_quality(entry)
+	var parts: Dictionary = {"base": 20}
+	var food := 0.0
+	for shop: Dictionary in all_buildings():
+		if str(shop.type_id) not in ["cafe", "supermarket"] or shop.position.distance_to(point) > AMENITY_RADIUS:
+			continue
+		if shop.has("legacy_plot") != entry.has("legacy_plot") and not entry.has("legacy_plot") and not shop.has("col"):
+			continue
+		if entry.has("col") and shop.has("col") and territory.road_distance_between_buildings(entry, shop) < 0:
+			continue
+		var capacity := food_stock_capacity(str(shop.type_id), int(shop.get("level", 1)))
+		if capacity > 0.0:
+			food = maxf(food, 25.0 * clampf(food_stock_for(shop) / capacity * 2.0, 0.0, 1.0))
+	if food <= 0.0 and entry.has("col") and food_delivery_covers(entry):
+		food = 12.0
+	parts.food = roundi(food)
+	var damage := house_damage(identifier) if is_residential_type(str(entry.type_id)) else 0
+	var home := 20.0 - float(damage) * 0.2
+	if str(entry.type_id) == "house":
+		home -= float(housing_neglect_percent(identifier)) * 0.2
+	if bool(entry.get("shanty", false)) or damage >= 100:
+		home = 0.0
+	parts.home = clampi(roundi(home), 0, 20)
+	parts.utilities = (10 if quality.water else 0) + (5 if quality.services else 0)
+	parts.safety = (4 if has_service_building("fire_station") else 0) + (3 if has_service_building("police_station") else 0) + (3 if has_service_building("hospital") else 0)
+	parts.leisure = roundi(clampf((float(quality.environment) - 12.0) / 18.0, 0.0, 1.0) * 15.0)
+	parts.transit = 10 if quality.transport else 0
+	var has_work := false
+	for neighbor: Dictionary in all_buildings():
+		if str(neighbor.type_id) in HAPPINESS_JOB_TYPES and neighbor.position.distance_to(point) <= AMENITY_RADIUS * 2.0:
+			has_work = true
+			break
+	parts.work = 5 if has_work else 0
+	var penalties: Dictionary = {}
+	var shanties := 0
+	for neighbor: Dictionary in territory.buildings:
+		if bool(neighbor.get("shanty", false)) and str(neighbor.get("instance_id", "")) != identifier and territory.building_center(neighbor).distance_to(point) <= TerritoryGrid.CELL_SIZE * 3.0:
+			shanties += 1
+	if shanties > 0:
+		penalties.shanty = mini(15, shanties * 5)
+	if fires.has(identifier):
+		penalties.fire = 10
+	var supply_problem := active_problem_for(identifier, "supply")
+	if not supply_problem.is_empty() and str(supply_problem.get("state", "new")) == "overdue":
+		penalties.supply = 8
+	var total := 0
+	for key: String in parts:
+		total += int(parts[key])
+	for key: String in penalties:
+		total -= int(penalties[key])
+	return {"score": clampi(total, 0, 100), "parts": parts, "penalties": penalties}
+
+# Up to `limit` causes of lost happiness for one home, biggest loss first.
+func happiness_issues(mood: Dictionary, limit: int = 2) -> Array[String]:
+	var losses: Array = []
+	for key: String in HAPPINESS_MAX:
+		if key == "base":
+			continue
+		var loss: int = int(HAPPINESS_MAX[key]) - int(mood.parts.get(key, 0))
+		if loss >= 3:
+			losses.append([key, loss])
+	for key: String in mood.penalties:
+		losses.append([key, int(mood.penalties[key])])
+	losses.sort_custom(func(a: Array, b: Array) -> bool: return int(a[1]) > int(b[1]))
+	var result: Array[String] = []
+	for item: Array in losses:
+		if result.size() >= limit:
+			break
+		result.append(str(item[0]))
+	return result
+
+func happiness_label(key: String) -> String:
+	var labels: Array = HAPPINESS_LABELS.get(key, ["", ""])
+	return str(labels[0] if language == "ru" else labels[1])
+
+# City-wide average weighted by residents, plus the most common causes of loss.
+# Recomputed at most every `max_age_msec` because it scans every home.
+func district_happiness_report(max_age_msec: int = 2000) -> Dictionary:
+	var now := Time.get_ticks_msec()
+	if max_age_msec > 0 and now - int(_happiness_report_cache.msec) < max_age_msec and not _happiness_report_cache.report.is_empty():
+		return _happiness_report_cache.report
+	var weighted := 0.0
+	var total := 0
+	var shortfall: Dictionary = {}
+	for entry: Dictionary in all_buildings():
+		var residents := record_residents(entry)
+		if residents <= 0 or not is_residential_type(str(entry.type_id)):
+			continue
+		var mood := house_happiness(entry)
+		weighted += float(residents) * float(mood.score)
+		total += residents
+		for key: String in HAPPINESS_MAX:
+			if key != "base":
+				shortfall[key] = float(shortfall.get(key, 0.0)) + float(residents * (int(HAPPINESS_MAX[key]) - int(mood.parts.get(key, 0))))
+		for key: String in mood.penalties:
+			shortfall[key] = float(shortfall.get(key, 0.0)) + float(residents * int(mood.penalties[key]))
+	var causes: Array = []
+	for key: String in shortfall:
+		var average := float(shortfall[key]) / float(maxi(1, total))
+		if average >= 3.0:
+			causes.append([key, average])
+	causes.sort_custom(func(a: Array, b: Array) -> bool: return float(a[1]) > float(b[1]))
+	var reasons: Array[String] = []
+	for item: Array in causes:
+		if reasons.size() >= 3:
+			break
+		reasons.append(str(item[0]))
+	var report := {"score": roundi(weighted / float(total)) if total > 0 else -1, "reasons": reasons, "residents": total}
+	_happiness_report_cache = {"msec": now, "report": report}
+	return report
+
 static func quality_band(score: float) -> int:
 	return clampi(int(score) / 20, 0, 4)
 

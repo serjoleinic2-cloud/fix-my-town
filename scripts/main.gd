@@ -5167,7 +5167,7 @@ func logistics_backoff_reason(identifier: String) -> String:
 		return "not_stuck"
 	var heading := Vector3(sin(truck.rotation.y), 0, cos(truck.rotation.y))
 	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
-	if traffic_controller == null or not traffic_controller.confirmed_head_on_near(truck.position, heading, 18.0):
+	if traffic_controller == null:
 		return "not_stuck"
 	var probe: Vector3 = truck.position - heading * 3.6
 	var half := logistics_vehicle_half_extents(heading)

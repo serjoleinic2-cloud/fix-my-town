@@ -971,7 +971,7 @@ func manual_backoff_available(actor_id: String) -> bool:
 	for other: Dictionary in vehicles:
 		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
 			return false
-	if not _tail_reaches_head_on(vehicle):
+	if not (_is_jam_tail(vehicle) or _tail_reaches_head_on(vehicle)):
 		return false
 	return not _backoff_plan(vehicle).is_empty()
 
@@ -984,7 +984,7 @@ func manual_backoff_block_reason(actor_id: String) -> String:
 	for other: Dictionary in vehicles:
 		if other.node.visible and str(other.get("waiting_on", "")) == actor_id:
 			return "not_tail"
-	if not _tail_reaches_head_on(vehicle):
+	if not (_is_jam_tail(vehicle) or _tail_reaches_head_on(vehicle)):
 		return "not_stuck"
 	if _backoff_plan(vehicle).is_empty():
 		return "no_room"
@@ -1096,8 +1096,7 @@ func _step_manual_backoff(vehicle: Dictionary, delta: float) -> Dictionary:
 	var tap_cell: Vector2i = vehicle.get("manual_backoff_tap_cell", retreat_cell)
 	banned.append(tap_cell)
 	for banned_cell: Vector2i in path:
-		if banned_cell != retreat_cell:
-			banned.append(banned_cell)
+		banned.append(banned_cell)
 	vehicle.banned_cells = banned
 	vehicle.banned_until = clock + BACKOFF_BAN_SECONDS
 	vehicle.cell = retreat_cell

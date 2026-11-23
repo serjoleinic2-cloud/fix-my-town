@@ -2642,6 +2642,36 @@ func tick(delta: float, movement_allowed: bool = true, movement_fraction: float 
 		save_game()
 	return changed
 
+const NEGLECT_UNHAPPY_BELOW := 35
+const NEGLECT_HAPPY_FROM := 70
+
+# One step of the maintenance meter. Quality (water, services, environment)
+# decides the direction; resident happiness speeds the recovery of content
+# homes up and slows it down or even starts decay in unhappy ones.
+func neglect_after(current: float, quality: int, mood: int, minutes: int, has_problem: bool) -> float:
+	var span := float(minutes)
+	if quality < 55:
+		if has_problem:
+			# The incident timer owns post-warning deterioration.
+			return current
+		var rate := 4.0 * (1.5 if mood < NEGLECT_UNHAPPY_BELOW else 1.0)
+		if current < 20.0:
+			return minf(20.0, current + rate * span)
+		return 20.0 if current > 20.0 else current
+	if quality >= 70:
+		var relief := 3.0
+		if mood >= NEGLECT_HAPPY_FROM:
+			relief = 4.5
+		elif mood < NEGLECT_UNHAPPY_BELOW:
+			relief = 1.5
+		return maxf(0.0, current - relief * span)
+	# Middle quality: content residents repair things, unhappy ones let it rot.
+	if mood < NEGLECT_UNHAPPY_BELOW:
+		if has_problem:
+			return current
+		return minf(maxf(current, 0.0) + span, maxf(current, 20.0) if current > 20.0 else 20.0)
+	return maxf(0.0, current - (2.0 if mood >= NEGLECT_HAPPY_FROM else 1.0) * span)
+
 func advance_housing_neglect(minutes: int = 1) -> bool:
 	var changed := false
 	var active_ids: Dictionary = {}
@@ -2657,20 +2687,8 @@ func advance_housing_neglect(minutes: int = 1) -> bool:
 		var quality: int = record_quality(quality_entry).score
 		var current := float(housing_neglect.get(identifier, 0.0))
 		var maintenance_problem := active_problem_for(identifier, "neglect")
-		if quality < 55:
-			if not maintenance_problem.is_empty():
-				# The incident timer owns post-warning deterioration. Keep the meter
-				# stable while the player still has time to react.
-				pass
-			elif current < 20.0:
-				current = minf(20.0, current + 4.0 * float(minutes))
-			elif current > 20.0:
-				# Never collapse a home before a reachable crew can be called.
-				current = 20.0
-		elif quality >= 70:
-			current = maxf(0.0, current - 3.0 * float(minutes))
-		else:
-			current = maxf(0.0, current - float(minutes))
+		var mood: int = int(house_happiness(quality_entry).score)
+		current = neglect_after(current, quality, mood, minutes, not maintenance_problem.is_empty())
 		var previous := float(housing_neglect.get(identifier, 0.0))
 		if not is_equal_approx(previous, current):
 			changed = true

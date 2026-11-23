@@ -14,7 +14,7 @@ const CITY_HALL_SITE := Vector2i(12, 19)
 const RIVER_COLS := Vector2i(45, 46)
 const BRIDGE_SITE := Vector2i(45, 19)
 const RIVER_LAYOUT_VERSION: int = 2
-const BUILDINGS = ["city_hall", "house", "cafe", "supermarket", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "bridge", "field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse", "elite_residence", "business_tower", "lawn", "flower_bed", "street_tree", "bush"]
+const BUILDINGS = ["city_hall", "house", "cafe", "supermarket", "park", "depot", "fire_station", "police_station", "hospital", "logistics_center", "warehouse", "bridge", "field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse", "elite_residence", "business_tower", "wind_turbine", "solar_panel", "power_plant", "battery", "fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park", "lawn", "flower_bed", "street_tree", "bush", "street_lamp"]
 var cells: Array = []
 var buildings: Array = []
 var revealed: Array = []
@@ -552,7 +552,7 @@ func place_building(col: int, row: int, type_id: String) -> bool:
 				var next: Vector2i = Vector2i(col + dx, row + dy) + offset
 				if in_bounds(next.x, next.y) and cells[next.y][next.x] == "road" and connected_road(next.x, next.y):
 					has_access = true
-	if type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
+	if type_id not in ["lawn", "flower_bed", "street_tree", "bush", "street_lamp"]:
 		var entry_for_access := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
 		var automatic_path := auto_access_path(entry_for_access)
 		if not has_constructed_network():
@@ -835,7 +835,7 @@ func has_constructed_network() -> bool:
 			if state == "road":
 				return true
 	for entry: Dictionary in buildings:
-		if entry.type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
+		if entry.type_id not in ["lawn", "flower_bed", "street_tree", "bush", "street_lamp"]:
 			return true
 	return false
 
@@ -919,7 +919,7 @@ func placement_reason(col: int, row: int, tool: String) -> String:
 		for dx in range(footprint.x):
 			if state_at(col + dx, row + dy) != "free":
 				return "clear_first"
-	if tool in ["landscaping", "lawn", "flower_bed", "street_tree", "bush"]:
+	if tool in ["landscaping", "lawn", "flower_bed", "street_tree", "bush", "street_lamp"]:
 		return "" if not strict_building_frontier or footprint_touches_connected_road(col, row, footprint) else "no_road"
 	var entry := {"col": col, "row": row, "width": footprint.x, "height": footprint.y}
 	if not has_constructed_network():
@@ -1026,7 +1026,7 @@ func road_removal_blocker(col: int, row: int, transit: RefCounted = null) -> Dic
 	cells[row][col] = "free"
 	var blocker: Dictionary = {}
 	for entry: Dictionary in buildings:
-		if entry.type_id in ["lawn", "flower_bed", "street_tree", "bush"]:
+		if entry.type_id in ["lawn", "flower_bed", "street_tree", "bush", "street_lamp"]:
 			continue
 		if access_path(entry, Vector2i(12, 18)).is_empty():
 			blocker = {"kind": "access", "building": entry}

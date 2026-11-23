@@ -43,6 +43,11 @@ func _ready() -> void:
 		bridge()
 	elif visual_type in ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]:
 		farm_building(visual_type)
+	elif visual_type == "street_lamp":
+		Art.box(self, Vector3(0, 0.06, 0), Vector3(2.0, 0.12, 2.0), Color("879d66"))
+		Art.lamp(self, Vector3.ZERO, 5.4)
+	elif visual_type in ["wind_turbine", "solar_panel", "power_plant", "battery", "fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"]:
+		energy_leisure_building(visual_type)
 	elif visual_type == "city_hall":
 		city_hall()
 	elif visual_type == "elite_residence":
@@ -1185,6 +1190,72 @@ func bridge() -> void:
 			Art.box(self, Vector3(x, 1.25, side * 3.7), Vector3(0.16, 1.2, 0.16), Color("56636a"))
 	for x in [-3.7, -1.85, 0.0, 1.85, 3.7]:
 		Art.box(self, Vector3(x, 0.5, 0), Vector3(0.92, 0.04, 0.10), Color("e7dfc5"))
+
+func energy_leisure_building(kind: String) -> void:
+	Art.box(self, Vector3(0, 0.1, 0), Vector3(8.4, 0.2, 8.4), Color("9aa096"))
+	match kind:
+		"wind_turbine":
+			Art.cylinder(self, Vector3(0, 4.6, 0), 0.35, 9.0, Color("e8ecef"), 0.6)
+			Art.box(self, Vector3(0, 9.3, 0.4), Vector3(0.9, 0.9, 1.6), Color("d5dade"))
+			for angle in [0.0, 120.0, 240.0]:
+				var blade := Node3D.new()
+				blade.position = Vector3(0, 9.3, 1.3)
+				blade.rotation_degrees.z = angle
+				add_child(blade)
+				Art.box(blade, Vector3(0, 2.2, 0), Vector3(0.28, 4.4, 0.08), Color("f4f6f7"))
+		"solar_panel":
+			for x in [-2.4, 0.0, 2.4]:
+				for z in [-1.8, 1.8]:
+					var panel := Node3D.new()
+					panel.position = Vector3(x, 1.1, z)
+					panel.rotation_degrees.x = -25
+					add_child(panel)
+					Art.box(panel, Vector3.ZERO, Vector3(2.1, 0.12, 2.6), Color("27456b"))
+					Art.box(self, Vector3(x, 0.55, z), Vector3(0.18, 1.0, 0.18), Color("777d82"))
+		"power_plant":
+			Art.box(self, Vector3(-1.2, 2.2, 1.2), Vector3(5.6, 4.0, 4.4), Color("9b8f84"))
+			Art.cylinder(self, Vector3(2.6, 4.6, -1.8), 0.9, 9.0, Color("8a8d90"), 0.8)
+			Art.cylinder(self, Vector3(2.6, 9.4, -1.8), 0.95, 0.5, Color("b64b3b"))
+			Art.box(self, Vector3(-1.2, 4.3, 1.2), Vector3(5.9, 0.4, 4.7), Color("5c5651"))
+		"battery":
+			for x in [-2.4, 0.0, 2.4]:
+				Art.cylinder(self, Vector3(x, 1.9, 0), 1.0, 3.4, Color("5f8f6d"))
+				Art.cylinder(self, Vector3(x, 3.75, 0), 0.4, 0.3, Color("d8d8c8"))
+			Art.box(self, Vector3(0, 0.7, 2.8), Vector3(6.4, 1.0, 1.4), Color("6a7075"))
+		"fitness_club":
+			Art.box(self, Vector3(0, 1.8, 0), Vector3(6.8, 3.4, 5.6), Color("6fa38e"))
+			Art.box(self, Vector3(0, 3.7, 0), Vector3(7.2, 0.4, 6.0), Color("4a5d57"))
+			Art.box(self, Vector3(0, 1.8, 2.82), Vector3(5.6, 1.8, 0.1), Color("bfe3e8"))
+			Art.sign_text(self, Vector3(0, 3.0, 2.95), "FIT", 48)
+		"pizzeria":
+			Art.box(self, Vector3(0, 1.7, 0), Vector3(6.0, 3.2, 5.2), Color("d96c4a"))
+			Art.box(self, Vector3(0, 3.5, 0), Vector3(6.4, 0.4, 5.6), Color("5a3b30"))
+			Art.box(self, Vector3(0, 1.4, 2.7), Vector3(4.2, 1.6, 0.1), Color("f6e6b8"))
+			Art.cylinder(self, Vector3(2.2, 4.2, -1.0), 0.45, 1.6, Color("7a4a3a"))
+			Art.sign_text(self, Vector3(0, 2.8, 2.85), "PIZZA", 44)
+		"theatre":
+			Art.box(self, Vector3(0, 2.0, 0), Vector3(7.4, 3.8, 6.2), Color("d8cdb8"))
+			Art.box(self, Vector3(0, 4.1, 0), Vector3(7.9, 0.5, 6.7), Color("8c3a45"))
+			for x in [-2.6, -0.9, 0.9, 2.6]:
+				Art.cylinder(self, Vector3(x, 1.9, 3.3), 0.3, 3.6, Color("f1ebdc"))
+			Art.box(self, Vector3(0, 4.6, 3.3), Vector3(7.0, 0.5, 0.8), Color("8c3a45"))
+			Art.sign_text(self, Vector3(0, 4.9, 3.75), "ТЕАТР", 44)
+		"aquapark":
+			Art.box(self, Vector3(-1.4, 0.25, 1.0), Vector3(5.2, 0.3, 4.2), Color("5ec0d8"))
+			Art.box(self, Vector3(2.8, 3.0, -1.6), Vector3(1.6, 5.8, 1.6), Color("e8c34e"))
+			Art.box(self, Vector3(1.2, 4.6, -1.6), Vector3(3.6, 0.35, 1.0), Color("d9534f"))
+			Art.box(self, Vector3(-0.2, 3.6, -1.6), Vector3(3.2, 0.35, 1.0), Color("4f9bd9"))
+			Art.sphere(self, Vector3(-3.2, 1.4, -2.6), 0.9, Color("77b255"))
+		"amusement_park":
+			Art.cylinder(self, Vector3(-2.2, 4.5, 0), 0.25, 9.0, Color("8c9aa4"))
+			Art.cylinder(self, Vector3(-2.2, 8.6, 0), 3.0, 0.3, Color("e0b84a"), 1.0, 20)
+			for angle in range(0, 360, 60):
+				var gondola := Node3D.new()
+				gondola.position = Vector3(-2.2 + 3.0 * cos(deg_to_rad(angle)), 8.6 + 3.0 * sin(deg_to_rad(angle)), 0)
+				add_child(gondola)
+				Art.box(gondola, Vector3.ZERO, Vector3(0.8, 0.8, 0.8), Color("d9534f") if angle % 120 == 0 else Color("4f9bd9"))
+			Art.box(self, Vector3(2.8, 1.5, 1.4), Vector3(2.6, 2.6, 2.6), Color("9b59b6"))
+			Art.box(self, Vector3(2.8, 3.2, 1.4), Vector3(3.0, 0.5, 3.0), Color("f2c14e"))
 
 func farm_building(kind: String) -> void:
 	var soil := Color("9d875a") if kind in ["field", "pasture"] else Color("75945c")

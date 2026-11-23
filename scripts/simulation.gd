@@ -7,7 +7,7 @@ var territory = TerritoryGrid.new()
 const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
 const MAX_SAVED_BUDGET: int = 1000000000
-const MAX_CAMPAIGN_STAGE: int = 15
+const MAX_CAMPAIGN_STAGE: int = 19
 
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
@@ -182,6 +182,9 @@ func start_empty_city() -> void:
 	farm_grain = 0.0
 	farm_flour = 0.0
 	farm_blueprint = []
+	day_time = 0.35
+	power_ratio = 1.0
+	battery_charge = 0.0
 	fire_triggered = false
 	transit = Transit.new()
 	district_tasks = [
@@ -422,8 +425,8 @@ func campaign_level_count(type_id: String, minimum_level: int) -> int:
 
 func campaign_stage_title(stage: int = -1) -> String:
 	var value := campaign_stage if stage < 0 else stage
-	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой", "Первые фермы", "Зерно и пастбища", "Животноводство", "Фермерская логистика"]
-	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river", "First farms", "Grain and pastures", "Livestock", "Farm logistics"]
+	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой", "Первые фермы", "Зерно и пастбища", "Животноводство", "Фермерская логистика", "Вечерний город", "Досуг и аппетит", "Большая сцена", "Курорт"]
+	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river", "First farms", "Grain and pastures", "Livestock", "Farm logistics", "Evening city", "Leisure and appetite", "The big stage", "Resort"]
 	var index := clampi(value, 1, titles_ru.size() - 1)
 	return titles_ru[index] if language == "ru" else titles_en[index]
 
@@ -445,6 +448,10 @@ func campaign_stage_goal_met(stage: int = -1) -> bool:
 		13: return campaign_population_count("mill") >= 1 and campaign_population_count("pasture") >= 1
 		14: return campaign_population_count("livestock_yard") >= 1
 		15: return campaign_population_count("farm_warehouse") >= 1
+		16: return campaign_population_count("street_lamp") >= 3 and campaign_population_count("wind_turbine") >= 1
+		17: return campaign_population_count("fitness_club") >= 1 and campaign_population_count("pizzeria") >= 1
+		18: return campaign_population_count("theatre") >= 1 and campaign_population_count("battery") >= 1
+		19: return campaign_population_count("aquapark") >= 1 and campaign_population_count("amusement_park") >= 1
 		_: return false
 
 func campaign_stage_progress() -> float:
@@ -463,6 +470,10 @@ func campaign_stage_progress() -> float:
 		13: return minf(1.0, float(int(campaign_population_count("mill") >= 1) + int(campaign_population_count("pasture") >= 1)) / 2.0)
 		14: return minf(1.0, float(campaign_population_count("livestock_yard")))
 		15: return minf(1.0, float(campaign_population_count("farm_warehouse")))
+		16: return minf(1.0, float(mini(3, campaign_population_count("street_lamp")) + mini(1, campaign_population_count("wind_turbine"))) / 4.0)
+		17: return minf(1.0, float(mini(1, campaign_population_count("fitness_club")) + mini(1, campaign_population_count("pizzeria"))) / 2.0)
+		18: return minf(1.0, float(mini(1, campaign_population_count("theatre")) + mini(1, campaign_population_count("battery"))) / 2.0)
+		19: return minf(1.0, float(mini(1, campaign_population_count("aquapark")) + mini(1, campaign_population_count("amusement_park"))) / 2.0)
 		_:
 			var tower_goal := 3 if campaign_stage == 7 else (4 if campaign_stage == 8 else (6 if campaign_stage == 9 else 8))
 			var mood_goal := 65 if campaign_stage == 7 else (72 if campaign_stage == 8 else (78 if campaign_stage == 9 else 85))
@@ -489,6 +500,10 @@ func campaign_stage_reward(stage: int = -1) -> int:
 		13: return 1800
 		14: return 2200
 		15: return 2800
+		16: return 3000
+		17: return 3200
+		18: return 3600
+		19: return 4200
 		_: return 1200 + maxi(0, value - 7) * 200
 
 func grant_campaign_stage_reward(stage: int) -> int:
@@ -766,6 +781,109 @@ func farm_building_issue(entry: Dictionary) -> String:
 		return "storage_full"
 	return ""
 
+# ---- Day and night, power --------------------------------------------------
+const DAY_LENGTH_SECONDS := 480.0
+const NIGHT_DARKNESS_BELOW := 0.15
+const LAMP_RADIUS_CELLS := 5.0
+const BATTERY_CAPACITY := 6000.0
+const POWER_SUPPLY := {"wind_turbine": 60.0, "solar_panel": 45.0, "power_plant": 180.0}
+const POWER_DEMAND := {"house": 3.0, "elite_residence": 8.0, "business_tower": 14.0, "cafe": 5.0, "supermarket": 9.0, "fire_station": 6.0, "police_station": 6.0, "hospital": 12.0, "depot": 4.0, "logistics_center": 10.0, "warehouse": 4.0, "mill": 6.0, "bakery": 8.0, "livestock_yard": 4.0, "farm_warehouse": 3.0, "fitness_club": 8.0, "pizzeria": 8.0, "theatre": 18.0, "aquapark": 30.0, "amusement_park": 40.0, "street_lamp": 1.0}
+const LEISURE_ENVIRONMENT := {"fitness_club": 4, "pizzeria": 2, "theatre": 6, "aquapark": 7, "amusement_park": 8}
+var day_time: float = 0.35
+var power_ratio: float = 1.0
+var battery_charge: float = 0.0
+
+func game_hour() -> float:
+	return day_time * 24.0
+
+func daylight() -> float:
+	var hour := game_hour()
+	if hour < 6.0 or hour > 20.0:
+		return 0.0
+	return clampf(sin((hour - 6.0) / 14.0 * PI) * 1.4, 0.0, 1.0)
+
+func is_night() -> bool:
+	return daylight() < NIGHT_DARKNESS_BELOW
+
+func wind_strength() -> float:
+	return clampf(0.55 + 0.45 * sin(day_time * TAU * 2.3), 0.1, 1.0)
+
+func power_enabled() -> bool:
+	if campaign_stage >= 16 or campaign_finished:
+		return true
+	for type_id: String in Catalog.ENERGY_TYPES:
+		if campaign_population_count(type_id) > 0:
+			return true
+	return false
+
+func power_supply() -> float:
+	var total := 0.0
+	for entry: Dictionary in territory.buildings:
+		var type_id := str(entry.get("type_id", ""))
+		if not POWER_SUPPLY.has(type_id):
+			continue
+		var factor := 1.0
+		if type_id == "wind_turbine":
+			factor = wind_strength()
+		elif type_id == "solar_panel":
+			factor = daylight()
+		total += float(POWER_SUPPLY[type_id]) * factor
+	return total
+
+func power_demand() -> float:
+	var total := 0.0
+	for entry: Dictionary in territory.buildings:
+		if bool(entry.get("shanty", false)):
+			continue
+		total += float(POWER_DEMAND.get(str(entry.get("type_id", "")), 0.0))
+	return total * (1.0 + (1.0 - daylight()) * 0.5)
+
+func battery_capacity() -> float:
+	return BATTERY_CAPACITY * float(farm_type_count("battery"))
+
+func advance_power(delta: float) -> void:
+	if not power_enabled():
+		power_ratio = 1.0
+		battery_charge = 0.0
+		return
+	var supply := power_supply()
+	var demand := power_demand()
+	if demand <= 0.0:
+		power_ratio = 1.0
+	elif supply >= demand:
+		battery_charge = minf(battery_capacity(), battery_charge + (supply - demand) * delta)
+		power_ratio = 1.0
+	else:
+		var take := minf(battery_charge, (demand - supply) * maxf(delta, 0.001))
+		battery_charge -= take
+		power_ratio = clampf((supply + take / maxf(delta, 0.001)) / demand, 0.0, 1.0)
+	battery_charge = minf(battery_charge, battery_capacity())
+
+func lamp_lit() -> bool:
+	return power_ratio >= 0.5
+
+# A home counts as lit at night when a working lamp stands close by.
+func home_has_street_light(point: Vector3) -> bool:
+	if not lamp_lit():
+		return false
+	for entry: Dictionary in territory.buildings:
+		if str(entry.get("type_id", "")) == "street_lamp" and territory.building_center(entry).distance_to(point) <= TerritoryGrid.CELL_SIZE * LAMP_RADIUS_CELLS:
+			return true
+	return false
+
+func leisure_environment(entry: Dictionary) -> int:
+	var type_id := str(entry.get("type_id", ""))
+	var value: int = int(LEISURE_ENVIRONMENT.get(type_id, 0))
+	if value == 0:
+		return 0
+	if power_enabled() and power_ratio < 0.5 and type_id in ["aquapark", "amusement_park", "theatre", "fitness_club"]:
+		return 0
+	if type_id == "pizzeria" and farm_stock < 2.0:
+		return 1
+	if type_id == "theatre" and daylight() > 0.5:
+		return value / 2
+	return value
+
 const FARM_BUILD_ORDER := ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]
 
 func farm_type_count(type_id: String) -> int:
@@ -846,6 +964,11 @@ func farm_restore_all() -> int:
 func advance_farm_stock(minutes: int) -> bool:
 	var changed := false
 	var auto_collect := farm_auto_collect_enabled()
+	# Pizzerias bake from farm goods: 2 per minute each while stock lasts.
+	var pizzerias := farm_type_count("pizzeria")
+	if pizzerias > 0 and farm_stock > 0.0:
+		farm_stock = maxf(0.0, farm_stock - 2.0 * float(pizzerias) * float(minutes))
+		changed = true
 	var mill_present := farm_has_mill()
 	# Grain without a mill goes straight to the warehouse as raw goods.
 	if not mill_present and farm_grain > 0.0:
@@ -1149,6 +1272,8 @@ func record_quality(entry: Dictionary) -> Dictionary:
 	for neighbor: Dictionary in all_buildings():
 		if neighbor.type_id in ["cafe", "park"] and neighbor.position.distance_to(point) < AMENITY_RADIUS:
 			environment += Catalog.level_data(neighbor.type_id, neighbor.level).environment
+		elif LEISURE_ENVIRONMENT.has(str(neighbor.type_id)) and neighbor.position.distance_to(point) < AMENITY_RADIUS:
+			environment += leisure_environment(neighbor)
 	var damage := house_damage(entry.instance_id) if is_residential_type(entry.type_id) else 0
 	var score := (30 if water else 0) + (20 if services else 10) + (20 if transport else 0) + mini(environment, 30) - int(damage * 0.35)
 	var neglect := housing_neglect_percent(str(entry.get("instance_id", ""))) if entry.type_id == "house" else 0
@@ -1189,6 +1314,8 @@ const HAPPINESS_LABELS := {
 	"shanty": ["Рядом палаточные места", "Shanties nearby"],
 	"fire": ["Недавний пожар", "A recent fire"],
 	"supply": ["Перебои со снабжением", "Supply interruptions"],
+	"blackout": ["Не хватает электричества: постройте станции", "Not enough electricity: build power stations"],
+	"dark": ["Тёмная улица ночью: нужен фонарь рядом", "A dark street at night: a lamp is needed nearby"],
 }
 const HAPPINESS_JOB_TYPES := ["supermarket", "cafe", "warehouse", "logistics_center", "business_tower", "depot", "fire_station", "police_station", "hospital"]
 var _happiness_report_cache: Dictionary = {"msec": -100000, "report": {}}
@@ -1241,6 +1368,11 @@ func house_happiness(entry: Dictionary) -> Dictionary:
 	var supply_problem := active_problem_for(identifier, "supply")
 	if not supply_problem.is_empty() and str(supply_problem.get("state", "new")) == "overdue":
 		penalties.supply = 8
+	if power_enabled() and entry.has("col"):
+		if power_ratio < 0.6:
+			penalties.blackout = 6
+		elif is_night() and not home_has_street_light(point):
+			penalties.dark = 4
 	var total := 0
 	for key: String in parts:
 		total += int(parts[key])
@@ -2411,6 +2543,9 @@ func police_target_still_active() -> bool:
 
 func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
+	if empty_city_mode:
+		day_time = fposmod(day_time + delta / DAY_LENGTH_SECONDS, 1.0)
+		advance_power(delta)
 	if movement_allowed:
 		fire_cooldown_left = maxf(0.0, fire_cooldown_left - delta)
 		for cooldown_type in incident_type_cooldowns.keys():
@@ -3002,7 +3137,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3440,6 +3575,9 @@ func load_game() -> bool:
 	farm_stock = clampf(float(data.get("farm_stock", 0.0)), 0.0, 100000.0) if (data.get("farm_stock", 0.0) is int or data.get("farm_stock", 0.0) is float) and is_finite(float(data.get("farm_stock", 0.0))) else 0.0
 	farm_grain = clampf(float(data.get("farm_grain", 0.0)), 0.0, 100000.0) if (data.get("farm_grain", 0.0) is int or data.get("farm_grain", 0.0) is float) and is_finite(float(data.get("farm_grain", 0.0))) else 0.0
 	farm_flour = clampf(float(data.get("farm_flour", 0.0)), 0.0, 100000.0) if (data.get("farm_flour", 0.0) is int or data.get("farm_flour", 0.0) is float) and is_finite(float(data.get("farm_flour", 0.0))) else 0.0
+	day_time = fposmod(float(data.get("day_time", 0.35)), 1.0) if (data.get("day_time", 0.35) is int or data.get("day_time", 0.35) is float) and is_finite(float(data.get("day_time", 0.35))) else 0.35
+	battery_charge = clampf(float(data.get("battery_charge", 0.0)), 0.0, 100000.0) if (data.get("battery_charge", 0.0) is int or data.get("battery_charge", 0.0) is float) and is_finite(float(data.get("battery_charge", 0.0))) else 0.0
+	power_ratio = 1.0
 	farm_blueprint = []
 	if data.get("farm_blueprint", []) is Array:
 		for item in data.get("farm_blueprint", []):

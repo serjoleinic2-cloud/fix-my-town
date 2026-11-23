@@ -10,7 +10,7 @@ const BUILDING_SELECT_SOUNDS := {
 	"city_hall": "success", "elite_residence": "level_up", "business_tower": "level_up",
 	"house": "select", "ruins": "deny", "empty": "select", "depot": "repair",
 	"logistics_center": "engine", "warehouse": "build", "fire_station": "siren",
-	"bridge": "build", "field": "leaves", "barn": "build", "mill": "engine", "bakery": "build",
+	"bridge": "build", "field": "leaves", "barn": "build", "mill": "engine", "street_lamp": "leaves", "wind_turbine": "build", "solar_panel": "build", "power_plant": "engine", "battery": "build", "fitness_club": "build", "pizzeria": "build", "theatre": "build", "aquapark": "build", "amusement_park": "build", "bakery": "build",
 	"pasture": "leaves", "livestock_yard": "leaves", "farm_warehouse": "build",
 	"police_station": "warning", "hospital": "radio_call", "lawn": "leaves",
 	"flower_bed": "leaves", "street_tree": "leaves", "bush": "leaves",
@@ -93,7 +93,7 @@ func play_vehicle_select(type_id: String) -> void:
 func play_construction(position_value: Vector3, type_id: String = "house") -> void:
 	play_ui(str({"road": "build", "clear": "repair"}.get(type_id, building_select_sound(type_id))))
 	play("build", "Effects", position_value)
-	if type_id in ["park", "lawn", "flower_bed", "street_tree", "bush"]:
+	if type_id in ["park", "lawn", "flower_bed", "street_tree", "bush", "street_lamp"]:
 		play("leaves", "Effects", position_value)
 
 func sync_traffic_ambience(traffic_vehicles: Array, listener_position: Vector3) -> void:

@@ -39,6 +39,9 @@ var fire_notice_label: Label
 var fire_notice_left: float = 0.0
 var harvest_all_button: Button
 var harvest_ready_count: int = 0
+var world_environment: WorldEnvironment
+var day_clock_label: Label
+var day_visual_clock: float = 0.0
 var harvest_check_clock: float = 0.0
 var subsidy_dialog: Control
 var rewarded_dialog: Control
@@ -165,13 +168,15 @@ var last_quality: float = -1
 var quality_trend: String = "→"
 const QUALITY_COLORS = [Color("df6356"), Color("e9994f"), Color("d8bd57"), Color("9fc76e"), Color("59a675")]
 const QUALITY_NAMES = [["Критическое", "Неблагополучное", "Удовлетворительное", "Благополучное", "Отличное"], ["Critical", "Struggling", "Satisfactory", "Good", "Excellent"]]
-const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "agriculture", "landscaping"]
+const CATALOG_CATEGORIES := ["residential", "commercial", "infrastructure", "services", "agriculture", "leisure", "energy", "landscaping"]
 const CATALOG_ITEMS := {
 	"residential": ["house", "elite_residence"],
 	"commercial": ["cafe", "supermarket", "park", "business_tower"],
 	"infrastructure": ["clear", "bridge", "logistics_center", "warehouse"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"agriculture": ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"],
+	"leisure": ["fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"],
+	"energy": ["street_lamp", "wind_turbine", "solar_panel", "power_plant", "battery"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
 const TEXT = {
@@ -195,6 +200,8 @@ const TEXT = {
 	"field": ["Поле", "Field"], "barn": ["Амбар", "Barn"], "mill": ["Мельница", "Mill"], "bakery": ["Пекарня", "Bakery"],
 	"pasture": ["Пастбище", "Pasture"], "livestock_yard": ["Животноводческий двор", "Livestock yard"],
 	"farm_warehouse": ["Фермерский склад", "Farm warehouse"],
+	"street_lamp": ["Фонарь", "Street lamp"], "wind_turbine": ["Ветряк", "Wind turbine"], "solar_panel": ["Солнечные панели", "Solar panels"], "power_plant": ["Электростанция", "Power plant"], "battery": ["Накопитель энергии", "Battery storage"],
+	"fitness_club": ["Фитнес-клуб", "Fitness club"], "pizzeria": ["Пиццерия", "Pizzeria"], "theatre": ["Театр", "Theatre"], "aquapark": ["Аквапарк", "Water park"], "amusement_park": ["Парк развлечений", "Amusement park"],
 	"elite_residence": ["Элитная резиденция", "Elite residence"], "business_tower": ["Деловая башня", "Business tower"],
 	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
 	"build": ["%s · %d\nНастроение +%d", "%s · %d\nHappiness +%d"],
@@ -285,6 +292,8 @@ const TEXT = {
 	"category_services": ["Службы", "Services"],
 	"category_agriculture": ["Фермерство", "Farming"],
 	"category_landscaping": ["Благоустройство", "Landscaping"],
+	"category_leisure": ["Досуг", "Leisure"],
+	"category_energy": ["Энергия и свет", "Power and light"],
 	"place_catalog_item": ["Разместить: %s", "Place: %s"],
 	"selected_cell": ["Выбрана клетка: %s", "Selected cell: %s"],
 	"cell_unselected": ["Нажмите на карту и выберите допустимое место", "Tap the map and choose a valid location"],
@@ -544,6 +553,10 @@ func build_ui() -> void:
 	harvest_all_button.custom_minimum_size.y = 64
 	harvest_all_button.add_theme_font_size_override("font_size", 22)
 	harvest_all_button.hide()
+	day_clock_label = label(18, screen, "")
+	day_clock_label.name = "DayClock"
+	day_clock_label.add_theme_color_override("font_color", Color("26333a"))
+	day_clock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sheet = card(screen)
 	sheet.resized.connect(func():
 		if not updating_layout:
@@ -628,6 +641,8 @@ func update_layout() -> void:
 		mission.size.y = 110
 	fire_notice.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
 	fire_notice.size = Vector2(size_value.x - safe_left - safe_right, 72)
+	day_clock_label.position = Vector2(safe_left + 12, fire_notice.position.y + 78)
+	day_clock_label.size = Vector2(320, 28)
 	harvest_all_button.position = Vector2(safe_left + 12, mission.position.y - 76)
 	harvest_all_button.size = Vector2(minf(360.0, size_value.x * 0.7), 64)
 	# A fire card must not lock the player out of normal navigation. The player
@@ -712,6 +727,7 @@ func build_world() -> void:
 	environment.environment.ambient_light_energy = 0.8
 	environment.environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	world.add_child(environment)
+	world_environment = environment
 	var empty_city: bool = game.empty_city_mode or (game.buildings.all(func(kind: String) -> bool: return kind == "empty") and game.territory.buildings.is_empty())
 	clean_start_visual = empty_city
 	if empty_city:
@@ -2029,7 +2045,7 @@ func snap_placement_anchor(cell: Vector2i, type_id: String) -> Vector2i:
 
 func catalog_items_for(category: String) -> Array:
 	var items: Array = CATALOG_ITEMS.get(category, [])
-	if category != "agriculture" or not game.empty_city_mode:
+	if category not in ["agriculture", "leisure", "energy"] or not game.empty_city_mode:
 		return items
 	# Future farming buildings stay out of the catalogue until their chapter;
 	# the stage briefing announces them immediately before they appear.
@@ -2930,6 +2946,10 @@ func campaign_goal_text(stage: int) -> String:
 		13: return tr_text("постройте мельницу и пастбище", "build a mill and a pasture")
 		14: return tr_text("постройте животноводческий двор", "build a livestock yard")
 		15: return tr_text("постройте фермерский склад", "build a farm warehouse")
+		16: return tr_text("3 фонаря и ветряк: город получает свет", "3 street lamps and a wind turbine: the city gets light")
+		17: return tr_text("фитнес-клуб и пиццерия (ей нужен хлеб с фермы)", "a fitness club and a pizzeria (it needs farm bread)")
+		18: return tr_text("театр и накопитель энергии", "a theatre and a battery storage")
+		19: return tr_text("аквапарк и парк развлечений", "a water park and an amusement park")
 		_: return ""
 
 func campaign_stage_unlock_text(stage: int) -> String:
@@ -2939,6 +2959,10 @@ func campaign_stage_unlock_text(stage: int) -> String:
 		13: return tr_text("Мельница и пастбище", "Mill and pasture")
 		14: return tr_text("Животноводческий двор", "Livestock yard")
 		15: return tr_text("Фермерский склад и логистика", "Farm warehouse and logistics")
+		16: return tr_text("День и ночь, фонари, ветряки и солнечные панели", "Day and night, lamps, wind and solar power")
+		17: return tr_text("Фитнес, пиццерия и электростанция", "Fitness, pizzeria and a power plant")
+		18: return tr_text("Театр и накопитель энергии", "Theatre and battery storage")
+		19: return tr_text("Аквапарк и парк развлечений", "Water park and amusement park")
 		_: return tr_text("Новые участки и развитие города", "New lots and city development")
 
 func campaign_stage_upgrade_text(stage: int) -> String:
@@ -3975,6 +3999,10 @@ func _process(delta: float) -> void:
 	if harvest_check_clock >= 0.5:
 		harvest_check_clock = 0.0
 		update_harvest_button()
+	day_visual_clock += delta
+	if day_visual_clock >= 0.5:
+		day_visual_clock = 0.0
+		apply_day_night()
 	if leak_effect != null and is_instance_valid(leak_effect):
 		leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
 	for marker_name in ["LeakMarker", "SignalMarker"]:
@@ -4330,6 +4358,12 @@ func build_district_sheet() -> void:
 		var farm_line := label(19, sheet_column, tr_text("Ферма: запас %d из %d · выпуск %d в минуту", "Farm: stock %d of %d · output %d per minute") % [roundi(game.farm_stock), roundi(farm_capacity), roundi(game.farm_production_per_minute())])
 		farm_line.name = "FarmStock"
 	add_farm_guidance()
+	if game.power_enabled():
+		var power_line := label(19, sheet_column, tr_text("Энергия: даёт %d · нужно %d · накопитель %d из %d", "Power: supply %d · demand %d · battery %d of %d") % [roundi(game.power_supply()), roundi(game.power_demand()), roundi(game.battery_charge), roundi(game.battery_capacity())])
+		power_line.name = "PowerLine"
+		power_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		if game.power_ratio < 0.6:
+			power_line.add_theme_color_override("font_color", Color("b36b49"))
 	var task_done := game.district_task_progress()
 	label(18, sheet_column, tr_text("Построено домов: %d/%d", "Homes built: %d/%d") % [game.district_house_count(), game.district_house_limit])
 	label(18, sheet_column, tr_text("Заданий выполнено: %d/%d", "Tasks complete: %d/%d") % [task_done, game.district_tasks.size()])
@@ -5604,6 +5638,16 @@ const BUILDING_EXPLAIN := {
 	"livestock_yard": {"does": ["Скотный двор: молоко и мясо. Собирается тапом.", "Livestock yard: milk and meat. Tap to collect."], "needs": ["Дорога к городу и место на складе фермы.", "A road to the city and room in the farm storage."], "gives": ["Больше всего товаров среди ферм.", "The biggest goods output on the farm."]},
 	"mill": {"does": ["Перемалывает зерно полей в муку: 1 зерно даёт 1,5 муки.", "Grinds field grain into flour: 1 grain makes 1.5 flour."], "needs": ["Поля, которые уже отдали зерно. Без зерна мельница стоит.", "Fields that have handed over grain. Without grain the mill idles."], "gives": ["Мука на склад фермы (собирается тапом).", "Flour for the farm storage (collect by tapping)."]},
 	"bakery": {"does": ["Печёт хлеб из муки мельницы: 1 мука даёт 2 хлеба.", "Bakes bread from mill flour: 1 flour makes 2 loaves."], "needs": ["Мельница, которая уже отдала муку. Без муки пекарня стоит.", "A mill that has handed over flour. Without flour the bakery idles."], "gives": ["Хлеб на склад фермы (собирается тапом): самый ценный товар цепочки.", "Bread for the farm storage (collect by tapping): the most valuable goods of the chain."]},
+	"street_lamp": {"does": ["Освещает улицу ночью.", "Lights the street at night."], "needs": ["Электричество: при нехватке не горит.", "Electricity: it stays dark when power is short."], "gives": ["Дома рядом не получают штраф за тёмную улицу.", "Homes nearby avoid the dark-street penalty."]},
+	"wind_turbine": {"does": ["Даёт электричество от ветра, 60 в пике.", "Makes electricity from wind, up to 60."], "needs": ["Ничего, но сила ветра меняется в течение суток.", "Nothing, but wind strength changes through the day."], "gives": ["Питание города. Дёшев, но нестабилен.", "City power. Cheap but unreliable."]},
+	"solar_panel": {"does": ["Даёт электричество днём, до 45.", "Makes electricity in daytime, up to 45."], "needs": ["Солнце: ночью не работает.", "Sunlight: idle at night."], "gives": ["Дневная энергия. Излишек заряжает накопитель.", "Daytime power. Surplus charges the battery."]},
+	"power_plant": {"does": ["Даёт стабильные 180 в любое время суток.", "Makes a steady 180 at any time."], "needs": ["Большой бюджет.", "A large budget."], "gives": ["Основа ночного питания большого города.", "The backbone of night power for a big city."]},
+	"battery": {"does": ["Запасает излишки энергии на ночь.", "Stores surplus power for the night."], "needs": ["Станции, дающие больше, чем нужно днём.", "Stations producing more than needed by day."], "gives": ["Отдаёт запас, когда не хватает света и ветра.", "Releases stored power when sun and wind are short."]},
+	"fitness_club": {"does": ["Спортзал для жителей района.", "A gym for the district."], "needs": ["Дорога и электричество.", "A road and electricity."], "gives": ["Радость и меньше болезней рядом.", "Happiness and fewer illnesses nearby."]},
+	"pizzeria": {"does": ["Печёт пиццу из товаров фермы, 2 в минуту.", "Bakes pizza from farm goods, 2 per minute."], "needs": ["Запас на складе фермы (хлеб, мука).", "Stock in the farm storage (bread, flour)."], "gives": ["Радость жителей рядом и доход. Без запаса почти не действует.", "Resident happiness nearby and income. Barely works without stock."]},
+	"theatre": {"does": ["Вечерние спектакли.", "Evening shows."], "needs": ["Электричество и дорога.", "Electricity and a road."], "gives": ["Сильный бонус к радости, особенно вечером и ночью.", "A strong happiness bonus, especially in the evening and at night."]},
+	"aquapark": {"does": ["Большой водный парк.", "A big water park."], "needs": ["Электричество (30 в минуту) и вода.", "Electricity (30) and water."], "gives": ["Большой бонус к радости и хороший доход.", "A large happiness bonus and strong income."]},
+	"amusement_park": {"does": ["Аттракционы для всего города.", "Rides for the whole city."], "needs": ["Много электричества (40) и хорошие дороги.", "Lots of electricity (40) and good roads."], "gives": ["Самый большой бонус к радости и доход.", "The biggest happiness bonus and income."]},
 	"barn": {"does": ["Хранит урожай фермы.", "Stores the farm harvest."], "needs": ["Дорога к городу.", "A road to the city."], "gives": ["+300 к складу фермы за уровень. С 2 уровня бригада сама собирает готовое (без бонуса).", "+300 farm storage per level. From level 2 a crew collects ready goods automatically (no bonus)."]},
 	"farm_warehouse": {"does": ["Большой склад фермы.", "The large farm storage."], "needs": ["Дорога к городу.", "A road to the city."], "gives": ["+600 к складу фермы за уровень.", "+600 farm storage per level."]},
 }
@@ -5673,6 +5717,24 @@ func restore_farm() -> void:
 		show_short_notice(tr_text("Не хватает средств или место занято.", "Not enough funds or the spot is taken."))
 		audio.play_ui("deny")
 	refresh()
+
+func apply_day_night() -> void:
+	if sunlight == null or world_environment == null or not game.empty_city_mode:
+		return
+	var light: float = game.daylight()
+	sunlight.light_energy = lerpf(0.06, 0.65, light)
+	sunlight.light_color = Color("ffb36b").lerp(Color("fff9ec"), clampf(light * 1.6, 0.0, 1.0)) if light > 0.0 else Color("7f95c9")
+	var env := world_environment.environment
+	env.ambient_light_energy = lerpf(0.28, 0.8, light)
+	env.ambient_light_color = Color("5a6c9a").lerp(Color("d9e4e2"), light)
+	env.background_color = Color("2c3a52").lerp(Color("8eaa69"), light)
+	var hour: float = game.game_hour()
+	var text_value := "%02d:%02d" % [int(hour), int((hour - floorf(hour)) * 60.0)]
+	text_value += (tr_text("  ·  ночь", "  ·  night") if game.is_night() else tr_text("  ·  день", "  ·  day"))
+	if game.power_enabled():
+		text_value += tr_text("  ·  энергия %d%%", "  ·  power %d%%") % roundi(game.power_ratio * 100.0)
+	day_clock_label.text = text_value
+	day_clock_label.visible = not bool(harvest_all_button.get_meta("menu_hidden", false))
 
 func farm_effect_text(kind: String, level_value: int) -> String:
 	var mult := float(clampi(level_value, 1, 3))

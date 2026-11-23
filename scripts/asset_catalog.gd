@@ -29,6 +29,16 @@ const TYPES = {
 	"flower_bed": {"icon": "res://assets/icons/flower_bed.svg", "scene": "res://scenes/visuals/flower_bed.tscn", "cost": 25, "environment": 4, "footprint": Vector2(4.8, 4.8)},
 	"street_tree": {"icon": "res://assets/icons/street_tree.svg", "scene": "res://scenes/visuals/street_tree.tscn", "cost": 20, "environment": 3, "footprint": Vector2(4.8, 4.8)},
 	"bush": {"icon": "res://assets/icons/bush.svg", "scene": "res://scenes/visuals/bush.tscn", "cost": 15, "environment": 2, "footprint": Vector2(4.8, 4.8)},
+	"street_lamp": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/street_lamp.tscn", "cost": 30, "environment": 2, "footprint": Vector2(4.8, 4.8)},
+	"wind_turbine": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/wind_turbine.tscn", "cost": 400, "income": 0, "footprint": Vector2(9.6, 9.6)},
+	"solar_panel": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/solar_panel.tscn", "cost": 520, "income": 0, "footprint": Vector2(9.6, 9.6)},
+	"power_plant": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/power_plant.tscn", "cost": 1500, "income": 0, "footprint": Vector2(9.6, 9.6)},
+	"battery": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/battery.tscn", "cost": 700, "income": 0, "footprint": Vector2(9.6, 9.6)},
+	"fitness_club": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/fitness_club.tscn", "cost": 260, "income": 14, "footprint": Vector2(9.6, 9.6)},
+	"pizzeria": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/pizzeria.tscn", "cost": 300, "income": 18, "footprint": Vector2(9.6, 9.6)},
+	"theatre": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/theatre.tscn", "cost": 900, "income": 30, "footprint": Vector2(9.6, 9.6)},
+	"aquapark": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/aquapark.tscn", "cost": 1400, "income": 48, "footprint": Vector2(9.6, 9.6)},
+	"amusement_park": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/amusement_park.tscn", "cost": 2200, "income": 70, "footprint": Vector2(9.6, 9.6)},
 	"cafe": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/cafe.tscn", "cost": 120, "mood": 5, "footprint": Vector2(9, 9)},
 	"park": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/park.tscn", "cost": 100, "mood": 5, "footprint": Vector2(9, 9)},
 	"repair_van": {"scene": "res://scenes/visuals/repair_van.tscn", "footprint": Vector2(1.8, 3.0)},
@@ -108,9 +118,12 @@ const UNLOCK_LEVELS = {
 	"elite_residence": 4, "business_tower": 5,
 	"bridge": 11, "field": 12, "barn": 12, "mill": 13, "pasture": 13, "livestock_yard": 14, "farm_warehouse": 15, "bakery": 15,
 	"police_station": 2, "hospital": 3,
-	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
+	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1,
+	"street_lamp": 16, "wind_turbine": 16, "solar_panel": 16, "fitness_club": 17, "pizzeria": 17, "power_plant": 17, "theatre": 18, "battery": 18, "aquapark": 19, "amusement_park": 19
 }
-const LANDSCAPING_TYPES = ["lawn", "flower_bed", "street_tree", "bush"]
+const LANDSCAPING_TYPES = ["lawn", "flower_bed", "street_tree", "bush", "street_lamp"]
+const LEISURE_TYPES = ["fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"]
+const ENERGY_TYPES = ["street_lamp", "wind_turbine", "solar_panel", "power_plant", "battery"]
 const SERVICE_TYPES = ["fire_station", "police_station", "hospital", "depot"]
 const FARM_TYPES = ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]
 

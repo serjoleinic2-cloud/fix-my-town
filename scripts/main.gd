@@ -4329,6 +4329,7 @@ func build_district_sheet() -> void:
 	if farm_capacity > 0.0:
 		var farm_line := label(19, sheet_column, tr_text("Ферма: запас %d из %d · выпуск %d в минуту", "Farm: stock %d of %d · output %d per minute") % [roundi(game.farm_stock), roundi(farm_capacity), roundi(game.farm_production_per_minute())])
 		farm_line.name = "FarmStock"
+	add_farm_guidance()
 	var task_done := game.district_task_progress()
 	label(18, sheet_column, tr_text("Построено домов: %d/%d", "Homes built: %d/%d") % [game.district_house_count(), game.district_house_limit])
 	label(18, sheet_column, tr_text("Заданий выполнено: %d/%d", "Tasks complete: %d/%d") % [task_done, game.district_tasks.size()])
@@ -5617,6 +5618,60 @@ func add_building_explanation(type_id: String) -> void:
 		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		line.add_theme_color_override("font_color", Color("4f5d66"))
 		line.name = "Explain_" + key
+
+func farm_suggestion_reason(suggestion: Dictionary) -> String:
+	match str(suggestion.reason):
+		"start": return tr_text("С поля начинается вся ферма: оно даёт зерно.", "The farm starts with a field: it grows grain.")
+		"storage": return tr_text("Урожаю нужно место: склад фермы почти полон или ещё мал.", "The harvest needs room: farm storage is small or nearly full.")
+		"chain": return tr_text("Мельница превратит зерно в муку: на 50% больше товара.", "The mill turns grain into flour: 50% more goods.")
+	return tr_text("Ещё одно здание сделает ферму разнообразнее и продуктивнее.", "Another building makes the farm more varied and productive.")
+
+func add_farm_guidance() -> void:
+	var restorable: Array = game.farm_restorable()
+	if not game.farm_blueprint.is_empty():
+		var cost: int = game.farm_restore_cost()
+		var missing := label(17, sheet_column, tr_text("Снесено зданий фермы: %d. Можно восстановить на прежних местах: %d (за %d).", "Demolished farm buildings: %d. Can be restored in place: %d (for %d).") % [game.farm_blueprint.size(), restorable.size(), cost])
+		missing.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		missing.name = "FarmDemolishedLine"
+		if not restorable.is_empty():
+			var restore := button(sheet_column, tr_text("Восстановить ферму · %d", "Restore the farm · %d") % cost, restore_farm, true)
+			restore.name = "RestoreFarmButton"
+			restore.disabled = game.budget < Catalog.cost(str(restorable[0].type_id))
+	var suggestion: Dictionary = game.farm_next_suggestion()
+	if suggestion.is_empty():
+		return
+	var name_text := t(str(suggestion.type_id))
+	var advice := label(17, sheet_column, tr_text("Следующий шаг фермы: %s. ", "Next farm step: %s. ") % name_text + farm_suggestion_reason(suggestion))
+	advice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	advice.name = "FarmNextStep"
+	if suggestion.site == Vector2i(-1, -1):
+		var no_site := label(16, sheet_column, tr_text("Свободных подготовленных участков нет: расчистите место у фермерской улицы или снесите ненужное здание.", "No prepared lots are free: clear space by the farm street or demolish something unused."))
+		no_site.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		no_site.add_theme_color_override("font_color", Color("b36b49"))
+		return
+	var build := button(sheet_column, tr_text("Построить: %s · %d", "Build: %s · %d") % [name_text, int(suggestion.price)], build_farm_suggestion, true)
+	build.name = "BuildFarmSuggestionButton"
+	build.disabled = not bool(suggestion.affordable)
+
+func build_farm_suggestion() -> void:
+	var suggestion: Dictionary = game.farm_next_suggestion()
+	if not suggestion.is_empty() and game.farm_build_suggestion():
+		show_short_notice(tr_text("Построено: %s", "Built: %s") % t(str(suggestion.type_id)))
+		audio.play_ui("success")
+	else:
+		show_short_notice(tr_text("Сейчас построить нельзя: не хватает средств или места.", "Cannot build now: not enough funds or space."))
+		audio.play_ui("deny")
+	refresh()
+
+func restore_farm() -> void:
+	var count: int = game.farm_restore_all()
+	if count > 0:
+		show_short_notice(tr_text("Восстановлено зданий фермы: %d", "Farm buildings restored: %d") % count)
+		audio.play_ui("success")
+	else:
+		show_short_notice(tr_text("Не хватает средств или место занято.", "Not enough funds or the spot is taken."))
+		audio.play_ui("deny")
+	refresh()
 
 func farm_effect_text(kind: String, level_value: int) -> String:
 	var mult := float(clampi(level_value, 1, 3))

@@ -73,6 +73,9 @@ var incident_type_cooldowns: Dictionary = {}
 var fire_cooldown_left: float = 0.0
 var farm_stock: float = 0.0
 var farm_grain: float = 0.0
+# Farm buildings the player demolished: {type_id, col, row}. Lets the farm be
+# restored in one tap and keeps the plan of the district visible.
+var farm_blueprint: Array = []
 var job_problem_id: String = ""
 var problem_test_hooks_enabled: bool = false
 var _logistics_coverage_cache_signature: int = -1
@@ -176,6 +179,7 @@ func start_empty_city() -> void:
 	fire_cooldown_left = 0.0
 	farm_stock = 0.0
 	farm_grain = 0.0
+	farm_blueprint = []
 	fire_triggered = false
 	transit = Transit.new()
 	district_tasks = [
@@ -743,6 +747,83 @@ func farm_building_issue(entry: Dictionary) -> String:
 	if farm_ready_amount(entry) >= capacity and farm_free_space() < 1.0:
 		return "storage_full"
 	return ""
+
+const FARM_BUILD_ORDER := ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"]
+
+func farm_type_count(type_id: String) -> int:
+	var count := 0
+	for entry: Dictionary in territory.buildings:
+		if str(entry.get("type_id", "")) == type_id:
+			count += 1
+	return count
+
+func farm_site_for(type_id: String) -> Vector2i:
+	if not territory.bridge_built or maxi(city_level(), campaign_stage) < Catalog.unlock_level(type_id):
+		return Vector2i(-1, -1)
+	for site: Vector2i in territory.farm_campaign_sites():
+		if territory.placement_reason(site.x, site.y, type_id) == "":
+			return site
+	return Vector2i(-1, -1)
+
+# The next farm building worth building and why. Returns {} when the farm is
+# complete (one of each) or farming is not open yet. Keys: type_id, reason
+# ("start", "chain", "storage", "variety", "restore"), site (Vector2i, or
+# (-1,-1) when no free lot exists), price, affordable.
+func farm_next_suggestion() -> Dictionary:
+	if not territory.bridge_built or maxi(city_level(), campaign_stage) < 12:
+		return {}
+	var wanted := ""
+	var reason := "variety"
+	if farm_type_count("field") == 0:
+		wanted = "field"
+		reason = "start"
+	elif farm_type_count("barn") == 0:
+		wanted = "barn"
+		reason = "storage"
+	elif farm_type_count("mill") == 0 and maxi(city_level(), campaign_stage) >= Catalog.unlock_level("mill"):
+		wanted = "mill"
+		reason = "chain"
+	elif farm_storage_capacity() > 0.0 and farm_stock + farm_grain >= farm_storage_capacity() * 0.8 and farm_type_count("farm_warehouse") == 0 and maxi(city_level(), campaign_stage) >= Catalog.unlock_level("farm_warehouse"):
+		wanted = "farm_warehouse"
+		reason = "storage"
+	else:
+		for type_id: String in FARM_BUILD_ORDER:
+			if farm_type_count(type_id) == 0 and maxi(city_level(), campaign_stage) >= Catalog.unlock_level(type_id):
+				wanted = type_id
+				break
+	if wanted == "":
+		return {}
+	var price: int = Catalog.cost(wanted)
+	return {"type_id": wanted, "reason": reason, "site": farm_site_for(wanted), "price": price, "affordable": budget >= price}
+
+func farm_build_suggestion() -> bool:
+	var suggestion := farm_next_suggestion()
+	if suggestion.is_empty() or suggestion.site == Vector2i(-1, -1) or not suggestion.affordable:
+		return false
+	return build_grid_building(suggestion.site.x, suggestion.site.y, str(suggestion.type_id))
+
+# Demolished farm buildings that can be put back right now.
+func farm_restorable() -> Array:
+	var result: Array = []
+	for item: Dictionary in farm_blueprint:
+		if territory.placement_reason(int(item.col), int(item.row), str(item.type_id)) == "":
+			result.append(item)
+	return result
+
+func farm_restore_cost() -> int:
+	var total := 0
+	for item: Dictionary in farm_restorable():
+		total += Catalog.cost(str(item.type_id))
+	return total
+
+# Rebuilds demolished farm buildings (level 1) while the budget lasts.
+func farm_restore_all() -> int:
+	var built := 0
+	for item: Dictionary in farm_restorable():
+		if budget >= Catalog.cost(str(item.type_id)) and build_grid_building(int(item.col), int(item.row), str(item.type_id)):
+			farm_blueprint.erase(item)
+			built += 1
+	return built
 
 func advance_farm_stock(minutes: int) -> bool:
 	var changed := false
@@ -1625,6 +1706,12 @@ func build_grid_building(col: int, row: int, type_id: String, reserved: bool = f
 		return false
 	if not reserved:
 		budget -= price
+	# Building a farm type anywhere (not only on the old lot) settles the memory
+	# of a demolished building of that type: the player chose a new layout.
+	for planned: Dictionary in farm_blueprint.duplicate():
+		if str(planned.type_id) == type_id:
+			farm_blueprint.erase(planned)
+			break
 	if type_id in ["cafe", "supermarket"]:
 		var shop_entry := territory.building_at(col, row)
 		shop_entry.food_stock = food_stock_capacity(type_id, 1)
@@ -1653,6 +1740,8 @@ func demolish_grid_building(identifier: String) -> bool:
 	if entry.type_id == "house":
 		renewal_credits += 1
 	budget += Catalog.cost(entry.type_id) / 4
+	if Catalog.is_farm(str(entry.type_id)):
+		farm_blueprint.append({"type_id": str(entry.type_id), "col": int(entry.col), "row": int(entry.row)})
 	for dy in range(entry.height):
 		for dx in range(entry.width):
 			if territory.cells[entry.row + dy][entry.col + dx] == "occupied":
@@ -2864,7 +2953,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "farm_grain": farm_grain,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "farm_grain": farm_grain, "farm_blueprint": farm_blueprint,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3301,6 +3390,11 @@ func load_game() -> bool:
 	fire_cooldown_left = clampf(float(data.get("fire_cooldown_left", 0.0)), 0.0, 3600.0)
 	farm_stock = clampf(float(data.get("farm_stock", 0.0)), 0.0, 100000.0) if (data.get("farm_stock", 0.0) is int or data.get("farm_stock", 0.0) is float) and is_finite(float(data.get("farm_stock", 0.0))) else 0.0
 	farm_grain = clampf(float(data.get("farm_grain", 0.0)), 0.0, 100000.0) if (data.get("farm_grain", 0.0) is int or data.get("farm_grain", 0.0) is float) and is_finite(float(data.get("farm_grain", 0.0))) else 0.0
+	farm_blueprint = []
+	if data.get("farm_blueprint", []) is Array:
+		for item in data.get("farm_blueprint", []):
+			if item is Dictionary and Catalog.is_farm(str(item.get("type_id", ""))) and (item.get("col", null) is int or item.get("col", null) is float) and (item.get("row", null) is int or item.get("row", null) is float) and farm_blueprint.size() < 40:
+				farm_blueprint.append({"type_id": str(item.type_id), "col": int(item.col), "row": int(item.row)})
 	incidents = {}
 	var raw_incidents: Variant = data.get("incidents", {})
 	if raw_incidents is Dictionary:

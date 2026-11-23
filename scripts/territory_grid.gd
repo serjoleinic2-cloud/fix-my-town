@@ -1141,6 +1141,12 @@ func restore(value: Variant) -> bool:
 			if not (stock_value is int or stock_value is float) or not is_finite(float(stock_value)) or float(stock_value) < 0.0 or float(stock_value) > 1000000.0:
 				return false
 			building.food_stock = minf(float(stock_value), capacity * float(level_value))
+		for farm_key in ["ready", "ready_age"]:
+			if building.has(farm_key):
+				var farm_value: Variant = building[farm_key]
+				if not (farm_value is int or farm_value is float) or not is_finite(float(farm_value)):
+					return false
+				building[farm_key] = clampf(float(farm_value), 0.0, 100000.0)
 		if typeof(building.get("inspected", false)) != TYPE_BOOL:
 			return false
 		if typeof(building.get("shanty", false)) != TYPE_BOOL or (bool(building.get("shanty", false)) and str(building.type_id) != "house"):

@@ -38,12 +38,54 @@ static func specs_for(game: RefCounted) -> Array[Dictionary]:
 		var progress := 1.0 - float(task.get("remaining", total)) / total
 		specs.append({"id": "construction:" + str(task.get("job_id", task.get("identifier", "%s_%s" % [task.get("col", -1), task.get("row", -1)]))),
 			"kind": "construction", "progress": progress, "position": construction_task_world(game, task) + Vector3(0, 4.8, 0)})
+	if game.has_method("farm_ready_count"):
+		for entry: Dictionary in game.territory.buildings:
+			var farm_type := str(entry.get("type_id", ""))
+			if game.is_farm_producer(farm_type) and game.farm_is_ready(entry) and game.farm_building_issue(entry) == "":
+				var capacity: float = game.farm_building_capacity(entry)
+				specs.append({"id": "harvest:" + str(entry.get("instance_id", "")), "kind": "harvest", "crop": farm_type,
+					"progress": game.farm_ready_amount(entry) / maxf(1.0, capacity), "position": game.territory.building_center(entry) + Vector3(0, 5.6, 0)})
 	if game.job != "" and game.job != "fire" and game.job_phase == "repair":
 		var repair_position: Vector3 = game.building_world_for_id(game.target_instance_id)
 		if repair_position != Vector3.ZERO:
 			specs.append({"id": "service:" + game.target_instance_id, "kind": "repair", "progress": 1.0 - game.repair_left / 4.0,
 				"position": repair_position + Vector3(0, 6.3, 0)})
 	return specs
+
+static func _disc(image: Image, cx: int, cy: int, radius: int, color: Color) -> void:
+	for y in range(maxi(0, cy - radius), mini(image.get_height(), cy + radius + 1)):
+		for x in range(maxi(0, cx - radius), mini(image.get_width(), cx + radius + 1)):
+			if (x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius:
+				image.set_pixel(x, y, color)
+
+static func harvest_texture(crop: String, full: bool) -> ImageTexture:
+	var image := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var fill := {"field": Color("e6b43c"), "pasture": Color("8cc56b"), "livestock_yard": Color("d9905a"), "mill": Color("e8e2d2")}.get(crop, Color("e6b43c")) as Color
+	_disc(image, 32, 32, 30, Color("ffffff") if not full else Color("7ec45a"))
+	_disc(image, 32, 32, 26, fill)
+	var ink := Color("fffdf3") if crop != "mill" else Color("8a6a3a")
+	match crop:
+		"pasture":
+			_disc(image, 32, 39, 10, ink)
+			image.fill_rect(Rect2i(30, 15, 4, 10), ink)
+			image.fill_rect(Rect2i(27, 24, 10, 6), ink)
+		"livestock_yard":
+			_disc(image, 32, 34, 13, ink)
+			_disc(image, 32, 21, 7, ink)
+			image.fill_rect(Rect2i(24, 44, 4, 8), ink)
+			image.fill_rect(Rect2i(36, 44, 4, 8), ink)
+		"mill":
+			image.fill_rect(Rect2i(19, 25, 26, 22), ink)
+			_disc(image, 32, 25, 13, ink)
+			image.fill_rect(Rect2i(28, 14, 8, 6), ink)
+		_:
+			image.fill_rect(Rect2i(30, 20, 4, 30), ink)
+			for i in range(3):
+				_disc(image, 25, 24 + i * 9, 4, ink)
+				_disc(image, 39, 24 + i * 9, 4, ink)
+			_disc(image, 32, 17, 4, ink)
+	return ImageTexture.create_from_image(image)
 
 func _texture(kind: String, progress: float) -> ImageTexture:
 	var image := Image.create(72, 10, false, Image.FORMAT_RGBA8)
@@ -70,6 +112,18 @@ func sync(specs: Array[Dictionary]) -> void:
 			add_child(sprite)
 			indicators[identifier] = sprite
 		var kind := str(spec.get("kind", "fire"))
+		if kind == "harvest":
+			var crop := str(spec.get("crop", "field"))
+			var is_full := float(spec.get("progress", 0.0)) >= 0.999
+			if sprite.get_meta("kind", "") != kind or sprite.get_meta("crop", "") != crop or bool(sprite.get_meta("full", false)) != is_full:
+				sprite.texture = harvest_texture(crop, is_full)
+				sprite.set_meta("kind", kind)
+				sprite.set_meta("crop", crop)
+				sprite.set_meta("full", is_full)
+			sprite.pixel_size = 0.05
+			var bob := sin(Time.get_ticks_msec() / 1000.0 * 3.0) * 0.18
+			sprite.position = spec.get("position", Vector3.ZERO) + Vector3(0, bob, 0)
+			continue
 		var progress := clampf(float(spec.get("progress", 0.0)), 0.0, 1.0)
 		var bucket := roundi(progress * 40.0)
 		if sprite.get_meta("kind", "") != kind or int(sprite.get_meta("bucket", -1)) != bucket:

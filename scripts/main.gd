@@ -37,6 +37,9 @@ var notified_fire_ids: Dictionary = {}
 var fire_notice: PanelContainer
 var fire_notice_label: Label
 var fire_notice_left: float = 0.0
+var harvest_all_button: Button
+var harvest_ready_count: int = 0
+var harvest_check_clock: float = 0.0
 var subsidy_dialog: Control
 var rewarded_dialog: Control
 var campaign_dialog: Control
@@ -536,6 +539,11 @@ func build_ui() -> void:
 	fire_notice_label = label(22, fire_notice, "", true)
 	fire_notice_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	fire_notice.hide()
+	harvest_all_button = button(screen, "", collect_all_farm, true)
+	harvest_all_button.name = "HarvestAllButton"
+	harvest_all_button.custom_minimum_size.y = 64
+	harvest_all_button.add_theme_font_size_override("font_size", 22)
+	harvest_all_button.hide()
 	sheet = card(screen)
 	sheet.resized.connect(func():
 		if not updating_layout:
@@ -620,11 +628,15 @@ func update_layout() -> void:
 		mission.size.y = 110
 	fire_notice.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
 	fire_notice.size = Vector2(size_value.x - safe_left - safe_right, 72)
+	harvest_all_button.position = Vector2(safe_left + 12, mission.position.y - 76)
+	harvest_all_button.size = Vector2(minf(360.0, size_value.x * 0.7), 64)
 	# A fire card must not lock the player out of normal navigation. The player
 	# may inspect or build elsewhere while firefighters handle the call.
 	var service_mode: bool = selection_kind in ["signal", "leak"]
 	var fullscreen_menu: bool = selection_kind in ["catalog", "catalog_detail", "catalog_legacy_placement", "land_cell", "grid_house", "grid_upgrade", "grid_road", "district_status"]
 	navbar.visible = not service_mode
+	harvest_all_button.set_meta("menu_hidden", fullscreen_menu or service_mode)
+	update_harvest_button()
 	hud.visible = not fullscreen_menu
 	tools.visible = not fullscreen_menu
 	if fullscreen_menu:
@@ -1559,6 +1571,14 @@ func map_input(event: InputEvent) -> void:
 			selected = -1
 			refresh()
 			return
+	if world_status_indicators != null:
+		for harvest_key in world_status_indicators.indicators:
+			if not str(harvest_key).begins_with("harvest:"):
+				continue
+			var harvest_sprite := world_status_indicators.indicators[harvest_key] as Sprite3D
+			if harvest_sprite != null and is_instance_valid(harvest_sprite) and harvest_sprite.visible and camera.unproject_position(harvest_sprite.global_position).distance_to(point) < 46.0 * render_scale / viewport_container.stretch_shrink:
+				collect_farm_building(str(harvest_key).trim_prefix("harvest:"))
+				return
 	for kind in ["leak", "signal"]:
 		var fixed: bool = game.leak_fixed if kind == "leak" else game.signal_fixed
 		var marker := world.get_node_or_null("LeakMarker" if kind == "leak" else "SignalMarker") as Node3D
@@ -3951,6 +3971,10 @@ func _process(delta: float) -> void:
 	sync_police_vehicle()
 	sync_service_vehicle_parking()
 	sync_building_status_indicators()
+	harvest_check_clock += delta
+	if harvest_check_clock >= 0.5:
+		harvest_check_clock = 0.0
+		update_harvest_button()
 	if leak_effect != null and is_instance_valid(leak_effect):
 		leak_effect.visual_root.position.y = sin(elapsed * 6) * 0.12
 	for marker_name in ["LeakMarker", "SignalMarker"]:
@@ -4385,6 +4409,9 @@ func build_grid_house_sheet() -> void:
 						audio.play_ui("deny")
 						refresh(), true)
 				restore_premium.disabled = game.budget < restoration_cost or not game.construction_job.is_empty()
+		add_building_explanation(str(entry.type_id))
+		if Catalog.is_farm(str(entry.type_id)):
+			add_farm_status(entry)
 		if Catalog.LEVELS.has(entry.type_id):
 			label(20, sheet_column, building_effect(entry.type_id, entry.level)).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			if entry.type_id == "logistics_center":
@@ -4448,6 +4475,7 @@ func build_grid_house_sheet() -> void:
 					refresh(), true)
 			grid_restore.name = "RestoreDamagedHouse"
 			grid_restore.disabled = game.budget < grid_repair_price
+	add_building_explanation("house")
 	label(20, sheet_column, t("residents") % [game.record_residents(entry), Catalog.level_data("house", entry.level).income])
 	var narrow_screen: bool = screen.size.x < 420
 	var row: HBoxContainer
@@ -5555,12 +5583,145 @@ func sync_road_police_node(active: bool) -> void:
 	if audio != null:
 		audio.set_loop("road_police_siren", "siren", "Effects", road_police.phase != "return", road_police.position, 0.3)
 
+const BUILDING_EXPLAIN := {
+	"city_hall": {"does": ["Центр района: от него считаются дороги, службы и задания.", "District center: roads, services and tasks are counted from here."], "needs": ["Ничего: стоит с самого начала и не сносится.", "Nothing: it is there from the start and cannot be demolished."], "gives": ["Бюджет района и задания развития.", "District budget and development tasks."]},
+	"house": {"does": ["Здесь живут горожане и платят налог.", "Citizens live here and pay tax."], "needs": ["Дорога, вода, остановка рядом, магазин или доставка еды.", "A road, water, a nearby stop, a shop or food delivery."], "gives": ["Доход и жители. Что огорчает жителей, видно строкой ниже.", "Income and residents. What upsets them is listed below."]},
+	"elite_residence": {"does": ["Дорогое жильё для состоятельных жителей.", "Premium housing for wealthy residents."], "needs": ["Дорога, вода и хорошее окружение рядом.", "A road, water and good amenities nearby."], "gives": ["Больше жителей и налога, чем обычный дом.", "More residents and tax than a regular home."]},
+	"business_tower": {"does": ["Офисная башня с рабочими местами.", "An office tower with jobs."], "needs": ["Дорога и транспорт для сотрудников.", "A road and transit for employees."], "gives": ["Рабочие места для жителей и налог.", "Jobs for residents and tax."]},
+	"cafe": {"does": ["Кормит жителей поблизости.", "Feeds nearby residents."], "needs": ["Дорога и запас еды. Склад и логистика пополняют его сами.", "A road and food stock. The warehouse and logistics refill it."], "gives": ["Доход и бонус окружения для домов рядом.", "Income and an amenity bonus for nearby homes."]},
+	"supermarket": {"does": ["Большой магазин: кормит целый район.", "A large shop that feeds a whole area."], "needs": ["Дорога и запас еды. Нужна логистика.", "A road and food stock. Logistics is required."], "gives": ["Еда для домов в радиусе и доход.", "Food for homes in range and income."]},
+	"park": {"does": ["Зелёная зона для отдыха.", "A green area for relaxation."], "needs": ["Место рядом с домами. Содержание стоит денег.", "A place near homes. Upkeep costs money."], "gives": ["Улучшает окружение и радость соседних домов.", "Improves amenities and the mood of nearby homes."]},
+	"fire_station": {"does": ["Выезжает на пожары.", "Responds to fires."], "needs": ["Дорога до района без заторов.", "A road to the district without jams."], "gives": ["Тушит огонь и чинит повреждения.", "Puts out fires and repairs damage."]},
+	"police_station": {"does": ["Наводит порядок и разбирает заторы.", "Keeps order and clears traffic jams."], "needs": ["Дорога без перекрытий.", "An open road."], "gives": ["Полиция освобождает дорогу в пробке.", "Police free a jammed road."]},
+	"hospital": {"does": ["Лечит заболевших жителей.", "Treats sick residents."], "needs": ["Дорога для скорой.", "A road for the ambulance."], "gives": ["Скорая выезжает на вызовы и лечит болезни.", "The ambulance answers calls and cures illness."]},
+	"depot": {"does": ["База ремонтной бригады.", "Home of the repair crew."], "needs": ["Дорога до проблемы.", "A road to the problem."], "gives": ["Починка протечек, светофоров и повреждений.", "Fixes leaks, signals and damage."]},
+	"logistics_center": {"does": ["Развозит еду со складов по магазинам и домам.", "Delivers food from warehouses to shops and homes."], "needs": ["Склады в радиусе и дорога до них.", "Warehouses in range and a road to them."], "gives": ["Магазины пополняются сами. Ферма даёт им бонус.", "Shops refill themselves. The farm adds a bonus."]},
+	"warehouse": {"does": ["Хранит товары для логистики.", "Stores goods for logistics."], "needs": ["Связь с логистическим центром.", "A link to the logistics center."], "gives": ["Запас еды для района вокруг.", "A food reserve for the surrounding area."]},
+	"bridge": {"does": ["Соединяет город с фермой за рекой.", "Connects the city to the farm across the river."], "needs": ["Дороги на обоих берегах.", "Roads on both banks."], "gives": ["Проезд к ферме. Затор на мосту задерживает товар.", "Access to the farm. A jam on the bridge delays goods."]},
+	"field": {"does": ["Растит зерно. Готовое собирается тапом по иконке.", "Grows grain. Tap the icon when it is ready."], "needs": ["Дорога к городу и место на складе фермы.", "A road to the city and room in the farm storage."], "gives": ["Зерно для мельницы. Без мельницы идёт на склад как есть.", "Grain for the mill. Without a mill it goes to storage as is."]},
+	"pasture": {"does": ["Луга дают молоко. Готовое собирается тапом.", "Meadows give milk. Tap to collect when ready."], "needs": ["Дорога к городу и место на складе фермы.", "A road to the city and room in the farm storage."], "gives": ["Молочные товары на склад фермы.", "Dairy goods for the farm storage."]},
+	"livestock_yard": {"does": ["Скотный двор: молоко и мясо. Собирается тапом.", "Livestock yard: milk and meat. Tap to collect."], "needs": ["Дорога к городу и место на складе фермы.", "A road to the city and room in the farm storage."], "gives": ["Больше всего товаров среди ферм.", "The biggest goods output on the farm."]},
+	"mill": {"does": ["Перемалывает зерно полей в муку: 1 зерно даёт 1,5 муки.", "Grinds field grain into flour: 1 grain makes 1.5 flour."], "needs": ["Поля, которые уже отдали зерно. Без зерна мельница стоит.", "Fields that have handed over grain. Without grain the mill idles."], "gives": ["Мука на склад фермы (собирается тапом).", "Flour for the farm storage (collect by tapping)."]},
+	"barn": {"does": ["Хранит урожай фермы.", "Stores the farm harvest."], "needs": ["Дорога к городу.", "A road to the city."], "gives": ["+300 к складу фермы за уровень. С 2 уровня бригада сама собирает готовое (без бонуса).", "+300 farm storage per level. From level 2 a crew collects ready goods automatically (no bonus)."]},
+	"farm_warehouse": {"does": ["Большой склад фермы.", "The large farm storage."], "needs": ["Дорога к городу.", "A road to the city."], "gives": ["+600 к складу фермы за уровень.", "+600 farm storage per level."]},
+}
+
+func add_building_explanation(type_id: String) -> void:
+	var info: Dictionary = BUILDING_EXPLAIN.get(type_id, {})
+	if info.is_empty():
+		return
+	var titles := {"does": tr_text("Что делает: ", "What it does: "), "needs": tr_text("Что нужно: ", "What it needs: "), "gives": tr_text("Что даёт: ", "What it gives: ")}
+	for key: String in ["does", "needs", "gives"]:
+		var pair: Array = info[key]
+		var line := label(17, sheet_column, titles[key] + tr_text(pair[0], pair[1]))
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		line.add_theme_color_override("font_color", Color("4f5d66"))
+		line.name = "Explain_" + key
+
+func farm_effect_text(kind: String, level_value: int) -> String:
+	var mult := float(clampi(level_value, 1, 3))
+	if kind == "barn":
+		return tr_text("Склад +%d%s", "Storage +%d%s") % [int(300 * mult), tr_text(" · бригада сама собирает готовое", " · crew auto-collects") if level_value >= Simulation.AUTO_COLLECT_BARN_LEVEL else ""]
+	if kind == "farm_warehouse":
+		return tr_text("Склад +%d", "Storage +%d") % int(600 * mult)
+	if kind == "mill":
+		return tr_text("Мелет %d зерна в минуту", "Grinds %d grain per minute") % int(Simulation.MILL_THROUGHPUT_PER_MINUTE * mult)
+	return tr_text("Выпуск %d в минуту", "Output %d per minute") % int(float(Simulation.FARM_OUTPUT_PER_MINUTE.get(kind, 0.0)) * mult)
+
+func farm_issue_text(issue: String) -> String:
+	match issue:
+		"damaged": return tr_text("Здание повреждено: сначала почините его.", "The building is damaged: repair it first.")
+		"no_grain": return tr_text("Нет зерна: соберите урожай с полей.", "No grain: collect the harvest from the fields.")
+		"storage_full": return tr_text("Склад фермы полон: постройте амбар или улучшите склад.", "Farm storage is full: build a barn or upgrade the storage.")
+	return ""
+
+func add_farm_status(entry: Dictionary) -> void:
+	var type_id := str(entry.type_id)
+	var storage := label(18, sheet_column, tr_text("Склад фермы: %d из %d · зерно ждёт мельницу: %d", "Farm storage: %d of %d · grain waiting for the mill: %d") % [roundi(game.farm_stock), roundi(game.farm_storage_capacity()), roundi(game.farm_grain)])
+	storage.name = "FarmStorageLine"
+	if not game.is_farm_producer(type_id):
+		return
+	var capacity: float = game.farm_building_capacity(entry)
+	var ready: float = game.farm_ready_amount(entry)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size.y = 14
+	bar.show_percentage = false
+	bar.max_value = maxf(1.0, capacity)
+	bar.value = ready
+	bar.add_theme_stylebox_override("fill", style(Color("e0a93a") if ready < capacity else Color("6bb04f"), 7))
+	sheet_column.add_child(bar)
+	var rate: float = game.farm_building_rate(entry)
+	var status_line := label(19, sheet_column, tr_text("Готово: %d из %d · темп %d в минуту", "Ready: %d of %d · rate %d per minute") % [roundi(ready), roundi(capacity), roundi(rate)])
+	status_line.name = "FarmReadyLine"
+	var issue: String = game.farm_building_issue(entry)
+	if issue != "":
+		var issue_label := label(17, sheet_column, farm_issue_text(issue))
+		issue_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		issue_label.add_theme_color_override("font_color", Color("b36b49"))
+		issue_label.name = "FarmIssueLine"
+	if game.farm_is_ready(entry):
+		var timely: bool = ready >= capacity and float(entry.get("ready_age", 0.0)) <= Simulation.FARM_TIMELY_MINUTES
+		var caption := tr_text("Собрать · +%d", "Collect · +%d") % roundi(ready * (Simulation.FARM_TIMELY_BONUS if timely else 1.0))
+		if timely:
+			caption += tr_text(" (бонус за вовремя)", " (on-time bonus)")
+		var collect := button(sheet_column, caption, collect_farm_building.bind(str(entry.instance_id)), true)
+		collect.name = "CollectFarmButton"
+		collect.disabled = issue == "damaged" or issue == "storage_full"
+
+func show_short_notice(text_value: String, seconds: float = 3.0) -> void:
+	fire_notice_left = seconds
+	fire_notice_label.text = text_value
+	fire_notice.show()
+
+func collect_farm_building(identifier: String) -> void:
+	var result: Dictionary = game.farm_collect(identifier)
+	if result.is_empty():
+		var entry: Dictionary = game.territory.building_by_id(identifier)
+		var issue: String = game.farm_building_issue(entry) if not entry.is_empty() else ""
+		show_short_notice(farm_issue_text(issue) if issue != "" else tr_text("Пока нечего собирать.", "Nothing to collect yet."))
+		audio.play_ui("deny")
+	else:
+		var text_value := tr_text("Собрано: +%d", "Collected: +%d") % roundi(float(result.amount))
+		if float(result.bonus) >= 1.0:
+			text_value += tr_text(" · бонус за вовремя +%d", " · on-time bonus +%d") % roundi(float(result.bonus))
+		show_short_notice(text_value)
+		audio.play_ui("success")
+		game.save_game()
+	sync_building_status_indicators()
+	update_harvest_button()
+	refresh()
+
+func collect_all_farm() -> void:
+	var result: Dictionary = game.farm_collect_all()
+	if int(result.count) <= 0:
+		show_short_notice(tr_text("Пока нечего собирать.", "Nothing to collect yet."))
+		audio.play_ui("deny")
+	else:
+		var text_value := tr_text("Собрано с %d зданий: +%d", "Collected from %d buildings: +%d") % [int(result.count), roundi(float(result.amount))]
+		if float(result.bonus) >= 1.0:
+			text_value += tr_text(" · бонус +%d", " · bonus +%d") % roundi(float(result.bonus))
+		show_short_notice(text_value)
+		audio.play_ui("success")
+		game.save_game()
+	sync_building_status_indicators()
+	update_harvest_button()
+	refresh()
+
+func update_harvest_button() -> void:
+	if harvest_all_button == null:
+		return
+	harvest_ready_count = game.farm_ready_count()
+	harvest_all_button.text = tr_text("Собрать всё · %d", "Collect all · %d") % harvest_ready_count
+	harvest_all_button.visible = harvest_ready_count > 0 and not bool(harvest_all_button.get_meta("menu_hidden", false))
+
 func building_effect(kind: String, level_value: int) -> String:
 	var data := Catalog.level_data(kind, level_value)
 	if kind == "logistics_center":
 		return tr_text("Прямой радиус %d дорожных клеток · разрешает %d склада", "Direct range %d road cells · permits %d warehouses") % [data.delivery_range, data.warehouse_limit]
 	if kind == "warehouse":
 		return tr_text("Запас %d единиц · местный радиус %d дорожных клеток", "Stores %d units · local range %d road cells") % [data.storage_capacity, data.delivery_range]
+	if Catalog.is_farm(kind):
+		return farm_effect_text(kind, level_value)
 	if kind == "house":
 		return tr_text("До %d жителей · доход %d/12 сек. при воде", "Up to %d residents · income %d/12 sec with water") % [data.residents, data.income]
 	if kind == "cafe":

@@ -67,7 +67,31 @@ const LEVELS = {
 	"warehouse": [
 		{"scene": "res://scenes/visuals/warehouse.tscn", "income": 0, "storage_capacity": 600, "delivery_range": 10, "upgrade_cost": 420},
 		{"scene": "res://scenes/visuals/warehouse_level_2.tscn", "income": 0, "storage_capacity": 1400, "delivery_range": 15, "upgrade_cost": 800},
-		{"scene": "res://scenes/visuals/warehouse_level_3.tscn", "income": 0, "storage_capacity": 2800, "delivery_range": 20, "upgrade_cost": 0}]
+		{"scene": "res://scenes/visuals/warehouse_level_3.tscn", "income": 0, "storage_capacity": 2800, "delivery_range": 20, "upgrade_cost": 0}],
+	"field": [
+		{"scene": "res://scenes/visuals/field.tscn", "income": 8, "upgrade_cost": 110},
+		{"scene": "res://scenes/visuals/field.tscn", "income": 13, "upgrade_cost": 220},
+		{"scene": "res://scenes/visuals/field.tscn", "income": 18, "upgrade_cost": 0}],
+	"barn": [
+		{"scene": "res://scenes/visuals/barn.tscn", "income": 14, "upgrade_cost": 250},
+		{"scene": "res://scenes/visuals/barn.tscn", "income": 22, "upgrade_cost": 500},
+		{"scene": "res://scenes/visuals/barn.tscn", "income": 32, "upgrade_cost": 0}],
+	"mill": [
+		{"scene": "res://scenes/visuals/mill.tscn", "income": 22, "upgrade_cost": 410},
+		{"scene": "res://scenes/visuals/mill.tscn", "income": 35, "upgrade_cost": 820},
+		{"scene": "res://scenes/visuals/mill.tscn", "income": 51, "upgrade_cost": 0}],
+	"pasture": [
+		{"scene": "res://scenes/visuals/pasture.tscn", "income": 9, "upgrade_cost": 140},
+		{"scene": "res://scenes/visuals/pasture.tscn", "income": 14, "upgrade_cost": 290},
+		{"scene": "res://scenes/visuals/pasture.tscn", "income": 21, "upgrade_cost": 0}],
+	"livestock_yard": [
+		{"scene": "res://scenes/visuals/livestock_yard.tscn", "income": 25, "upgrade_cost": 460},
+		{"scene": "res://scenes/visuals/livestock_yard.tscn", "income": 40, "upgrade_cost": 910},
+		{"scene": "res://scenes/visuals/livestock_yard.tscn", "income": 57, "upgrade_cost": 0}],
+	"farm_warehouse": [
+		{"scene": "res://scenes/visuals/farm_warehouse.tscn", "income": 12, "upgrade_cost": 310},
+		{"scene": "res://scenes/visuals/farm_warehouse.tscn", "income": 19, "upgrade_cost": 620},
+		{"scene": "res://scenes/visuals/farm_warehouse.tscn", "income": 28, "upgrade_cost": 0}]
 }
 const ALTERNATIVES = {
 	"house": "res://scenes/visuals/house_alternate.tscn",

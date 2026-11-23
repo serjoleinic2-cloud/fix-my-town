@@ -71,6 +71,7 @@ var incident_notification_serial: int = 0
 var last_incident_type: String = ""
 var incident_type_cooldowns: Dictionary = {}
 var fire_cooldown_left: float = 0.0
+var farm_stock: float = 0.0
 var job_problem_id: String = ""
 var problem_test_hooks_enabled: bool = false
 var _logistics_coverage_cache_signature: int = -1
@@ -172,6 +173,7 @@ func start_empty_city() -> void:
 	last_incident_type = ""
 	incident_type_cooldowns.clear()
 	fire_cooldown_left = 0.0
+	farm_stock = 0.0
 	fire_triggered = false
 	transit = Transit.new()
 	district_tasks = [
@@ -659,8 +661,45 @@ func connected_to_residential_network(entry: Dictionary) -> bool:
 			break
 	return not hall.is_empty() and territory.road_distance_between_buildings(entry, hall) >= 0
 
+# Farm production: fields, pastures and livestock yards grow goods; a mill
+# raises the output by 30%; barns and the farm warehouse set the storage limit.
+# Stocked shops that are served by the logistics center refill faster from it.
+const FARM_OUTPUT_PER_MINUTE := {"field": 10.0, "pasture": 6.0, "livestock_yard": 10.0}
+const FARM_STORAGE_PER_BUILDING := {"barn": 300.0, "farm_warehouse": 600.0}
+const FARM_SHOP_BONUS := 0.03
+
+func farm_production_per_minute() -> float:
+	var total := 0.0
+	var has_mill := false
+	for entry: Dictionary in territory.buildings:
+		var type_id := str(entry.get("type_id", ""))
+		if FARM_OUTPUT_PER_MINUTE.has(type_id):
+			total += float(FARM_OUTPUT_PER_MINUTE[type_id]) * float(clampi(int(entry.get("level", 1)), 1, 3))
+		elif type_id == "mill":
+			has_mill = true
+	return total * (1.3 if has_mill else 1.0)
+
+func farm_storage_capacity() -> float:
+	var capacity := 0.0
+	var has_farm := false
+	for entry: Dictionary in territory.buildings:
+		var type_id := str(entry.get("type_id", ""))
+		if Catalog.is_farm(type_id):
+			has_farm = true
+		if FARM_STORAGE_PER_BUILDING.has(type_id):
+			capacity += float(FARM_STORAGE_PER_BUILDING[type_id]) * float(clampi(int(entry.get("level", 1)), 1, 3))
+	return (300.0 + capacity) if has_farm else 0.0
+
+func advance_farm_stock(minutes: int) -> bool:
+	var capacity := farm_storage_capacity()
+	var new_stock := clampf(farm_stock + farm_production_per_minute() * float(minutes), 0.0, capacity)
+	if is_equal_approx(new_stock, farm_stock):
+		return false
+	farm_stock = new_stock
+	return true
+
 func advance_food_stocks(minutes: int = 1) -> bool:
-	var changed := false
+	var changed := advance_farm_stock(minutes)
 	initialize_food_stocks()
 	if not territory.buildings.any(func(entry: Dictionary) -> bool: return entry.type_id in ["cafe", "supermarket"]):
 		return true
@@ -687,7 +726,15 @@ func advance_food_stocks(minutes: int = 1) -> bool:
 		var new_stock := maxf(0.0, old_stock - demand)
 		# A connected logistics delivery route replenishes a local shop gradually.
 		if supplied_ids.has(str(shop.get("instance_id", ""))):
-			new_stock = minf(food_stock_capacity(str(shop.type_id), int(shop.get("level", 1))), new_stock + food_stock_capacity(str(shop.type_id), int(shop.get("level", 1))) * 0.05 * float(minutes))
+			var shop_capacity := food_stock_capacity(str(shop.type_id), int(shop.get("level", 1)))
+			new_stock = minf(shop_capacity, new_stock + shop_capacity * 0.05 * float(minutes))
+			# Farm goods add a bonus refill while the farm warehouse has any.
+			var bonus := minf(farm_stock, shop_capacity * FARM_SHOP_BONUS * float(minutes))
+			if bonus > 0.0 and new_stock < shop_capacity:
+				bonus = minf(bonus, shop_capacity - new_stock)
+				new_stock += bonus
+				farm_stock -= bonus
+				changed = true
 		if not is_equal_approx(old_stock, new_stock):
 			shop.food_stock = new_stock
 			changed = true
@@ -2683,7 +2730,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3118,6 +3165,7 @@ func load_game() -> bool:
 			if str(cooldown_type) in PROBLEM_TYPES and (raw_cooldowns[cooldown_type] is int or raw_cooldowns[cooldown_type] is float) and is_finite(float(raw_cooldowns[cooldown_type])):
 				incident_type_cooldowns[str(cooldown_type)] = clampf(float(raw_cooldowns[cooldown_type]), 0.0, 3600.0)
 	fire_cooldown_left = clampf(float(data.get("fire_cooldown_left", 0.0)), 0.0, 3600.0)
+	farm_stock = clampf(float(data.get("farm_stock", 0.0)), 0.0, 100000.0) if (data.get("farm_stock", 0.0) is int or data.get("farm_stock", 0.0) is float) and is_finite(float(data.get("farm_stock", 0.0))) else 0.0
 	incidents = {}
 	var raw_incidents: Variant = data.get("incidents", {})
 	if raw_incidents is Dictionary:

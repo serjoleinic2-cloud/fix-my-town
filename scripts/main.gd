@@ -4282,7 +4282,7 @@ func toggle_quality() -> void:
 	refresh()
 
 func build_district_sheet() -> void:
-	action_height = 380
+	action_height = 420
 	header(t("district_name"))
 	var score: float = game.district_quality()
 	var condition := label(24, sheet_column, "● " + quality_name(score) + "  " + quality_trend, true)
@@ -4301,6 +4301,10 @@ func build_district_sheet() -> void:
 			var reason_label := label(16, sheet_column, "• " + game.happiness_label(reason_key))
 			reason_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			reason_label.add_theme_color_override("font_color", Color("b36b49"))
+	var farm_capacity: float = game.farm_storage_capacity()
+	if farm_capacity > 0.0:
+		var farm_line := label(19, sheet_column, tr_text("Ферма: запас %d из %d · выпуск %d в минуту", "Farm: stock %d of %d · output %d per minute") % [roundi(game.farm_stock), roundi(farm_capacity), roundi(game.farm_production_per_minute())])
+		farm_line.name = "FarmStock"
 	var task_done := game.district_task_progress()
 	label(18, sheet_column, tr_text("Построено домов: %d/%d", "Homes built: %d/%d") % [game.district_house_count(), game.district_house_limit])
 	label(18, sheet_column, tr_text("Заданий выполнено: %d/%d", "Tasks complete: %d/%d") % [task_done, game.district_tasks.size()])

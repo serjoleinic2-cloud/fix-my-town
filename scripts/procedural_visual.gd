@@ -41,7 +41,7 @@ func _ready() -> void:
 		warehouse()
 	elif visual_type == "bridge":
 		bridge()
-	elif visual_type in ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"]:
+	elif visual_type in ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]:
 		farm_building(visual_type)
 	elif visual_type == "city_hall":
 		city_hall()
@@ -1200,11 +1200,14 @@ func farm_building(kind: String) -> void:
 		for pos in [Vector3(-2, 0.45, -1.2), Vector3(1.6, 0.45, 1.5), Vector3(2.7, 0.45, -2.0)]:
 			Art.box(self, pos, Vector3(0.9, 0.65, 0.45), Color("eee7d5"))
 		return
-	var wall := Color("a94f3f") if kind in ["barn", "livestock_yard"] else Color("d0c29e")
+	var wall := Color("a94f3f") if kind in ["barn", "livestock_yard"] else (Color("d9a867") if kind == "bakery" else Color("d0c29e"))
 	var size := Vector3(6.8, 3.5, 5.8) if kind != "farm_warehouse" else Vector3(7.8, 3.2, 6.8)
 	Art.box(self, Vector3(0, size.y * 0.5 + 0.12, 0), size, wall)
 	Art.box(self, Vector3(0, size.y + 0.35, 0), Vector3(size.x + 0.5, 0.55, size.z + 0.5), Color("594f49"))
 	Art.box(self, Vector3(0, 1.35, size.z * 0.5 + 0.03), Vector3(1.5, 2.4, 0.12), Color("5b4633"))
+	if kind == "bakery":
+		Art.box(self, Vector3(-2.2, size.y + 1.9, -1.4), Vector3(1.0, 2.6, 1.0), Color("7a4a3a"))
+		Art.box(self, Vector3(2.0, 1.9, size.z * 0.5 + 0.1), Vector3(2.2, 1.0, 0.15), Color("e9b96a"))
 	if kind == "mill":
 		Art.cylinder(self, Vector3(0, 5.0, 0), 1.05, 3.0, Color("d8cfb2"))
 		Art.box(self, Vector3(0, 5.0, 3.15), Vector3(0.38, 4.6, 0.12), Color("eee5cb"))

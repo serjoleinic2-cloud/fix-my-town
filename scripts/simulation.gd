@@ -52,7 +52,7 @@ var job_vehicle_id: String = ""
 const FIRE_STATION_ID := "pine_district_fire_station"
 const FIRST_FIRE_TARGET := "pine_district_legacy_0"
 const FIRST_FIRE_NEIGHBOR := "pine_district_legacy_4"
-const LOGISTICS_TARGET_TYPES := ["house", "cafe", "park", "elite_residence", "business_tower", "field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse", "supermarket"]
+const LOGISTICS_TARGET_TYPES := ["house", "cafe", "park", "elite_residence", "business_tower", "field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse", "bakery", "supermarket"]
 var fire_triggered: bool = false
 var fires: Dictionary = {}
 var fire_damage: Dictionary = {}
@@ -73,6 +73,7 @@ var incident_type_cooldowns: Dictionary = {}
 var fire_cooldown_left: float = 0.0
 var farm_stock: float = 0.0
 var farm_grain: float = 0.0
+var farm_flour: float = 0.0
 # Farm buildings the player demolished: {type_id, col, row}. Lets the farm be
 # restored in one tap and keeps the plan of the district visible.
 var farm_blueprint: Array = []
@@ -179,6 +180,7 @@ func start_empty_city() -> void:
 	fire_cooldown_left = 0.0
 	farm_stock = 0.0
 	farm_grain = 0.0
+	farm_flour = 0.0
 	farm_blueprint = []
 	fire_triggered = false
 	transit = Transit.new()
@@ -683,21 +685,35 @@ const FARM_TIMELY_MINUTES := 3.0
 const FARM_TIMELY_BONUS := 1.2
 const MILL_THROUGHPUT_PER_MINUTE := 12.0
 const MILL_FLOUR_RATIO := 1.5
+const BAKERY_THROUGHPUT_PER_MINUTE := 8.0
+const BAKERY_BREAD_RATIO := 2.0
 const AUTO_COLLECT_BARN_LEVEL := 2
 
 func is_farm_producer(type_id: String) -> bool:
-	return FARM_OUTPUT_PER_MINUTE.has(type_id) or type_id == "mill"
+	return FARM_OUTPUT_PER_MINUTE.has(type_id) or type_id in ["mill", "bakery"]
 
 func farm_building_rate(entry: Dictionary) -> float:
 	var type_id := str(entry.get("type_id", ""))
 	var level_value := float(clampi(int(entry.get("level", 1)), 1, 3))
 	if type_id == "mill":
 		return MILL_THROUGHPUT_PER_MINUTE * level_value
+	if type_id == "bakery":
+		return BAKERY_THROUGHPUT_PER_MINUTE * level_value
 	return float(FARM_OUTPUT_PER_MINUTE.get(type_id, 0.0)) * level_value
 
 func farm_building_capacity(entry: Dictionary) -> float:
-	var capacity := farm_building_rate(entry) * FARM_FILL_MINUTES
-	return capacity * MILL_FLOUR_RATIO if str(entry.get("type_id", "")) == "mill" else capacity
+	return farm_building_rate(entry) * FARM_FILL_MINUTES * farm_output_ratio(str(entry.get("type_id", "")))
+
+# Goods produced per unit of input: mill 1.5 flour per grain, bakery 2 bread per flour.
+func farm_output_ratio(type_id: String) -> float:
+	if type_id == "mill":
+		return MILL_FLOUR_RATIO
+	if type_id == "bakery":
+		return BAKERY_BREAD_RATIO
+	return 1.0
+
+func farm_has_type(type_id: String) -> bool:
+	return farm_type_count(type_id) > 0
 
 func farm_ready_amount(entry: Dictionary) -> float:
 	return clampf(float(entry.get("ready", 0.0)), 0.0, farm_building_capacity(entry))
@@ -707,7 +723,7 @@ func farm_is_ready(entry: Dictionary) -> bool:
 	return capacity > 0.0 and farm_ready_amount(entry) >= capacity * FARM_READY_SHARE
 
 func farm_has_mill() -> bool:
-	return territory.buildings.any(func(entry: Dictionary) -> bool: return str(entry.get("type_id", "")) == "mill")
+	return farm_has_type("mill")
 
 func farm_auto_collect_enabled() -> bool:
 	return territory.buildings.any(func(entry: Dictionary) -> bool: return str(entry.get("type_id", "")) == "barn" and int(entry.get("level", 1)) >= AUTO_COLLECT_BARN_LEVEL)
@@ -731,7 +747,7 @@ func farm_storage_capacity() -> float:
 	return (300.0 + capacity) if has_farm else 0.0
 
 func farm_free_space() -> float:
-	return maxf(0.0, farm_storage_capacity() - farm_stock - farm_grain)
+	return maxf(0.0, farm_storage_capacity() - farm_stock - farm_grain - farm_flour)
 
 # Why a farm building is not producing or cannot be collected right now.
 # Empty string means everything is fine.
@@ -744,11 +760,13 @@ func farm_building_issue(entry: Dictionary) -> String:
 	var capacity := farm_building_capacity(entry)
 	if type_id == "mill" and farm_grain < 1.0 and farm_ready_amount(entry) < capacity:
 		return "no_grain"
+	if type_id == "bakery" and farm_flour < 1.0 and farm_ready_amount(entry) < capacity:
+		return "no_flour"
 	if farm_ready_amount(entry) >= capacity and farm_free_space() < 1.0:
 		return "storage_full"
 	return ""
 
-const FARM_BUILD_ORDER := ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"]
+const FARM_BUILD_ORDER := ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]
 
 func farm_type_count(type_id: String) -> int:
 	var count := 0
@@ -835,6 +853,11 @@ func advance_farm_stock(minutes: int) -> bool:
 		farm_stock += moved
 		farm_grain = 0.0
 		changed = true
+	if not farm_has_type("bakery") and farm_flour > 0.0:
+		var moved_flour := minf(farm_flour, maxf(0.0, farm_storage_capacity() - farm_stock))
+		farm_stock += moved_flour
+		farm_flour = 0.0
+		changed = true
 	for entry: Dictionary in territory.buildings:
 		var type_id := str(entry.get("type_id", ""))
 		if not is_farm_producer(type_id) or farm_building_issue(entry) == "damaged":
@@ -847,12 +870,17 @@ func advance_farm_stock(minutes: int) -> bool:
 			if take > 0.0:
 				ready += take * MILL_FLOUR_RATIO
 				farm_grain -= take
+		elif type_id == "bakery":
+			var flour_take := minf(minf(farm_flour, farm_building_rate(entry) * float(minutes)), (capacity - ready) / BAKERY_BREAD_RATIO)
+			if flour_take > 0.0:
+				ready += flour_take * BAKERY_BREAD_RATIO
+				farm_flour -= flour_take
 		else:
 			ready = minf(capacity, ready + farm_building_rate(entry) * float(minutes))
 		var full_before := old_ready >= capacity
 		var age := float(entry.get("ready_age", 0.0))
 		if ready >= capacity:
-			var overflow := float(minutes) if full_before else maxf(0.0, float(minutes) - (capacity - old_ready) / maxf(0.001, farm_building_rate(entry) * (MILL_FLOUR_RATIO if type_id == "mill" else 1.0)))
+			var overflow := float(minutes) if full_before else maxf(0.0, float(minutes) - (capacity - old_ready) / maxf(0.001, farm_building_rate(entry) * farm_output_ratio(type_id)))
 			age += overflow
 		else:
 			age = 0.0
@@ -883,6 +911,8 @@ func farm_collect(identifier: String, allow_bonus: bool = true) -> Dictionary:
 	var gained := taken * multiplier
 	if type_id == "field" and farm_has_mill():
 		farm_grain += gained
+	elif type_id == "mill" and farm_has_type("bakery"):
+		farm_flour += gained
 	else:
 		farm_stock += gained
 	entry["ready"] = ready - taken
@@ -894,10 +924,11 @@ func farm_collect_all() -> Dictionary:
 	var count := 0
 	var bonus := 0.0
 	# Fields first so the mill gets grain, mills last so flour is collected too.
-	for pass_index in range(2):
+	for pass_index in range(3):
 		for entry: Dictionary in territory.buildings:
-			var is_mill := str(entry.get("type_id", "")) == "mill"
-			if not is_farm_producer(str(entry.get("type_id", ""))) or is_mill != (pass_index == 1) or not farm_is_ready(entry):
+			var entry_type := str(entry.get("type_id", ""))
+			var entry_pass := 1 if entry_type == "mill" else (2 if entry_type == "bakery" else 0)
+			if not is_farm_producer(entry_type) or entry_pass != pass_index or not farm_is_ready(entry):
 				continue
 			var result := farm_collect(str(entry.get("instance_id", "")))
 			if not result.is_empty():
@@ -2953,7 +2984,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "farm_grain": farm_grain, "farm_blueprint": farm_blueprint,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3390,6 +3421,7 @@ func load_game() -> bool:
 	fire_cooldown_left = clampf(float(data.get("fire_cooldown_left", 0.0)), 0.0, 3600.0)
 	farm_stock = clampf(float(data.get("farm_stock", 0.0)), 0.0, 100000.0) if (data.get("farm_stock", 0.0) is int or data.get("farm_stock", 0.0) is float) and is_finite(float(data.get("farm_stock", 0.0))) else 0.0
 	farm_grain = clampf(float(data.get("farm_grain", 0.0)), 0.0, 100000.0) if (data.get("farm_grain", 0.0) is int or data.get("farm_grain", 0.0) is float) and is_finite(float(data.get("farm_grain", 0.0))) else 0.0
+	farm_flour = clampf(float(data.get("farm_flour", 0.0)), 0.0, 100000.0) if (data.get("farm_flour", 0.0) is int or data.get("farm_flour", 0.0) is float) and is_finite(float(data.get("farm_flour", 0.0))) else 0.0
 	farm_blueprint = []
 	if data.get("farm_blueprint", []) is Array:
 		for item in data.get("farm_blueprint", []):

@@ -61,7 +61,7 @@ static func _disc(image: Image, cx: int, cy: int, radius: int, color: Color) -> 
 static func harvest_texture(crop: String, full: bool) -> ImageTexture:
 	var image := Image.create(64, 64, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0, 0, 0, 0))
-	var fill := {"field": Color("e6b43c"), "pasture": Color("8cc56b"), "livestock_yard": Color("d9905a"), "mill": Color("e8e2d2")}.get(crop, Color("e6b43c")) as Color
+	var fill := {"field": Color("e6b43c"), "pasture": Color("8cc56b"), "livestock_yard": Color("d9905a"), "mill": Color("e8e2d2"), "bakery": Color("e9b27a")}.get(crop, Color("e6b43c")) as Color
 	_disc(image, 32, 32, 30, Color("ffffff") if not full else Color("7ec45a"))
 	_disc(image, 32, 32, 26, fill)
 	var ink := Color("fffdf3") if crop != "mill" else Color("8a6a3a")
@@ -75,6 +75,11 @@ static func harvest_texture(crop: String, full: bool) -> ImageTexture:
 			_disc(image, 32, 21, 7, ink)
 			image.fill_rect(Rect2i(24, 44, 4, 8), ink)
 			image.fill_rect(Rect2i(36, 44, 4, 8), ink)
+		"bakery":
+			_disc(image, 32, 36, 14, ink)
+			_disc(image, 22, 36, 8, ink)
+			_disc(image, 42, 36, 8, ink)
+			image.fill_rect(Rect2i(24, 18, 16, 4), ink)
 		"mill":
 			image.fill_rect(Rect2i(19, 25, 26, 22), ink)
 			_disc(image, 32, 25, 13, ink)

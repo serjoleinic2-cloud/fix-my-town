@@ -10,7 +10,7 @@ const BUILDING_SELECT_SOUNDS := {
 	"city_hall": "success", "elite_residence": "level_up", "business_tower": "level_up",
 	"house": "select", "ruins": "deny", "empty": "select", "depot": "repair",
 	"logistics_center": "engine", "warehouse": "build", "fire_station": "siren",
-	"bridge": "build", "field": "leaves", "barn": "build", "mill": "engine",
+	"bridge": "build", "field": "leaves", "barn": "build", "mill": "engine", "bakery": "build",
 	"pasture": "leaves", "livestock_yard": "leaves", "farm_warehouse": "build",
 	"police_station": "warning", "hospital": "radio_call", "lawn": "leaves",
 	"flower_bed": "leaves", "street_tree": "leaves", "bush": "leaves",

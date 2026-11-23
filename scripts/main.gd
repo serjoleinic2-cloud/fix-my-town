@@ -171,7 +171,7 @@ const CATALOG_ITEMS := {
 	"commercial": ["cafe", "supermarket", "park", "business_tower"],
 	"infrastructure": ["clear", "bridge", "logistics_center", "warehouse"],
 	"services": ["fire_station", "police_station", "hospital", "depot"],
-	"agriculture": ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"],
+	"agriculture": ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
 const TEXT = {
@@ -192,7 +192,7 @@ const TEXT = {
 	"logistics_center": ["Логистический центр", "Logistics center"],
 	"warehouse": ["Склад", "Warehouse"],
 	"bridge": ["Городской мост", "City bridge"],
-	"field": ["Поле", "Field"], "barn": ["Амбар", "Barn"], "mill": ["Мельница", "Mill"],
+	"field": ["Поле", "Field"], "barn": ["Амбар", "Barn"], "mill": ["Мельница", "Mill"], "bakery": ["Пекарня", "Bakery"],
 	"pasture": ["Пастбище", "Pasture"], "livestock_yard": ["Животноводческий двор", "Livestock yard"],
 	"farm_warehouse": ["Фермерский склад", "Farm warehouse"],
 	"elite_residence": ["Элитная резиденция", "Elite residence"], "business_tower": ["Деловая башня", "Business tower"],
@@ -5603,6 +5603,7 @@ const BUILDING_EXPLAIN := {
 	"pasture": {"does": ["Луга дают молоко. Готовое собирается тапом.", "Meadows give milk. Tap to collect when ready."], "needs": ["Дорога к городу и место на складе фермы.", "A road to the city and room in the farm storage."], "gives": ["Молочные товары на склад фермы.", "Dairy goods for the farm storage."]},
 	"livestock_yard": {"does": ["Скотный двор: молоко и мясо. Собирается тапом.", "Livestock yard: milk and meat. Tap to collect."], "needs": ["Дорога к городу и место на складе фермы.", "A road to the city and room in the farm storage."], "gives": ["Больше всего товаров среди ферм.", "The biggest goods output on the farm."]},
 	"mill": {"does": ["Перемалывает зерно полей в муку: 1 зерно даёт 1,5 муки.", "Grinds field grain into flour: 1 grain makes 1.5 flour."], "needs": ["Поля, которые уже отдали зерно. Без зерна мельница стоит.", "Fields that have handed over grain. Without grain the mill idles."], "gives": ["Мука на склад фермы (собирается тапом).", "Flour for the farm storage (collect by tapping)."]},
+	"bakery": {"does": ["Печёт хлеб из муки мельницы: 1 мука даёт 2 хлеба.", "Bakes bread from mill flour: 1 flour makes 2 loaves."], "needs": ["Мельница, которая уже отдала муку. Без муки пекарня стоит.", "A mill that has handed over flour. Without flour the bakery idles."], "gives": ["Хлеб на склад фермы (собирается тапом): самый ценный товар цепочки.", "Bread for the farm storage (collect by tapping): the most valuable goods of the chain."]},
 	"barn": {"does": ["Хранит урожай фермы.", "Stores the farm harvest."], "needs": ["Дорога к городу.", "A road to the city."], "gives": ["+300 к складу фермы за уровень. С 2 уровня бригада сама собирает готовое (без бонуса).", "+300 farm storage per level. From level 2 a crew collects ready goods automatically (no bonus)."]},
 	"farm_warehouse": {"does": ["Большой склад фермы.", "The large farm storage."], "needs": ["Дорога к городу.", "A road to the city."], "gives": ["+600 к складу фермы за уровень.", "+600 farm storage per level."]},
 }
@@ -5679,6 +5680,8 @@ func farm_effect_text(kind: String, level_value: int) -> String:
 		return tr_text("Склад +%d%s", "Storage +%d%s") % [int(300 * mult), tr_text(" · бригада сама собирает готовое", " · crew auto-collects") if level_value >= Simulation.AUTO_COLLECT_BARN_LEVEL else ""]
 	if kind == "farm_warehouse":
 		return tr_text("Склад +%d", "Storage +%d") % int(600 * mult)
+	if kind == "bakery":
+		return tr_text("Печёт хлеб из %d муки в минуту", "Bakes bread from %d flour per minute") % int(Simulation.BAKERY_THROUGHPUT_PER_MINUTE * mult)
 	if kind == "mill":
 		return tr_text("Мелет %d зерна в минуту", "Grinds %d grain per minute") % int(Simulation.MILL_THROUGHPUT_PER_MINUTE * mult)
 	return tr_text("Выпуск %d в минуту", "Output %d per minute") % int(float(Simulation.FARM_OUTPUT_PER_MINUTE.get(kind, 0.0)) * mult)
@@ -5687,12 +5690,13 @@ func farm_issue_text(issue: String) -> String:
 	match issue:
 		"damaged": return tr_text("Здание повреждено: сначала почините его.", "The building is damaged: repair it first.")
 		"no_grain": return tr_text("Нет зерна: соберите урожай с полей.", "No grain: collect the harvest from the fields.")
+		"no_flour": return tr_text("Нет муки: соберите её на мельнице.", "No flour: collect it at the mill.")
 		"storage_full": return tr_text("Склад фермы полон: постройте амбар или улучшите склад.", "Farm storage is full: build a barn or upgrade the storage.")
 	return ""
 
 func add_farm_status(entry: Dictionary) -> void:
 	var type_id := str(entry.type_id)
-	var storage := label(18, sheet_column, tr_text("Склад фермы: %d из %d · зерно ждёт мельницу: %d", "Farm storage: %d of %d · grain waiting for the mill: %d") % [roundi(game.farm_stock), roundi(game.farm_storage_capacity()), roundi(game.farm_grain)])
+	var storage := label(18, sheet_column, tr_text("Склад фермы: %d из %d · зерно для мельницы: %d · мука для пекарни: %d", "Farm storage: %d of %d · grain for the mill: %d · flour for the bakery: %d") % [roundi(game.farm_stock), roundi(game.farm_storage_capacity()), roundi(game.farm_grain), roundi(game.farm_flour)])
 	storage.name = "FarmStorageLine"
 	if not game.is_farm_producer(type_id):
 		return

@@ -63,6 +63,21 @@ func run() -> void:
 	check(is_equal_approx(game.farm_grain, 48.0) and is_equal_approx(game.farm_ready_amount(mill), 18.0), "The mill grinds 12 grain into 18 flour per minute")
 	var flour: Dictionary = game.farm_collect(str(mill.instance_id), false)
 	check(is_equal_approx(float(flour.amount), 18.0) and is_equal_approx(game.farm_stock, 18.0), "Flour goes to the warehouse")
+	# Bakery: flour from the mill becomes bread worth 2x.
+	game.territory.buildings.append({"type_id": "bakery", "instance_id": "pine_district_bakery_test", "col": mill_site.x, "row": mill_site.y + 3, "width": 2, "height": 2, "level": 1, "inspected": false})
+	var bakery: Dictionary = game.territory.buildings.filter(func(e: Dictionary) -> bool: return e.type_id == "bakery")[0]
+	check(game.farm_building_issue(bakery) == "no_flour", "A bakery without flour idles")
+	game.farm_stock = 0.0
+	game.farm_grain = 0.0
+	mill["ready"] = 90.0
+	game.farm_collect(str(mill.instance_id), false)
+	check(is_equal_approx(game.farm_flour, 90.0) and is_equal_approx(game.farm_stock, 0.0), "With a bakery, mill flour waits for it")
+	game.advance_farm_stock(1)
+	check(is_equal_approx(game.farm_flour, 82.0) and is_equal_approx(game.farm_ready_amount(bakery), 16.0), "The bakery bakes 8 flour into 16 bread per minute")
+	check(is_equal_approx(float(game.farm_collect(str(bakery.instance_id), false).amount), 16.0) and is_equal_approx(game.farm_stock, 16.0), "Bread goes to the warehouse")
+	game.territory.buildings.erase(bakery)
+	game.advance_farm_stock(1)
+	check(is_equal_approx(game.farm_flour, 0.0) and game.farm_stock > 16.0, "Without a bakery leftover flour goes to the warehouse")
 	# Auto collection starts with a level 2 barn.
 	game.farm_stock = 0.0
 	game.farm_grain = 0.0
@@ -74,12 +89,13 @@ func run() -> void:
 	game.advance_farm_stock(1)
 	check(game.farm_ready_amount(field) < 60.0, "The crew collected the full field by itself")
 	game.territory.buildings.erase(mill)
+	game.farm_flour = 7.0
 	game.farm_grain = 12.0
 	game.save_game()
 	var reloaded := Simulation.new(false)
 	reloaded.save_path = save_path
 	check(reloaded.load_game(), "The saved city loads")
-	check(is_equal_approx(reloaded.farm_stock, game.farm_stock) and is_equal_approx(reloaded.farm_grain, game.farm_grain), "Farm stock survives save and load")
+	check(is_equal_approx(reloaded.farm_stock, game.farm_stock) and is_equal_approx(reloaded.farm_grain, game.farm_grain) and is_equal_approx(reloaded.farm_flour, game.farm_flour), "Farm stock survives save and load")
 	print("FARM PRODUCTION CHECKS: ", "PASS" if failures.is_empty() else "FAIL")
 	for message in failures:
 		push_error(message)

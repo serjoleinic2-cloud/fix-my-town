@@ -17,6 +17,7 @@ const TYPES = {
 	"barn": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/barn.tscn", "cost": 420, "income": 14, "footprint": Vector2(9.6, 9.6)},
 	"mill": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/mill.tscn", "cost": 680, "income": 22, "footprint": Vector2(9.6, 9.6)},
 	"pasture": {"icon": "res://assets/icons/park.svg", "scene": "res://scenes/visuals/pasture.tscn", "cost": 240, "income": 9, "footprint": Vector2(9.6, 9.6)},
+	"bakery": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/bakery.tscn", "cost": 720, "income": 24, "footprint": Vector2(9.6, 9.6)},
 	"livestock_yard": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/livestock_yard.tscn", "cost": 760, "income": 25, "footprint": Vector2(9.6, 9.6)},
 	"farm_warehouse": {"icon": "res://assets/icons/house.svg", "scene": "res://scenes/visuals/farm_warehouse.tscn", "cost": 520, "income": 12, "footprint": Vector2(9.6, 9.6)},
 	"supermarket": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/supermarket.tscn", "cost": 220, "income": 12, "footprint": Vector2(9, 9)},
@@ -84,6 +85,10 @@ const LEVELS = {
 		{"scene": "res://scenes/visuals/pasture.tscn", "income": 9, "upgrade_cost": 140},
 		{"scene": "res://scenes/visuals/pasture.tscn", "income": 14, "upgrade_cost": 290},
 		{"scene": "res://scenes/visuals/pasture.tscn", "income": 21, "upgrade_cost": 0}],
+	"bakery": [
+		{"scene": "res://scenes/visuals/bakery.tscn", "income": 24, "upgrade_cost": 430},
+		{"scene": "res://scenes/visuals/bakery.tscn", "income": 38, "upgrade_cost": 860},
+		{"scene": "res://scenes/visuals/bakery.tscn", "income": 55, "upgrade_cost": 0}],
 	"livestock_yard": [
 		{"scene": "res://scenes/visuals/livestock_yard.tscn", "income": 25, "upgrade_cost": 460},
 		{"scene": "res://scenes/visuals/livestock_yard.tscn", "income": 40, "upgrade_cost": 910},
@@ -101,13 +106,13 @@ const UNLOCK_LEVELS = {
 	"city_hall": 1, "house": 1, "cafe": 1, "park": 1, "fire_station": 1, "depot": 1, "supermarket": 2,
 	"logistics_center": 6, "warehouse": 6,
 	"elite_residence": 4, "business_tower": 5,
-	"bridge": 11, "field": 12, "barn": 12, "mill": 13, "pasture": 13, "livestock_yard": 14, "farm_warehouse": 15,
+	"bridge": 11, "field": 12, "barn": 12, "mill": 13, "pasture": 13, "livestock_yard": 14, "farm_warehouse": 15, "bakery": 15,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1
 }
 const LANDSCAPING_TYPES = ["lawn", "flower_bed", "street_tree", "bush"]
 const SERVICE_TYPES = ["fire_station", "police_station", "hospital", "depot"]
-const FARM_TYPES = ["field", "barn", "mill", "pasture", "livestock_yard", "farm_warehouse"]
+const FARM_TYPES = ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]
 
 static func unlock_level(type_id: String) -> int:
 	return int(UNLOCK_LEVELS.get(type_id, 1))

@@ -182,6 +182,10 @@ func start_empty_city() -> void:
 	farm_grain = 0.0
 	farm_flour = 0.0
 	farm_blueprint = []
+	market_order_amount = 0
+	market_order_reward = 0
+	market_order_days_left = 0
+	market_order_fresh = false
 	day_time = 0.35
 	power_ratio = 1.0
 	battery_charge = 0.0
@@ -790,6 +794,39 @@ const POWER_SUPPLY := {"wind_turbine": 60.0, "solar_panel": 45.0, "power_plant":
 const POWER_DEMAND := {"house": 3.0, "elite_residence": 8.0, "business_tower": 14.0, "cafe": 5.0, "supermarket": 9.0, "fire_station": 6.0, "police_station": 6.0, "hospital": 12.0, "depot": 4.0, "logistics_center": 10.0, "warehouse": 4.0, "mill": 6.0, "bakery": 8.0, "livestock_yard": 4.0, "farm_warehouse": 3.0, "fitness_club": 8.0, "pizzeria": 8.0, "theatre": 18.0, "aquapark": 30.0, "amusement_park": 40.0, "street_lamp": 1.0}
 const LEISURE_ENVIRONMENT := {"fitness_club": 4, "pizzeria": 2, "theatre": 6, "aquapark": 7, "amusement_park": 8}
 var day_time: float = 0.35
+
+# Daily market order: the city asks for farm goods; delivering in time pays a premium.
+const MARKET_ORDER_REWARD_PER_UNIT := 3
+const MARKET_ORDER_DAYS := 2
+var market_order_amount: int = 0
+var market_order_reward: int = 0
+var market_order_days_left: int = 0
+var market_order_fresh: bool = false
+
+func new_day_market() -> void:
+	if market_order_amount > 0:
+		market_order_days_left -= 1
+		if market_order_days_left <= 0:
+			market_order_amount = 0
+			market_order_reward = 0
+	if market_order_amount == 0 and farm_storage_capacity() > 0.0:
+		market_order_amount = maxi(10, int(round(farm_storage_capacity() * 0.3 / 5.0)) * 5)
+		market_order_reward = market_order_amount * MARKET_ORDER_REWARD_PER_UNIT
+		market_order_days_left = MARKET_ORDER_DAYS
+		market_order_fresh = true
+
+func market_order_ready() -> bool:
+	return market_order_amount > 0 and farm_stock >= float(market_order_amount)
+
+func market_order_fulfill() -> bool:
+	if not market_order_ready():
+		return false
+	farm_stock -= float(market_order_amount)
+	budget += market_order_reward
+	market_order_amount = 0
+	market_order_reward = 0
+	market_order_days_left = 0
+	return true
 var power_ratio: float = 1.0
 var battery_charge: float = 0.0
 
@@ -2554,7 +2591,10 @@ func police_target_still_active() -> bool:
 func tick(delta: float, movement_allowed: bool = true, movement_fraction: float = 1.0, fire_motion: Dictionary = {}) -> bool:
 	var changed := false
 	if empty_city_mode:
+		var previous_day_time := day_time
 		day_time = fposmod(day_time + delta / DAY_LENGTH_SECONDS, 1.0)
+		if day_time < previous_day_time:
+			new_day_market()
 		advance_power(delta)
 	if movement_allowed:
 		fire_cooldown_left = maxf(0.0, fire_cooldown_left - delta)
@@ -3147,7 +3187,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint, "market_order_amount": market_order_amount, "market_order_reward": market_order_reward, "market_order_days_left": market_order_days_left,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3585,6 +3625,12 @@ func load_game() -> bool:
 	farm_stock = clampf(float(data.get("farm_stock", 0.0)), 0.0, 100000.0) if (data.get("farm_stock", 0.0) is int or data.get("farm_stock", 0.0) is float) and is_finite(float(data.get("farm_stock", 0.0))) else 0.0
 	farm_grain = clampf(float(data.get("farm_grain", 0.0)), 0.0, 100000.0) if (data.get("farm_grain", 0.0) is int or data.get("farm_grain", 0.0) is float) and is_finite(float(data.get("farm_grain", 0.0))) else 0.0
 	farm_flour = clampf(float(data.get("farm_flour", 0.0)), 0.0, 100000.0) if (data.get("farm_flour", 0.0) is int or data.get("farm_flour", 0.0) is float) and is_finite(float(data.get("farm_flour", 0.0))) else 0.0
+	market_order_amount = clampi(int(data.get("market_order_amount", 0)), 0, 100000)
+	market_order_reward = clampi(int(data.get("market_order_reward", 0)), 0, 1000000)
+	market_order_days_left = clampi(int(data.get("market_order_days_left", 0)), 0, 10)
+	if market_order_amount == 0:
+		market_order_reward = 0
+		market_order_days_left = 0
 	day_time = fposmod(float(data.get("day_time", 0.35)), 1.0) if (data.get("day_time", 0.35) is int or data.get("day_time", 0.35) is float) and is_finite(float(data.get("day_time", 0.35))) else 0.35
 	battery_charge = clampf(float(data.get("battery_charge", 0.0)), 0.0, 100000.0) if (data.get("battery_charge", 0.0) is int or data.get("battery_charge", 0.0) is float) and is_finite(float(data.get("battery_charge", 0.0))) else 0.0
 	power_ratio = 1.0

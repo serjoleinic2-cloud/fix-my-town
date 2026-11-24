@@ -3902,6 +3902,9 @@ func _process(delta: float) -> void:
 		fire_notice_left = maxf(0, fire_notice_left - delta)
 		fire_notice.visible = fire_notice_left > 0
 	announce_repair_phase()
+	if game.market_order_fresh:
+		game.market_order_fresh = false
+		show_short_notice(tr_text("Новый заказ города: нужно %d продукции, награда %d монет.", "New city order: %d goods needed, reward %d coins.") % [game.market_order_amount, game.market_order_reward], 5.0)
 	if energy_icon != null and energy_icon.visible:
 		# Low or missing power blinks: fast and red when short, slow and amber when tight.
 		var power_now: float = game.power_ratio
@@ -5881,6 +5884,21 @@ func add_farm_status(entry: Dictionary) -> void:
 	var type_id := str(entry.type_id)
 	var storage := label(18, sheet_column, tr_text("Склад фермы: %d из %d · зерно для мельницы: %d · мука для пекарни: %d", "Farm storage: %d of %d · grain for the mill: %d · flour for the bakery: %d") % [roundi(game.farm_stock), roundi(game.farm_storage_capacity()), roundi(game.farm_grain), roundi(game.farm_flour)])
 	storage.name = "FarmStorageLine"
+	if game.market_order_amount > 0:
+		var order_text := tr_text("Заказ города: %d продукции за %d монет · осталось дней: %d", "City order: %d goods for %d coins · days left: %d") % [game.market_order_amount, game.market_order_reward, game.market_order_days_left]
+		var order_label := label(18, sheet_column, order_text)
+		order_label.name = "MarketOrderLine"
+		order_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		order_label.add_theme_color_override("font_color", Color("2f7d4f") if game.market_order_ready() else Color("b36b49"))
+		var deliver := button(sheet_column, tr_text("Выполнить заказ · +%d", "Fulfil order · +%d") % game.market_order_reward, func():
+			var paid: int = game.market_order_reward
+			if game.market_order_fulfill():
+				audio.play_ui("success")
+				show_short_notice(tr_text("Заказ выполнен · +%d монет", "Order fulfilled · +%d coins") % paid, 3.0)
+				close_sheet()
+		, true)
+		deliver.name = "MarketOrderButton"
+		deliver.disabled = not game.market_order_ready()
 	if not game.is_farm_producer(type_id):
 		return
 	var capacity: float = game.farm_building_capacity(entry)

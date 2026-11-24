@@ -111,8 +111,12 @@ var transit_visuals: Node3D
 var logistics_visuals: Node3D
 var logistics_vehicles: Array[Dictionary] = []
 var backoff_sheet_state := "?"
+# Every police station keeps one patrol. `road_police` is the unit being processed
+# right now (a scratch alias of one entry of road_police_units).
 var road_police: Dictionary = {}
-var ambulance_job: Dictionary = {}
+var road_police_units: Array = []
+var current_police_id: String = ""
+var ambulance_jobs: Array = []
 var road_police_queue: Array = []
 var road_police_vanished: Array = []
 var backoff_refresh_timer := 0.0
@@ -3627,12 +3631,12 @@ func act_on_city_problem() -> void:
 		if not game.has_service_building("hospital"):
 			open_service_catalog("hospital")
 			return
-		if not ambulance_job.is_empty() or not start_ambulance(selected_problem_id):
+		if not start_ambulance(selected_problem_id):
 			audio.play_ui("deny")
 			refresh()
 			return
 		game.accept_problem(selected_problem_id)
-		audio.play("siren", "Effects", ambulance_job.position)
+		audio.play("siren", "Effects", ambulance_jobs[ambulance_jobs.size() - 1].position)
 		close_sheet()
 	elif kind == "traffic_jam":
 		if not game.has_service_building("police_station"):
@@ -4358,6 +4362,13 @@ func build_district_sheet() -> void:
 		var farm_line := label(19, sheet_column, tr_text("Ферма: запас %d из %d · выпуск %d в минуту", "Farm: stock %d of %d · output %d per minute") % [roundi(game.farm_stock), roundi(farm_capacity), roundi(game.farm_production_per_minute())])
 		farm_line.name = "FarmStock"
 	add_farm_guidance()
+	var hospitals: int = game.farm_type_count("hospital")
+	var patrols: int = game.farm_type_count("police_station")
+	var engines: int = game.farm_type_count("fire_station") * 2
+	if hospitals + patrols + engines > 0:
+		var service_line := label(18, sheet_column, tr_text("Службы свободны: скорые %d из %d · патрули %d из %d · пожарные машины %d из %d", "Services free: ambulances %d of %d · patrols %d of %d · fire engines %d of %d") % [hospitals - ambulance_jobs.size(), hospitals, patrols - road_police_units.size(), patrols, maxi(0, engines - game.fire_assignments().size()), engines])
+		service_line.name = "ServiceCapacityLine"
+		service_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if game.power_enabled():
 		var power_line := label(19, sheet_column, tr_text("Энергия: даёт %d · нужно %d · накопитель %d из %d", "Power: supply %d · demand %d · battery %d of %d") % [roundi(game.power_supply()), roundi(game.power_demand()), roundi(game.battery_charge), roundi(game.battery_capacity())])
 		power_line.name = "PowerLine"
@@ -5315,74 +5326,95 @@ const AMBULANCE_TREAT_SECONDS := 5.0
 func hospital_world_position(target: Vector3 = Vector3.ZERO) -> Vector3:
 	return game.nearest_station_center(["hospital"], target)
 
+# Every hospital keeps one ambulance. A call goes to the closest hospital whose
+# ambulance is free; with all of them out, the call waits.
+func free_hospital_for(target: Vector3) -> Dictionary:
+	for station: Dictionary in game.stations_by_distance("hospital", target):
+		if not ambulance_jobs.any(func(job: Dictionary) -> bool: return str(job.station_id) == str(station.instance_id)):
+			return station
+	return {}
+
+func ambulance_available() -> bool:
+	return not free_hospital_for(Vector3.ZERO).is_empty()
+
 # The ambulance drives from the hospital to the sick home; treatment starts on
 # arrival and the problem is resolved only after it, then the crew drives back.
 func start_ambulance(problem_id: String) -> bool:
 	var incident: Dictionary = game.incidents.get(problem_id, {})
-	if incident.is_empty():
+	if incident.is_empty() or ambulance_jobs.any(func(job: Dictionary) -> bool: return str(job.problem_id) == problem_id):
 		return false
 	var home_id := str(incident.get("target_id", ""))
 	var home_position: Vector3 = game.building_world_for_id(home_id)
-	var station := hospital_world_position(home_position)
-	if station == Vector3.INF:
+	var hospital := free_hospital_for(home_position)
+	if hospital.is_empty():
 		return false
+	var station: Vector3 = game.territory.building_center(hospital)
 	var path: Array[Vector2i] = game.territory.road_path(game.territory.nearest_road(station), game.territory.nearest_road(home_position))
 	if path.is_empty():
 		return false
 	var route: Array = []
 	for cell: Vector2i in path:
 		route.append(game.territory.cell_world(cell.x, cell.y) + Vector3(0, 0.18, 0))
-	ambulance_job = {"problem_id": problem_id, "phase": "travel", "route": route, "index": 0, "position": route[0], "treat_left": AMBULANCE_TREAT_SECONDS}
+	ambulance_jobs.append({"problem_id": problem_id, "station_id": str(hospital.instance_id), "phase": "travel", "route": route, "index": 0, "position": route[0], "treat_left": AMBULANCE_TREAT_SECONDS})
 	return true
 
 func tick_ambulance(delta: float) -> void:
-	var node := world.get_node_or_null("Ambulance") as Node3D
-	if ambulance_job.is_empty():
-		if node != null:
-			node.queue_free()
-		return
 	var traffic_controller: Variant = scenery.traffic_controller if scenery != null else null
-	var phase := str(ambulance_job.phase)
-	var position_value: Vector3 = ambulance_job.position
-	var route: Array = ambulance_job.route
+	var live_names: Dictionary = {}
+	for job: Dictionary in ambulance_jobs.duplicate():
+		var node_name := "Ambulance_" + str(job.station_id)
+		live_names[node_name] = true
+		if not tick_ambulance_job(job, node_name, delta, traffic_controller):
+			ambulance_jobs.erase(job)
+			live_names.erase(node_name)
+	for child in world.get_children():
+		if str(child.name).begins_with("Ambulance_") and not live_names.has(str(child.name)):
+			child.queue_free()
+
+# Returns false once the ambulance is back at its hospital.
+func tick_ambulance_job(job: Dictionary, node_name: String, delta: float, traffic_controller: Variant) -> bool:
+	var node := world.get_node_or_null(node_name) as Node3D
+	var phase := str(job.phase)
+	var position_value: Vector3 = job.position
+	var route: Array = job.route
 	if phase == "treat":
-		ambulance_job.treat_left = float(ambulance_job.treat_left) - delta
-		if float(ambulance_job.treat_left) <= 0.0:
-			game.resolve_problem_with_service(str(ambulance_job.problem_id), "hospital")
+		job.treat_left = float(job.treat_left) - delta
+		if float(job.treat_left) <= 0.0:
+			game.resolve_problem_with_service(str(job.problem_id), "hospital")
 			route.reverse()
-			ambulance_job.index = 0
-			ambulance_job.phase = "return"
+			job.index = 0
+			job.phase = "return"
 			refresh()
 	else:
-		var index := int(ambulance_job.index)
+		var index := int(job.index)
 		if index >= route.size():
 			if phase == "travel":
-				ambulance_job.phase = "treat"
+				job.phase = "treat"
 			else:
-				ambulance_job = {}
 				if node != null:
 					node.queue_free()
-				return
+				return false
 		else:
 			var point: Vector3 = route[index]
 			var step := delta * AMBULANCE_SPEED
 			if traffic_controller != null and phase == "travel":
 				var allowed: float = traffic_controller.service_travel_distance(position_value, position_value.move_toward(point, step), delta, "ambulance", true, "", "ambulance")
 				step = minf(step, allowed) if allowed >= 0.0 else step
-			ambulance_job.position = position_value.move_toward(point, step)
-			if ambulance_job.position.distance_to(point) < 0.05:
-				ambulance_job.index = index + 1
+			job.position = position_value.move_toward(point, step)
+			if job.position.distance_to(point) < 0.05:
+				job.index = index + 1
 	if node == null:
-		node = create_object(world, "ambulance", "Ambulance", ambulance_job.position)
-		node.name = "Ambulance"
-	var index_now := mini(int(ambulance_job.index), route.size() - 1)
-	var heading: Vector3 = route[index_now] - ambulance_job.position
-	node.position = ambulance_job.position
+		node = create_object(world, "ambulance", node_name, job.position)
+		node.name = node_name
+	var index_now := mini(int(job.index), route.size() - 1)
+	var heading: Vector3 = route[index_now] - job.position
+	node.position = job.position
 	if heading.length() > 0.05:
 		node.rotation.y = atan2(heading.x, heading.z)
-	node.set_emergency_lights(str(ambulance_job.phase) != "return", elapsed)
-	if traffic_controller != null and str(ambulance_job.phase) != "return":
-		traffic_controller.blocking_positions.append({"id": "ambulance", "position": ambulance_job.position, "half_extents": Vector2(1.2, 1.2)})
+	node.set_emergency_lights(str(job.phase) != "return", elapsed)
+	if traffic_controller != null and str(job.phase) != "return":
+		traffic_controller.blocking_positions.append({"id": node_name, "position": job.position, "half_extents": Vector2(1.2, 1.2)})
+	return true
 
 const ROAD_POLICE_SPEED := 7.0
 const ROAD_POLICE_CLEAR_RADIUS := 11.0
@@ -5426,7 +5458,7 @@ func backoff_state_key() -> String:
 	var jam := "0"
 	if selected_vehicle_id != "" and scenery != null and scenery.traffic_controller != null:
 		jam = "1" if road_jam_here(selected_vehicle_world_position()) else "0"
-	return manual_backoff_reason(selected_vehicle_id) + "|" + jam + "|" + str(road_police.is_empty())
+	return manual_backoff_reason(selected_vehicle_id) + "|" + jam + "|" + str(road_police_units.size())
 
 func road_police_station_position(target: Vector3 = Vector3.ZERO) -> Vector3:
 	return game.nearest_station_center(["police_station", "depot"], target)
@@ -5438,8 +5470,8 @@ func add_road_police_action() -> void:
 	var has_station := road_police_station_position() != Vector3.INF
 	var queued := road_police_queue.size()
 	var text := tr_text("Вызвать полицию", "Call police")
-	if queued > 0 or not road_police.is_empty():
-		text = tr_text("Вызвать полицию · в очереди %d", "Call police · queued %d") % (queued + (1 if not road_police.is_empty() else 0))
+	if queued > 0 or not road_police_units.is_empty():
+		text = tr_text("Вызвать полицию · в очереди %d", "Call police · queued %d") % (queued + road_police_units.size())
 	var police_button := button(sheet_column, text if has_station else tr_text("Нужен участок полиции", "A police station is needed"), call_police_for_road_jam, true)
 	police_button.name = "CallRoadPolice"
 	police_button.disabled = not has_station or queued >= ROAD_POLICE_QUEUE_LIMIT
@@ -5471,7 +5503,8 @@ func road_police_route(from_world: Vector3, to_world: Vector3) -> Array:
 func begin_road_police_return() -> bool:
 	if road_police.is_empty():
 		return false
-	var station := road_police_station_position(road_police.position)
+	var home: Dictionary = game.territory.building_by_id(str(road_police.get("station_id", "")))
+	var station: Vector3 = game.territory.building_center(home) if not home.is_empty() else road_police_station_position(road_police.position)
 	if station == Vector3.INF:
 		return false
 	var route := road_police_route(road_police.position, station)
@@ -5482,21 +5515,30 @@ func begin_road_police_return() -> bool:
 	road_police.phase = "return"
 	return true
 
-func start_road_police(target: Vector3) -> bool:
-	var station := road_police_station_position(target)
-	if station == Vector3.INF:
-		return false
-	var route := road_police_route(station, target)
+func free_police_station_for(target: Vector3) -> Dictionary:
+	for type_id in ["police_station", "depot"]:
+		for station: Dictionary in game.stations_by_distance(type_id, target):
+			if not road_police_units.any(func(unit: Dictionary) -> bool: return str(unit.station_id) == str(station.instance_id)):
+				return station
+	return {}
+
+# 1 = patrol sent, 0 = no route (drop the call), -1 = every patrol is busy (keep waiting).
+func start_road_police(target: Vector3) -> int:
+	var station_entry := free_police_station_for(target)
+	if station_entry.is_empty():
+		return -1
+	var route := road_police_route(game.territory.building_center(station_entry), target)
 	if route.is_empty():
-		return false
-	road_police = {"phase": "travel", "route": route, "index": 0, "position": route[0], "target": target, "vanish_left": 0.0, "clear_left": 45.0, "station": route[0]}
-	return true
+		return 0
+	road_police_units.append({"station_id": str(station_entry.instance_id), "phase": "travel", "route": route, "index": 0, "position": route[0], "target": target, "vanish_left": 0.0, "clear_left": 45.0, "station": route[0]})
+	return 1
 
 func road_police_node() -> Node3D:
-	var node := world.get_node_or_null("RoadPolice") as Node3D
+	var node_name := "RoadPolice_" + current_police_id
+	var node := world.get_node_or_null(node_name) as Node3D
 	if node == null and not road_police.is_empty():
-		node = create_object(world, "police_car", "RoadPolice", road_police.position)
-		node.name = "RoadPolice"
+		node = create_object(world, "police_car", node_name, road_police.position)
+		node.name = node_name
 	return node
 
 func tick_road_police(delta: float) -> void:
@@ -5528,13 +5570,30 @@ func tick_road_police(delta: float) -> void:
 					truck.show()
 					truck_entry.stalled_time = 0.0
 					road_police_vanished.remove_at(index)
-	if road_police.is_empty():
-		if road_police_queue.is_empty() or game.police_job.size() > 0:
-			sync_road_police_node(false)
-			return
-		var next_target: Vector3 = road_police_queue.pop_front()
-		if road_jam_stalled_vehicles(next_target, 22.0).is_empty() or not start_road_police(next_target):
-			return
+	while not road_police_queue.is_empty() and game.police_job.is_empty():
+		var next_target: Vector3 = road_police_queue[0]
+		if road_jam_stalled_vehicles(next_target, 22.0).is_empty():
+			road_police_queue.pop_front()
+			continue
+		var started := start_road_police(next_target)
+		if started < 0:
+			break
+		road_police_queue.pop_front()
+	for unit: Dictionary in road_police_units.duplicate():
+		road_police = unit
+		current_police_id = str(unit.station_id)
+		tick_road_police_unit(delta, traffic_controller)
+		if road_police.is_empty() or str(road_police.get("phase", "")) == "done":
+			road_police_units.erase(unit)
+	road_police = {}
+	current_police_id = ""
+	for child in world.get_children():
+		if str(child.name).begins_with("RoadPolice_") and not road_police_units.any(func(unit: Dictionary) -> bool: return "RoadPolice_" + str(unit.station_id) == str(child.name)):
+			child.queue_free()
+	if road_police_units.is_empty() and audio != null:
+		audio.set_loop("road_police_siren", "siren", "Effects", false)
+
+func tick_road_police_unit(delta: float, traffic_controller: Variant) -> void:
 	var phase := str(road_police.phase)
 	var position_value: Vector3 = road_police.position
 	if phase == "travel" or phase == "return":
@@ -5544,8 +5603,8 @@ func tick_road_police(delta: float) -> void:
 			if phase == "travel":
 				road_police.phase = "clearing"
 			else:
-				road_police = {}
 				sync_road_police_node(false)
+				road_police.phase = "done"
 				return
 		else:
 			var point: Vector3 = route[index]
@@ -5561,7 +5620,7 @@ func tick_road_police(delta: float) -> void:
 			var proposed := position_value.move_toward(point, step)
 			var intended := position_value.distance_to(proposed)
 			if intended > 0.0001:
-				var allowed: float = traffic_controller.service_travel_distance(position_value, proposed, delta, "road_police", urgent_response, "", "police_car")
+				var allowed: float = traffic_controller.service_travel_distance(position_value, proposed, delta, "road_police_" + current_police_id, urgent_response, "", "police_car")
 				step = minf(step, allowed) if allowed >= 0.0 else step
 			road_police.position = position_value.move_toward(point, step)
 			if road_police.position.distance_to(point) < 0.05:
@@ -5592,15 +5651,15 @@ func tick_road_police(delta: float) -> void:
 		var route_delta: Vector3 = route[index] - road_police.position if not route.is_empty() else Vector3.FORWARD
 		var route_axis := "H" if absf(route_delta.x) >= absf(route_delta.z) else "V"
 		var route_direction := int(signf(route_delta.x if route_axis == "H" else route_delta.z))
-		traffic_controller.blocking_positions.append({"id": "road_police", "position": road_police.position, "moving_vehicle": true, "emergency": road_police.phase == "travel", "axis": route_axis, "direction": route_direction, "half_extents": traffic_controller.service_half_extents("police_car", route_axis)})
+		traffic_controller.blocking_positions.append({"id": "road_police_" + current_police_id, "position": road_police.position, "moving_vehicle": true, "emergency": road_police.phase == "travel", "axis": route_axis, "direction": route_direction, "half_extents": traffic_controller.service_half_extents("police_car", route_axis)})
 
 func sync_road_police_node(active: bool) -> void:
 	if not active or road_police.is_empty():
-		var node := world.get_node_or_null("RoadPolice")
+		var node := world.get_node_or_null("RoadPolice_" + current_police_id)
 		if node != null:
 			node.queue_free()
 		if audio != null:
-			audio.set_loop("road_police_siren", "siren", "Effects", false)
+			audio.set_loop("road_police_siren_" + current_police_id, "siren", "Effects", false)
 		return
 	var police := road_police_node()
 	var route: Array = road_police.route
@@ -5611,7 +5670,7 @@ func sync_road_police_node(active: bool) -> void:
 		police.rotation.y = atan2(direction.x, direction.z)
 	police.set_emergency_lights(road_police.phase != "return", elapsed)
 	if audio != null:
-		audio.set_loop("road_police_siren", "siren", "Effects", road_police.phase != "return", road_police.position, 0.3)
+		audio.set_loop("road_police_siren_" + current_police_id, "siren", "Effects", road_police.phase != "return", road_police.position, 0.3)
 
 const BUILDING_EXPLAIN := {
 	"city_hall": {"does": ["Центр района: от него считаются дороги, службы и задания.", "District center: roads, services and tasks are counted from here."], "needs": ["Ничего: стоит с самого начала и не сносится.", "Nothing: it is there from the start and cannot be demolished."], "gives": ["Бюджет района и задания развития.", "District budget and development tasks."]},

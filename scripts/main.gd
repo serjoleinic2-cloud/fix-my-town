@@ -41,6 +41,9 @@ var harvest_all_button: Button
 var harvest_ready_count: int = 0
 var world_environment: WorldEnvironment
 var day_clock_label: Label
+var day_panel: PanelContainer
+var energy_icon: TextureRect
+var energy_label: Label
 var day_visual_clock: float = 0.0
 var harvest_check_clock: float = 0.0
 var subsidy_dialog: Control
@@ -89,6 +92,7 @@ var settings_path: String = SETTINGS_PATH
 var focus_point := Vector3(-15, 0, 27)
 var save_clock: float = 0
 var elapsed: float = 0
+var last_repair_phase: String = ""
 var drag_start := Vector2.ZERO
 var drag_previous := Vector2.ZERO
 var dragging: bool = false
@@ -557,10 +561,30 @@ func build_ui() -> void:
 	harvest_all_button.custom_minimum_size.y = 64
 	harvest_all_button.add_theme_font_size_override("font_size", 22)
 	harvest_all_button.hide()
-	day_clock_label = label(18, screen, "")
+	day_panel = PanelContainer.new()
+	day_panel.name = "DayPanel"
+	day_panel.add_theme_stylebox_override("panel", style(Color(0.09, 0.12, 0.16, 0.82), 12))
+	day_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(day_panel)
+	var day_row := HBoxContainer.new()
+	day_row.add_theme_constant_override("separation", 8)
+	day_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	day_panel.add_child(day_row)
+	day_clock_label = label(18, day_row, "")
 	day_clock_label.name = "DayClock"
-	day_clock_label.add_theme_color_override("font_color", Color("26333a"))
+	day_clock_label.add_theme_color_override("font_color", Color("f2f4f5"))
 	day_clock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	energy_icon = TextureRect.new()
+	energy_icon.name = "EnergyIcon"
+	energy_icon.texture = load("res://assets/icons/ui_energy.svg")
+	energy_icon.custom_minimum_size = Vector2(24, 24)
+	energy_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	energy_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	energy_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	day_row.add_child(energy_icon)
+	energy_label = label(18, day_row, "")
+	energy_label.name = "EnergyLabel"
+	energy_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sheet = card(screen)
 	sheet.resized.connect(func():
 		if not updating_layout:
@@ -645,8 +669,8 @@ func update_layout() -> void:
 		mission.size.y = 110
 	fire_notice.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
 	fire_notice.size = Vector2(size_value.x - safe_left - safe_right, 72)
-	day_clock_label.position = Vector2(safe_left + 12, fire_notice.position.y + 78)
-	day_clock_label.size = Vector2(320, 28)
+	day_panel.position = Vector2(safe_left + 8, safe_top + 60)
+	day_panel.size = Vector2(10, 10)
 	harvest_all_button.position = Vector2(safe_left + 12, mission.position.y - 76)
 	harvest_all_button.size = Vector2(minf(360.0, size_value.x * 0.7), 64)
 	# A fire card must not lock the player out of normal navigation. The player
@@ -896,13 +920,13 @@ func incident_building_exists(building_id: String) -> bool:
 
 func city_problem_marker_texture(kind: String) -> Texture2D:
 	var path: String = str({
-		"leak": "res://assets/icons/ui_drop.svg",
-		"supply": "res://assets/icons/cafe.svg",
-		"electricity": "res://assets/icons/ui_hammer.svg",
-		"disease": "res://assets/icons/hospital.svg",
-		"traffic_jam": "res://assets/icons/problem_marker.svg",
-		"neglect": "res://assets/icons/house.svg",
-		"strike": "res://assets/icons/police_station.svg",
+		"leak": "res://assets/icons/problem_leak.svg",
+		"supply": "res://assets/icons/problem_supply.svg",
+		"electricity": "res://assets/icons/problem_electricity.svg",
+		"disease": "res://assets/icons/problem_disease.svg",
+		"traffic_jam": "res://assets/icons/problem_traffic.svg",
+		"neglect": "res://assets/icons/problem_repair.svg",
+		"strike": "res://assets/icons/problem_strike.svg",
 	}.get(kind, "res://assets/icons/problem_marker.svg"))
 	return load(path) as Texture2D
 
@@ -1890,7 +1914,7 @@ func update_city_problem_visuals() -> void:
 		marker.set_meta("building_id", target_id)
 		marker.set_meta("incident_type", kind)
 		marker.position = game.building_world_for_id(target_id) + Vector3(0, 5.6 + sin(elapsed * 2.4) * 0.14, 0)
-		marker.modulate = {"leak": Color("45a7df"), "supply": Color("e7ad44"), "electricity": Color("e6c84f"), "disease": Color("72b78a"), "traffic_jam": Color("d68149"), "neglect": Color("9b7559"), "strike": Color("d65a4a")}.get(kind, Color.WHITE)
+		marker.modulate = Color.WHITE
 		active_ids[str(problem_id)] = true
 		if not notified_problem_ids.has(str(problem_id)):
 			notified_problem_ids[str(problem_id)] = true
@@ -3877,6 +3901,18 @@ func _process(delta: float) -> void:
 	if fire_notice_left > 0:
 		fire_notice_left = maxf(0, fire_notice_left - delta)
 		fire_notice.visible = fire_notice_left > 0
+	announce_repair_phase()
+	if energy_icon != null and energy_icon.visible:
+		# Low or missing power blinks: fast and red when short, slow and amber when tight.
+		var power_now: float = game.power_ratio
+		if power_now < 0.85:
+			var blink_speed := 7.0 if power_now < 0.6 else 3.0
+			var pulse := 0.35 + 0.65 * absf(sin(elapsed * blink_speed))
+			energy_icon.modulate.a = pulse
+			energy_label.modulate.a = pulse
+		else:
+			energy_icon.modulate.a = 1.0
+			energy_label.modulate.a = 1.0
 	jam_notice_cooldown = maxf(0.0, jam_notice_cooldown - delta)
 	if game.completed and not game.fire_triggered and elapsed >= 5.0:
 		if game.start_fire():
@@ -4449,6 +4485,7 @@ func build_grid_house_sheet() -> void:
 					restoration_cost = maxi(120, int(Catalog.cost(entry.type_id) / 2))
 				var restore_premium := button(sheet_column, (tr_text("Восстановить здание", "Restore building") if game.is_ruined(entry.instance_id) else tr_text("Устранить повреждения", "Repair damage")) + " · %d" % restoration_cost, func():
 					if game.repair_fire_damage(entry.instance_id):
+						show_short_notice(tr_text("Ремонт · Здание восстановлено.", "Repair · Building restored."), 3.0)
 						audio.play_ui("success")
 						close_sheet()
 					else:
@@ -4514,6 +4551,7 @@ func build_grid_house_sheet() -> void:
 			var grid_repair_price := 120 if game.is_ruined(grid_selected_id) else 40 + grid_damage
 			var grid_restore := button(sheet_column, (tr_text("Восстановить дом", "Rebuild home") if game.is_ruined(grid_selected_id) else tr_text("Восстановить дом", "Restore home")) + " · %d" % grid_repair_price, func():
 				if game.repair_fire_damage(grid_selected_id):
+					show_short_notice(tr_text("Ремонт · Здание восстановлено.", "Repair · Building restored."), 3.0)
 					audio.play_ui("success")
 					close_sheet()
 				else:
@@ -4631,6 +4669,7 @@ func build_building_sheet() -> void:
 				var repair_price := 120 if game.is_ruined(house_id) else 40 + damage
 				var restore := button(sheet_column, (tr_text("Восстановить дом", "Rebuild home") if game.is_ruined(house_id) else tr_text("Восстановить дом", "Restore home")) + " · %d" % repair_price, func():
 					if game.repair_fire_damage(house_id):
+						show_short_notice(tr_text("Ремонт · Здание восстановлено.", "Repair · Building restored."), 3.0)
 						audio.play_ui("success")
 						close_sheet()
 					else:
@@ -5432,6 +5471,12 @@ func selected_vehicle_world_position() -> Vector3:
 			return vehicle.node.position
 	return Vector3.INF
 
+# A queue that creeps forward keeps resetting its stall timer, so a short
+# threshold and a wide radius also catch jams on long stretches like the bridge,
+# where the tapped car may be far from the tail.
+const ROAD_JAM_STALL_SECONDS := 1.5
+const ROAD_JAM_RADIUS := 22.0
+
 func road_jam_stalled_vehicles(center: Vector3, radius: float) -> Array:
 	var result: Array = []
 	if scenery == null or scenery.traffic_controller == null:
@@ -5439,7 +5484,7 @@ func road_jam_stalled_vehicles(center: Vector3, radius: float) -> Array:
 	for vehicle: Dictionary in scenery.traffic_controller.vehicles:
 		if not vehicle.node.visible or vehicle.get("managed", false) or vehicle.get("manual_backoff", false):
 			continue
-		if float(vehicle.get("stalled_time", 0.0)) < 3.0 or str(vehicle.get("waiting_reason", "")) in ["signal", "manual_backoff"]:
+		if float(vehicle.get("stalled_time", 0.0)) < ROAD_JAM_STALL_SECONDS or str(vehicle.get("waiting_reason", "")) in ["signal", "manual_backoff"]:
 			continue
 		if vehicle.node.position.distance_to(center) <= radius:
 			result.append({"kind": "car", "vehicle": vehicle, "position": vehicle.node.position})
@@ -5447,12 +5492,12 @@ func road_jam_stalled_vehicles(center: Vector3, radius: float) -> Array:
 		var truck: Node3D = entry.get("object")
 		if truck == null or not is_instance_valid(truck) or not truck.visible:
 			continue
-		if float(entry.get("stalled_time", 0.0)) >= 3.0 and truck.position.distance_to(center) <= radius:
+		if float(entry.get("stalled_time", 0.0)) >= ROAD_JAM_STALL_SECONDS and truck.position.distance_to(center) <= radius:
 			result.append({"kind": "truck", "vehicle": entry, "position": truck.position})
 	return result
 
 func road_jam_here(center: Vector3) -> bool:
-	return center != Vector3.INF and road_jam_stalled_vehicles(center, 16.0).size() >= 3
+	return center != Vector3.INF and road_jam_stalled_vehicles(center, ROAD_JAM_RADIUS).size() >= 3
 
 func backoff_state_key() -> String:
 	var jam := "0"
@@ -5529,6 +5574,13 @@ func start_road_police(target: Vector3) -> int:
 		return -1
 	var route := road_police_route(game.territory.building_center(station_entry), target)
 	if route.is_empty():
+		# The tapped car can stand on a cell the router does not reach (a bridge
+		# ramp, say): try the road beside it and drive as close as possible.
+		for offset: Vector3 in [Vector3(4, 0, 0), Vector3(-4, 0, 0), Vector3(0, 0, 4), Vector3(0, 0, -4), Vector3(8, 0, 0), Vector3(-8, 0, 0), Vector3(0, 0, 8), Vector3(0, 0, -8), Vector3(12, 0, 0), Vector3(-12, 0, 0), Vector3(0, 0, 12), Vector3(0, 0, -12)]:
+			route = road_police_route(game.territory.building_center(station_entry), target + offset)
+			if not route.is_empty():
+				break
+	if route.is_empty():
 		return 0
 	road_police_units.append({"station_id": str(station_entry.instance_id), "phase": "travel", "route": route, "index": 0, "position": route[0], "target": target, "vanish_left": 0.0, "clear_left": 45.0, "station": route[0]})
 	return 1
@@ -5579,6 +5631,8 @@ func tick_road_police(delta: float) -> void:
 		if started < 0:
 			break
 		road_police_queue.pop_front()
+		if started == 0:
+			show_short_notice(tr_text("Патруль не смог проехать к затору: проверьте дорогу к участку полиции.", "The patrol could not reach the jam: check the road to the police station."), 4.0)
 	for unit: Dictionary in road_police_units.duplicate():
 		road_police = unit
 		current_police_id = str(unit.station_id)
@@ -5792,11 +5846,16 @@ func apply_day_night() -> void:
 		get_tree().call_group("night_visuals", "set_night", night_now)
 	var hour: float = game.game_hour()
 	var text_value := "%02d:%02d" % [int(hour), int((hour - floorf(hour)) * 60.0)]
-	text_value += (tr_text("  ·  ночь", "  ·  night") if game.is_night() else tr_text("  ·  день", "  ·  day"))
-	if game.power_enabled():
-		text_value += tr_text("  ·  энергия %d%%", "  ·  power %d%%") % roundi(game.power_ratio * 100.0)
+	text_value += (tr_text(" · ночь", " · night") if game.is_night() else tr_text(" · день", " · day"))
 	day_clock_label.text = text_value
-	day_clock_label.visible = not bool(harvest_all_button.get_meta("menu_hidden", false))
+	var has_power: bool = game.power_enabled()
+	energy_icon.visible = has_power
+	energy_label.visible = has_power
+	if has_power:
+		energy_label.text = "%d%%" % roundi(game.power_ratio * 100.0)
+		var tint := Color("8be28b") if game.power_ratio >= 0.85 else (Color("f4c430") if game.power_ratio >= 0.6 else Color("ff6a5c"))
+		energy_label.add_theme_color_override("font_color", tint)
+	day_panel.visible = not bool(harvest_all_button.get_meta("menu_hidden", false))
 
 func farm_effect_text(kind: String, level_value: int) -> String:
 	var mult := float(clampi(level_value, 1, 3))
@@ -5850,6 +5909,25 @@ func add_farm_status(entry: Dictionary) -> void:
 		var collect := button(sheet_column, caption, collect_farm_building.bind(str(entry.instance_id)), true)
 		collect.name = "CollectFarmButton"
 		collect.disabled = issue == "damaged" or issue == "storage_full"
+
+func announce_repair_phase() -> void:
+	# Repair crews get the same dispatch banners as fire engines: on the way, working, finished.
+	var key: String = "" if game.job == "" or game.job == "fire" else game.job_phase
+	if key == last_repair_phase:
+		return
+	var previous := last_repair_phase
+	last_repair_phase = key
+	match key:
+		"travel":
+			if previous == "":
+				show_short_notice(tr_text("Ремонт · Бригада выехала на вызов.", "Repair · The crew is on its way."), 4.0)
+		"repair":
+			show_short_notice(tr_text("Ремонт · Бригада на месте, работы идут.", "Repair · The crew is on site and working."), 4.0)
+		"return":
+			show_short_notice(tr_text("Ремонт завершён · Бригада возвращается на базу.", "Repair done · The crew is heading back."), 4.0)
+		"":
+			if previous == "return":
+				show_short_notice(tr_text("Ремонт · Бригада свободна.", "Repair · The crew is free."), 3.0)
 
 func show_short_notice(text_value: String, seconds: float = 3.0) -> void:
 	fire_notice_left = seconds

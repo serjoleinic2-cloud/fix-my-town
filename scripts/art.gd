@@ -154,7 +154,7 @@ static func bench(parent: Node3D, pos: Vector3, angle: float = 0, scale_value: f
 	box(node, Vector3(0, 1.1, -0.3), Vector3(1.7, 0.38, 0.12), Color("aa8756"))
 	return node
 
-static func lamp(parent: Node3D, pos: Vector3, pole_height: float = 6.2, angle: float = 0.0) -> Node3D:
+static func lamp(parent: Node3D, pos: Vector3, pole_height: float = 6.2, angle: float = 0.0, group: String = "night_glow") -> Node3D:
 	var node := Node3D.new()
 	node.name = "StreetLamp"
 	node.position = pos
@@ -163,9 +163,68 @@ static func lamp(parent: Node3D, pos: Vector3, pole_height: float = 6.2, angle: 
 	cylinder(node, Vector3(0, pole_height * 0.5, 0), 0.065, pole_height, Color("56646a"), 1, 7)
 	box(node, Vector3(0.35, pole_height, 0), Vector3(0.72, 0.13, 0.16), Color("58666c"))
 	box(node, Vector3(0.62, pole_height - 0.08, 0), Vector3(0.34, 0.16, 0.3), Color("edf0dc"))
-	glow(node, Vector3(0.62, pole_height - 0.2, 0), Vector3(0.3, 0.08, 0.26), Color("ffe6a0"), 1.0, "night_lamps")
-	glow(node, Vector3(0.62, 0.05 - pos.y, 0), Vector3(4.4, 0.02, 4.4), Color("ffd98a"), 0.14, "night_lamps")
+	glow(node, Vector3(0.62, pole_height - 0.2, 0), Vector3(0.3, 0.08, 0.26), Color("ffe6a0"), 1.0, group)
+	glow(node, Vector3(0.62, 0.05 - pos.y, 0), Vector3(4.4, 0.02, 4.4), Color("ffd98a"), 0.14, group)
 	return node
+
+static var window_material: StandardMaterial3D
+
+# Lit windows for a building, merged into one mesh (a single draw call).
+# boxes: [{"center": Vector3, "size": Vector3, "floors": int}], windows are
+# placed on the four walls of each box and a share of them (ratio) is lit.
+static func night_windows(parent: Node3D, boxes: Array, cols: int, seed_value: int, ratio: float = 0.6, color: Color = Color("ffd98a")) -> MeshInstance3D:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var count := 0
+	for box_index in range(boxes.size()):
+		var spec: Dictionary = boxes[box_index]
+		var center: Vector3 = spec.center
+		var size_value: Vector3 = spec.size
+		var floors: int = int(spec.floors)
+		for face in range(4):
+			var along_x := face < 2
+			var span := size_value.x if along_x else size_value.z
+			var depth := size_value.z if along_x else size_value.x
+			var sign_value := 1.0 if face % 2 == 0 else -1.0
+			var wall_cols := maxi(1, cols if span > 3.0 else 1)
+			for floor_index in range(floors):
+				var y := center.y - size_value.y * 0.5 + (float(floor_index) + 0.5) * size_value.y / float(floors)
+				for column in range(wall_cols):
+					if absi(hash("%d:%d:%d:%d:%d" % [seed_value, box_index, face, floor_index, column])) % 100 >= int(ratio * 100.0):
+						continue
+					var u := -span * 0.5 + (float(column) + 0.5) * span / float(wall_cols)
+					var half_w := span / float(wall_cols) * 0.22
+					var half_h := size_value.y / float(floors) * 0.26
+					var offset := depth * 0.5 + 0.04
+					var points: Array[Vector3] = []
+					for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+						if along_x:
+							points.append(Vector3(center.x + u + corner.x * half_w, y + corner.y * half_h, center.z + sign_value * offset))
+						else:
+							points.append(Vector3(center.x + sign_value * offset, y + corner.y * half_h, center.z + u + corner.x * half_w))
+					for index in [0, 1, 2, 0, 2, 3]:
+						surface.add_vertex(points[index])
+					count += 1
+	if count == 0:
+		return null
+	if window_material == null:
+		window_material = StandardMaterial3D.new()
+		window_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		window_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		window_material.albedo_color = color
+		window_material.emission_enabled = true
+		window_material.emission = color
+		window_material.emission_energy_multiplier = 1.3
+	var item := MeshInstance3D.new()
+	item.mesh = surface.commit()
+	item.material_override = window_material
+	item.name = "NightWindows"
+	item.set_meta("dynamic", true)
+	item.add_to_group("night_glow")
+	item.visible = night_on
+	item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(item)
+	return item
 
 static func fence(parent: Node3D, pos: Vector3, length: float, angle: float = 0) -> void:
 	var node := Node3D.new()

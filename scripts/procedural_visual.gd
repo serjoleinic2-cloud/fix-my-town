@@ -47,7 +47,7 @@ func _ready() -> void:
 		farm_building(visual_type)
 	elif visual_type == "street_lamp":
 		Art.box(self, Vector3(0, 0.06, 0), Vector3(2.0, 0.12, 2.0), Color("879d66"))
-		Art.lamp(self, Vector3.ZERO, 5.4)
+		Art.lamp(self, Vector3.ZERO, 5.4, 0.0, "night_lamps")
 	elif visual_type in ["wind_turbine", "solar_panel", "power_plant", "battery", "fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"]:
 		energy_leisure_building(visual_type)
 	elif visual_type == "city_hall":
@@ -119,9 +119,14 @@ func _ready() -> void:
 			jet.rotation.x = cos(angle) * 0.45
 		Art.cylinder(self, Vector3(1.45, 0.06, 0), 0.48, 0.1, Color("776d58"))
 	Art.batch(self)
-	set_process(visual_type == "police_station")
+	if visual_type == "police_station":
+		set_process(true)
 
 func _process(delta: float) -> void:
+	if not farm_animals.is_empty():
+		animate_farm_animals(delta)
+	if mill_blades != null:
+		mill_blades.rotation.z += delta * 0.9
 	if police_helicopter == null or helicopter_rotor == null:
 		return
 	helicopter_rotor.rotation.y += delta * 16.0
@@ -325,6 +330,7 @@ func supermarket() -> void:
 	Art.box(self, Vector3(0, 1.65, -0.8), Vector3(7.2, 3.1, 5.5), Color("e2ded2"))
 	Art.box(self, Vector3(0, 3.35, -0.8), Vector3(7.7, 0.35, 5.9), Color("4b7880"))
 	Art.box(self, Vector3(0, 2.9, 2.02), Vector3(6.9, 0.72, 0.16), Color("e4aa55"))
+	Art.night_windows(self, [{"center": Vector3(0, 1.65, -0.8), "size": Vector3(7.2, 3.1, 5.5), "floors": 1}], 4, 7, 0.9)
 	for x in [-2.6, -1.35, 1.35, 2.6]:
 		Art.box(self, Vector3(x, 1.35, 2.04), Vector3(1.12, 2.0, 0.1), Color("65969c"))
 	Art.box(self, Vector3(0, 1.15, 2.12), Vector3(1.75, 2.3, 0.13), Color("8fc5c7"))
@@ -347,6 +353,8 @@ func service_building_shell(wall: Color, roof: Color, foundation: Color) -> void
 	Art.box(self, Vector3(2.7, 1.8, -1.7), Vector3(1.8, 3.6, 4.0), wall)
 	Art.box(self, Vector3(-0.9, 3.7, -0.7), Vector3(5.65, 0.3, 6.25), roof)
 	Art.box(self, Vector3(2.7, 3.7, -1.7), Vector3(2.05, 0.3, 4.25), roof)
+	Art.night_windows(self, [{"center": Vector3(-0.9, 1.8, -0.7), "size": Vector3(5.4, 3.6, 6.0), "floors": 1}, {"center": Vector3(2.7, 1.8, -1.7), "size": Vector3(1.8, 3.6, 4.0), "floors": 1}], 3, 5, 0.9)
+	Art.glow(self, Vector3(0.6, 0.04, 3.4), Vector3(5.0, 0.02, 2.2), Color("ffd98a"), 0.16)
 	var corner := Node3D.new()
 	corner.name = "ServiceVehicleCornerCutout"
 	corner.set_meta("vehicle_court_open", true)
@@ -869,6 +877,7 @@ func city_hall() -> void:
 	Art.box(self, Vector3(3.18, 2.55, -0.68), Vector3(1.25, 4.15, 5.15), Color("d7d2c3"))
 	# Deep blue rooflines distinguish the civic building from ordinary houses.
 	Art.box(self, Vector3(0, 5.62, -0.52), Vector3(5.65, 0.34, 6.15), Color("455f78"))
+	Art.night_windows(self, [{"center": Vector3(0, 2.98, -0.55), "size": Vector3(5.15, 5.05, 5.65), "floors": 3}, {"center": Vector3(-3.18, 2.55, -0.68), "size": Vector3(1.25, 4.15, 5.15), "floors": 2}, {"center": Vector3(3.18, 2.55, -0.68), "size": Vector3(1.25, 4.15, 5.15), "floors": 2}], 4, 3, 0.7)
 	Art.box(self, Vector3(-3.18, 4.72, -0.68), Vector3(1.55, 0.28, 5.45), Color("637b8c"))
 	Art.box(self, Vector3(3.18, 4.72, -0.68), Vector3(1.55, 0.28, 5.45), Color("637b8c"))
 	# Grand portico, repeated stone columns, and a broad public staircase.
@@ -1060,6 +1069,11 @@ func business_tower() -> void:
 		for side in [-1.0, 1.0]:
 			Art.box(self, Vector3(side * 5.15 * taper, y, 0), Vector3(0.12, 0.85, 9.8 * taper), Color("c9e3df"))
 	Art.box(self, Vector3(0, 15.4, 0), Vector3(5.8, 1.2, 5.8), Color("37566c"))
+	var tower_tiers: Array = []
+	for floor_index in range(12):
+		var tier_taper := 1.0 - float(floor_index) * 0.018
+		tower_tiers.append({"center": Vector3(0, 1.25 + floor_index * 1.16, 0), "size": Vector3(10.2 * tier_taper, 1.08, 10.2 * tier_taper), "floors": 1})
+	Art.night_windows(self, tower_tiers, 4, 11, 0.5)
 	for x in [-7.0, 7.0]:
 		for z in [-7.0, 7.0]:
 			Art.tree(self, Vector3(x, 0.1, z), 0.42, false, absi(roundi(x * 13 + z)))
@@ -1245,12 +1259,14 @@ func energy_leisure_building(kind: String) -> void:
 			Art.box(self, Vector3(0, 3.7, 0), Vector3(7.2, 0.4, 6.0), Color("4a5d57"))
 			Art.box(self, Vector3(0, 1.8, 2.82), Vector3(5.6, 1.8, 0.1), Color("bfe3e8"))
 			Art.sign_text(self, Vector3(0, 3.0, 2.95), "FIT", 48)
+			Art.night_windows(self, [{"center": Vector3(0, 1.8, 0), "size": Vector3(6.8, 3.4, 5.6), "floors": 1}], 4, 21, 0.9)
 		"pizzeria":
 			Art.box(self, Vector3(0, 1.7, 0), Vector3(6.0, 3.2, 5.2), Color("d96c4a"))
 			Art.box(self, Vector3(0, 3.5, 0), Vector3(6.4, 0.4, 5.6), Color("5a3b30"))
 			Art.box(self, Vector3(0, 1.4, 2.7), Vector3(4.2, 1.6, 0.1), Color("f6e6b8"))
 			Art.cylinder(self, Vector3(2.2, 4.2, -1.0), 0.45, 1.6, Color("7a4a3a"))
 			Art.sign_text(self, Vector3(0, 2.8, 2.85), "PIZZA", 44)
+			Art.night_windows(self, [{"center": Vector3(0, 1.7, 0), "size": Vector3(6.0, 3.2, 5.2), "floors": 1}], 3, 22, 0.9)
 		"theatre":
 			Art.box(self, Vector3(0, 2.0, 0), Vector3(7.4, 3.8, 6.2), Color("d8cdb8"))
 			Art.box(self, Vector3(0, 4.1, 0), Vector3(7.9, 0.5, 6.7), Color("8c3a45"))
@@ -1258,6 +1274,7 @@ func energy_leisure_building(kind: String) -> void:
 				Art.cylinder(self, Vector3(x, 1.9, 3.3), 0.3, 3.6, Color("f1ebdc"))
 			Art.box(self, Vector3(0, 4.6, 3.3), Vector3(7.0, 0.5, 0.8), Color("8c3a45"))
 			Art.sign_text(self, Vector3(0, 4.9, 3.75), "ТЕАТР", 44)
+			Art.night_windows(self, [{"center": Vector3(0, 2.0, 0), "size": Vector3(7.4, 3.8, 6.2), "floors": 2}], 4, 23, 0.85)
 		"aquapark":
 			Art.box(self, Vector3(-1.4, 0.25, 1.0), Vector3(5.2, 0.3, 4.2), Color("5ec0d8"))
 			Art.box(self, Vector3(2.8, 3.0, -1.6), Vector3(1.6, 5.8, 1.6), Color("e8c34e"))
@@ -1275,29 +1292,205 @@ func energy_leisure_building(kind: String) -> void:
 			Art.box(self, Vector3(2.8, 1.5, 1.4), Vector3(2.6, 2.6, 2.6), Color("9b59b6"))
 			Art.box(self, Vector3(2.8, 3.2, 1.4), Vector3(3.0, 0.5, 3.0), Color("f2c14e"))
 
+var farm_animals: Array = []
+var mill_blades: Node3D
+
+func farm_roof(center: Vector3, width: float, depth: float, rise: float, color: Color) -> void:
+	# Gabled roof along X: two slopes plus triangular gable ends.
+	var hw := width * 0.5 + 0.3
+	var hd := depth * 0.5 + 0.3
+	var a := center + Vector3(-hw, 0, -hd)
+	var b := center + Vector3(hw, 0, -hd)
+	var c := center + Vector3(hw, 0, hd)
+	var d := center + Vector3(-hw, 0, hd)
+	var r1 := center + Vector3(-hw, rise, 0)
+	var r2 := center + Vector3(hw, rise, 0)
+	Art.triangles(self, PackedVector3Array([a, b, r2, a, r2, r1, d, r1, r2, d, r2, c, a, r1, d, b, c, r2]), color)
+	Art.triangles(self, PackedVector3Array([a, r1, d, r2, c, b, a, d, r1, b, r2, c]), color.darkened(0.12))
+
+func farm_window(pos: Vector3, size_value := Vector3(0.9, 0.9, 0.1)) -> void:
+	Art.box(self, pos, size_value, Color("f3ead2"))
+	Art.box(self, pos + Vector3(0, 0, size_value.z * 0.5), Vector3(size_value.x - 0.2, size_value.y - 0.2, 0.05), Color("7ea6c4"))
+
+func animal_texture(kind: String) -> ImageTexture:
+	var img := Image.create(16, 12, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var body := Color("f4f1ea")
+	var spot := Color("2f2b28")
+	var head := Color("3a3330")
+	match kind:
+		"cow":
+			body = Color("f4f1ea"); spot = Color("3a3330"); head = Color("f0d9d0")
+		"sheep":
+			body = Color("fbfaf5"); spot = Color("e6e1d4"); head = Color("3a3330")
+		"chicken":
+			body = Color("f7f0e0"); spot = Color("d9482f"); head = Color("f7f0e0")
+	if kind == "chicken":
+		for x in range(4, 11):
+			for y in range(4, 9):
+				img.set_pixel(x, y, body)
+		for x in range(10, 13):
+			for y in range(2, 6):
+				img.set_pixel(x, y, head)
+		img.set_pixel(13, 4, Color("e8a33a"))
+		img.set_pixel(11, 1, spot)
+		img.set_pixel(12, 1, spot)
+		img.set_pixel(5, 9, Color("e8a33a")); img.set_pixel(8, 9, Color("e8a33a"))
+		img.set_pixel(3, 4, body); img.set_pixel(3, 5, body)
+	else:
+		for x in range(2, 12):
+			for y in range(3, 9):
+				img.set_pixel(x, y, body)
+		for x in range(11, 15):
+			for y in range(2, 7):
+				img.set_pixel(x, y, head)
+		img.set_pixel(13, 3, Color("101010"))
+		for x in [3, 5, 9, 11]:
+			img.set_pixel(x, 9, Color("4a3f38")); img.set_pixel(x, 10, Color("4a3f38"))
+		for p in [Vector2i(4, 4), Vector2i(5, 4), Vector2i(8, 6), Vector2i(9, 6), Vector2i(9, 5), Vector2i(6, 7)]:
+			img.set_pixelv(p, spot)
+	return ImageTexture.create_from_image(img)
+
+func add_farm_animal(kind: String, home: Vector3, area: float, seed_value: int) -> void:
+	var sprite := Sprite3D.new()
+	sprite.texture = animal_texture(kind)
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.pixel_size = 0.07 if kind == "chicken" else 0.085
+	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	sprite.shaded = true
+	sprite.position = home + Vector3(0, 0.55, 0)
+	add_child(sprite)
+	farm_animals.append({"node": sprite, "home": home, "area": area, "target": home, "wait": float(seed_value % 5) * 0.4, "phase": float(seed_value), "hop": 0.0, "kind": kind})
+
+func animate_farm_animals(delta: float) -> void:
+	for animal in farm_animals:
+		var node: Sprite3D = animal.node
+		var pos := node.position
+		animal.phase += delta
+		if animal.wait > 0.0:
+			animal.wait -= delta
+			# Grazing: a slow head-bob in place.
+			node.position.y = 0.55 + absf(sin(animal.phase * 2.4)) * 0.03
+			if animal.wait <= 0.0:
+				var spread: float = animal.area
+				animal.target = animal.home + Vector3(randf_range(-spread, spread), 0, randf_range(-spread, spread))
+			continue
+		var flat := Vector3(animal.target.x - pos.x, 0, animal.target.z - pos.z)
+		if flat.length() < 0.12:
+			animal.wait = randf_range(1.5, 4.5)
+			continue
+		var speed := 1.1 if animal.kind == "chicken" else 0.6
+		node.position += flat.normalized() * speed * delta
+		node.position.y = 0.55 + absf(sin(animal.phase * (11.0 if animal.kind == "chicken" else 7.0))) * (0.12 if animal.kind == "chicken" else 0.06)
+		if absf(flat.x) > 0.02:
+			node.flip_h = flat.x < 0.0
+
 func farm_building(kind: String) -> void:
 	var soil := Color("9d875a") if kind in ["field", "pasture"] else Color("75945c")
 	Art.box(self, Vector3(0, 0.06, 0), Vector3(8.8, 0.12, 8.8), soil)
 	if kind == "field":
-		for x in [-3.2, -2.1, -1.0, 0.1, 1.2, 2.3, 3.4]:
-			Art.box(self, Vector3(x, 0.22, 0), Vector3(0.34, 0.32, 7.4), Color("c6aa48"))
+		# Furrows with green crop rows, a scarecrow and a haystack.
+		for i in range(7):
+			var x := -3.2 + i * 1.07
+			Art.box(self, Vector3(x, 0.14, 0), Vector3(0.7, 0.14, 7.4), Color("7a5a35"))
+			Art.box(self, Vector3(x, 0.34, 0), Vector3(0.36, 0.34, 7.2), Color("c6aa48") if i % 2 == 0 else Color("b8c14e"))
+			for z in range(-3, 4):
+				Art.sphere(self, Vector3(x, 0.52, z * 1.0), 0.2, Color("d8bb4f"))
+		Art.cylinder(self, Vector3(3.9, 0.9, 3.9), 0.06, 1.8, Color("6b4a2b"))
+		Art.box(self, Vector3(3.9, 1.5, 3.9), Vector3(1.1, 0.08, 0.08), Color("6b4a2b"))
+		Art.sphere(self, Vector3(3.9, 1.95, 3.9), 0.22, Color("e5c46a"))
+		Art.box(self, Vector3(3.9, 2.18, 3.9), Vector3(0.6, 0.06, 0.6), Color("8b6842"))
+		Art.sphere(self, Vector3(-3.9, 0.5, -3.9), 0.7, Color("e0c25a"))
 		return
 	if kind == "pasture":
 		for edge in [-4.0, 4.0]:
-			Art.box(self, Vector3(edge, 0.48, 0), Vector3(0.12, 0.8, 8.0), Color("8b6842"))
-			Art.box(self, Vector3(0, 0.48, edge), Vector3(8.0, 0.8, 0.12), Color("8b6842"))
-		for pos in [Vector3(-2, 0.45, -1.2), Vector3(1.6, 0.45, 1.5), Vector3(2.7, 0.45, -2.0)]:
-			Art.box(self, pos, Vector3(0.9, 0.65, 0.45), Color("eee7d5"))
+			for k in range(-4, 5):
+				Art.box(self, Vector3(edge, 0.55, k * 0.95), Vector3(0.14, 1.0, 0.14), Color("6e4d2e"))
+				Art.box(self, Vector3(k * 0.95, 0.55, edge), Vector3(0.14, 1.0, 0.14), Color("6e4d2e"))
+			Art.box(self, Vector3(edge, 0.85, 0), Vector3(0.08, 0.1, 8.0), Color("8b6842"))
+			Art.box(self, Vector3(edge, 0.5, 0), Vector3(0.08, 0.1, 8.0), Color("8b6842"))
+			Art.box(self, Vector3(0, 0.85, edge), Vector3(8.0, 0.1, 0.08), Color("8b6842"))
+			Art.box(self, Vector3(0, 0.5, edge), Vector3(8.0, 0.1, 0.08), Color("8b6842"))
+		Art.box(self, Vector3(0, 0.1, 0), Vector3(8.0, 0.1, 8.0), Color("7fae56"))
+		for tuft in [Vector3(-2.5, 0.2, 2.8), Vector3(2.9, 0.2, -2.6), Vector3(0.2, 0.2, -3.0)]:
+			Art.sphere(self, tuft, 0.35, Color("5f9140"))
+		Art.cylinder(self, Vector3(3.2, 0.3, 3.2), 0.8, 0.45, Color("6aa7c9"))
+		for k in range(4):
+			add_farm_animal("cow" if k < 2 else "sheep", Vector3(-2.0 + k * 1.3, 0, -1.5 + (k % 2) * 2.6), 2.2, k * 3 + 1)
+		add_farm_animal("chicken", Vector3(-2.8, 0, 2.6), 1.4, 7)
+		add_farm_animal("chicken", Vector3(2.6, 0, -2.8), 1.4, 11)
+		set_process(true)
 		return
 	var wall := Color("a94f3f") if kind in ["barn", "livestock_yard"] else (Color("d9a867") if kind == "bakery" else Color("d0c29e"))
 	var size := Vector3(6.8, 3.5, 5.8) if kind != "farm_warehouse" else Vector3(7.8, 3.2, 6.8)
-	Art.box(self, Vector3(0, size.y * 0.5 + 0.12, 0), size, wall)
-	Art.box(self, Vector3(0, size.y + 0.35, 0), Vector3(size.x + 0.5, 0.55, size.z + 0.5), Color("594f49"))
+	var roof_color := Color("594f49") if kind != "bakery" else Color("b0533a")
+	Art.box(self, Vector3(0, 0.2, 0), Vector3(size.x + 0.5, 0.2, size.z + 0.5), Color("8d8a80"))
+	Art.box(self, Vector3(0, size.y * 0.5 + 0.3, 0), size, wall)
+	farm_roof(Vector3(0, size.y + 0.3, 0), size.x, size.z, 1.8, roof_color)
 	Art.box(self, Vector3(0, 1.35, size.z * 0.5 + 0.03), Vector3(1.5, 2.4, 0.12), Color("5b4633"))
+	if kind in ["barn", "livestock_yard", "farm_warehouse"]:
+		# Big double door with white X braces, hay loft hatch.
+		Art.box(self, Vector3(0, 1.55, size.z * 0.5 + 0.08), Vector3(2.6, 2.7, 0.12), Color("7a3a2f"))
+		Art.box(self, Vector3(0, 1.55, size.z * 0.5 + 0.16), Vector3(0.12, 2.7, 0.06), Color("f3ead2"))
+		var brace := Art.box(self, Vector3(0, 1.55, size.z * 0.5 + 0.17), Vector3(0.1, 3.3, 0.05), Color("f3ead2"))
+		brace.rotation.z = 0.7
+		var brace2 := Art.box(self, Vector3(0, 1.55, size.z * 0.5 + 0.17), Vector3(0.1, 3.3, 0.05), Color("f3ead2"))
+		brace2.rotation.z = -0.7
+		Art.box(self, Vector3(0, size.y + 0.9, size.z * 0.5 - 0.1), Vector3(1.1, 1.1, 0.1), Color("3b2a22"))
+		farm_window(Vector3(-2.4, 2.1, size.z * 0.5 + 0.05))
+		farm_window(Vector3(2.4, 2.1, size.z * 0.5 + 0.05))
+		Art.box(self, Vector3(size.x * 0.5 + 0.1, 1.0, 0), Vector3(0.1, 1.2, 2.4), Color("f3ead2"))
+	if kind == "barn":
+		Art.cylinder(self, Vector3(size.x * 0.5 + 1.4, 3.0, -1.2), 0.9, 5.8, Color("c9ccd0"), 1.0, 16)
+		Art.sphere(self, Vector3(size.x * 0.5 + 1.4, 6.0, -1.2), 0.9, Color("b3b7bc"))
+	if kind == "livestock_yard":
+		for k in range(-2, 3):
+			Art.box(self, Vector3(k * 1.5, 0.5, size.z * 0.5 + 2.2), Vector3(0.12, 1.0, 0.12), Color("6e4d2e"))
+		Art.box(self, Vector3(0, 0.9, size.z * 0.5 + 2.2), Vector3(6.0, 0.1, 0.08), Color("8b6842"))
+		Art.box(self, Vector3(0, 0.5, size.z * 0.5 + 2.2), Vector3(6.0, 0.1, 0.08), Color("8b6842"))
+		Art.box(self, Vector3(-2.0, 0.35, size.z * 0.5 + 1.2), Vector3(1.8, 0.4, 0.6), Color("8b6842"))
+		add_farm_animal("cow", Vector3(-1.5, 0, size.z * 0.5 + 1.4), 0.9, 2)
+		add_farm_animal("sheep", Vector3(1.6, 0, size.z * 0.5 + 1.4), 0.9, 5)
+		add_farm_animal("chicken", Vector3(3.0, 0, size.z * 0.5 + 1.3), 0.7, 9)
+		set_process(true)
+	if kind == "farm_warehouse":
+		for k in range(3):
+			Art.box(self, Vector3(-2.4 + k * 0.95, 0.75, size.z * 0.5 + 0.9), Vector3(0.8, 0.8, 0.8), Color("c99b5a"))
+		Art.box(self, Vector3(-1.9, 1.5, size.z * 0.5 + 0.9), Vector3(0.8, 0.7, 0.8), Color("d6ab68"))
+		Art.cylinder(self, Vector3(3.0, 0.7, size.z * 0.5 + 0.9), 0.5, 0.9, Color("8aa5b8"))
 	if kind == "bakery":
-		Art.box(self, Vector3(-2.2, size.y + 1.9, -1.4), Vector3(1.0, 2.6, 1.0), Color("7a4a3a"))
+		var chimney := Vector3(-2.2, size.y + 1.9, -1.4)
+		Art.box(self, chimney, Vector3(1.0, 2.6, 1.0), Color("7a4a3a"))
+		Art.box(self, chimney + Vector3(0, 1.4, 0), Vector3(1.25, 0.2, 1.25), Color("5e3a2e"))
 		Art.box(self, Vector3(2.0, 1.9, size.z * 0.5 + 0.1), Vector3(2.2, 1.0, 0.15), Color("e9b96a"))
+		Art.box(self, Vector3(2.0, 1.2, size.z * 0.5 + 0.35), Vector3(2.4, 0.15, 0.7), Color("8b6842"))
+		for k in range(3):
+			Art.box(self, Vector3(1.3 + k * 0.7, 1.45, size.z * 0.5 + 0.35), Vector3(0.5, 0.25, 0.4), Color("d89a4a"))
+		var awning := Art.box(self, Vector3(0, 3.0, size.z * 0.5 + 0.6), Vector3(5.6, 0.12, 1.4), Color("d9534f"))
+		awning.rotation.x = 0.35
+		for k in range(-2, 3):
+			Art.box(self, Vector3(k * 1.12, 3.04, size.z * 0.5 + 0.62), Vector3(0.56, 0.13, 1.42), Color("fbf3e6"))
+		Art.glow(self, Vector3(-2.4, 2.2, size.z * 0.5 + 0.12), Vector3(0.9, 0.9, 0.06), Color("ffcf7a"))
+		farm_window(Vector3(-2.4, 2.2, size.z * 0.5 + 0.05))
 	if kind == "mill":
 		Art.cylinder(self, Vector3(0, 5.0, 0), 1.05, 3.0, Color("d8cfb2"))
-		Art.box(self, Vector3(0, 5.0, 3.15), Vector3(0.38, 4.6, 0.12), Color("eee5cb"))
-		Art.box(self, Vector3(0, 5.0, 3.15), Vector3(4.6, 0.38, 0.12), Color("eee5cb"))
+		mill_blades = Node3D.new()
+		mill_blades.position = Vector3(0, 5.2, size.z * 0.5 + 0.6)
+		add_child(mill_blades)
+		for rot in [0.0, PI * 0.5]:
+			var blade := Art.box(mill_blades, Vector3.ZERO, Vector3(0.38, 5.0, 0.12), Color("eee5cb"))
+			blade.rotation.z = rot
+			blade.set_meta("dynamic", true)
+			var slat := Art.box(mill_blades, Vector3.ZERO, Vector3(1.2, 4.4, 0.06), Color("f6efd9"))
+			slat.rotation.z = rot
+			slat.position = Vector3(0, 0, 0.06)
+			slat.set_meta("dynamic", true)
+		var hub := Art.sphere(mill_blades, Vector3(0, 0, 0.1), 0.3, Color("5b4633"))
+		hub.set_meta("dynamic", true)
+		for k in range(3):
+			Art.box(self, Vector3(-2.6 + k * 0.75, 0.6, size.z * 0.5 + 0.8), Vector3(0.6, 0.9, 0.6), Color("f1ead4"))
+		farm_window(Vector3(2.4, 2.1, size.z * 0.5 + 0.05))
+		set_process(true)
+	if kind in ["barn", "mill", "bakery", "farm_warehouse", "livestock_yard"]:
+		Art.night_windows(self, [{"center": Vector3(0, size.y * 0.5 + 0.3, 0), "size": size, "floors": 2}], 3, 41, 0.35)
+

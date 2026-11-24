@@ -1,12 +1,12 @@
 extends Node3D
 
 const GameObjectScene = preload("res://scenes/objects/game_object.tscn")
+const Art = preload("res://scripts/art.gd")
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const AudioManager = preload("res://scripts/audio_manager.gd")
 const Simulation = preload("res://scripts/simulation.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
 const TerritoryGrid = preload("res://scripts/territory_grid.gd")
-const Art = preload("res://scripts/art.gd")
 const GroundRoadVisuals = preload("res://scripts/ground_road_visuals.gd")
 const CitizenPool = preload("res://scripts/citizen_pool.gd")
 const WorldStatusIndicators = preload("res://scripts/world_status_indicators.gd")
@@ -5728,6 +5728,14 @@ func apply_day_night() -> void:
 	env.ambient_light_energy = lerpf(0.28, 0.8, light)
 	env.ambient_light_color = Color("5a6c9a").lerp(Color("d9e4e2"), light)
 	env.background_color = Color("2c3a52").lerp(Color("8eaa69"), light)
+	var night_now: bool = game.is_night()
+	var lamps_now: bool = night_now and game.lamp_lit()
+	if night_now != Art.night_on or lamps_now != Art.lamps_on:
+		Art.night_on = night_now
+		Art.lamps_on = lamps_now
+		get_tree().call_group("night_glow", "set_visible", night_now)
+		get_tree().call_group("night_lamps", "set_visible", lamps_now)
+		get_tree().call_group("night_visuals", "set_night", night_now)
 	var hour: float = game.game_hour()
 	var text_value := "%02d:%02d" % [int(hour), int((hour - floorf(hour)) * 60.0)]
 	text_value += (tr_text("  ·  ночь", "  ·  night") if game.is_night() else tr_text("  ·  день", "  ·  day"))

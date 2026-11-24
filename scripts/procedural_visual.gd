@@ -18,6 +18,8 @@ var delivery_cargo_height: float = 0.0
 var delivery_cab_height: float = 0.0
 
 func _ready() -> void:
+	add_to_group("night_visuals")
+	call_deferred("set_night", Art.night_on)
 	var seed_value := absi(str(get_parent().get_parent().get("instance_id")).hash())
 	if visual_type == "house":
 		house(seed_value)
@@ -497,6 +499,9 @@ func add_vehicle_lights(half_width: float, front_z: float, y: float, rear_z: flo
 	for side in [-1.0, 1.0]:
 		Art.box(self, Vector3(side * half_width, y, front_z), Vector3(0.22, 0.14, 0.08), Color("fff1bf"))
 		Art.box(self, Vector3(side * half_width, y * 0.78, rear_z), Vector3(0.18, 0.12, 0.08), Color("e45e4f"))
+		Art.glow(self, Vector3(side * half_width, y, front_z + 0.06), Vector3(0.26, 0.16, 0.08), Color("fff3c4"))
+		Art.glow(self, Vector3(side * half_width, y * 0.78, rear_z - 0.05), Vector3(0.2, 0.12, 0.06), Color("ff4a3a"))
+	Art.glow(self, Vector3(0, 0.03, front_z + 2.2), Vector3(half_width * 2.6, 0.02, 3.6), Color("fff0b8"), 0.16)
 
 func parked_service_vehicle(kind: String, slot: int = 0) -> void:
 	# The visible vehicle uses the exact road model so its parked and dispatched
@@ -820,7 +825,20 @@ func construction_vehicle() -> void:
 		beacon.set_meta("dynamic", true)
 		beacon.material_override = Art.material(Color("ff8c24"))
 
+var serviced_state: bool = true
+var night_state: bool = false
+
+# Called by main.gd when day turns to night: serviced homes light their windows.
+func set_night(value: bool) -> void:
+	night_state = value
+	set_serviced(serviced_state)
+
 func set_serviced(value: bool) -> void:
+	serviced_state = value
+	if night_state and value and visual_type == "house":
+		for item: MeshInstance3D in windows:
+			item.material_override = Art.glow_material(Color("ffd98a"))
+		return
 	for item: MeshInstance3D in windows:
 		item.material_override = Art.material(Color("7fbbb4") if value else Color("6a8790")) if visual_type != "traffic_signal" else Art.material(Color("6bad67") if value else Color("ef9b43"))
 

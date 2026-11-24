@@ -34,6 +34,7 @@ Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--scr
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/road_demolition_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/ambulance_dispatch_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/farm_production_test.gd')
+Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/night_glow_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/day_night_power_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/neglect_mood_test.gd')
 Invoke-GodotCheck -GodotArguments @('--headless', '--path', $projectRoot, '--script', 'res://tests/farm_guidance_test.gd')

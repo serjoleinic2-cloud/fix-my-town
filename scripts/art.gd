@@ -4,6 +4,34 @@ static var materials: Dictionary = {}
 static var cube: BoxMesh
 static var crown_mesh: ArrayMesh
 static var cylinders: Dictionary = {}
+# Night lighting: glow parts are hidden by day and switched on by main.gd.
+static var night_on: bool = false
+static var lamps_on: bool = false
+static var glow_materials: Dictionary = {}
+
+static func glow_material(color: Color, alpha: float = 1.0) -> StandardMaterial3D:
+	var key := color.to_html() + ":" + str(alpha)
+	if not glow_materials.has(key):
+		var value := StandardMaterial3D.new()
+		value.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		value.albedo_color = Color(color.r, color.g, color.b, alpha)
+		value.emission_enabled = true
+		value.emission = color
+		value.emission_energy_multiplier = 1.4
+		if alpha < 1.0:
+			value.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		glow_materials[key] = value
+	return glow_materials[key]
+
+# A glowing part. group "night_glow" follows the night, "night_lamps" also needs power.
+static func glow(parent: Node3D, pos: Vector3, size_value: Vector3, color: Color, alpha: float = 1.0, group: String = "night_glow") -> MeshInstance3D:
+	var item := box(parent, pos, size_value, color)
+	item.material_override = glow_material(color, alpha)
+	item.set_meta("dynamic", true)
+	item.add_to_group(group)
+	item.visible = lamps_on if group == "night_lamps" else night_on
+	item.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return item
 
 static func material(color: Color) -> StandardMaterial3D:
 	var key := color.to_html()
@@ -135,6 +163,8 @@ static func lamp(parent: Node3D, pos: Vector3, pole_height: float = 6.2, angle: 
 	cylinder(node, Vector3(0, pole_height * 0.5, 0), 0.065, pole_height, Color("56646a"), 1, 7)
 	box(node, Vector3(0.35, pole_height, 0), Vector3(0.72, 0.13, 0.16), Color("58666c"))
 	box(node, Vector3(0.62, pole_height - 0.08, 0), Vector3(0.34, 0.16, 0.3), Color("edf0dc"))
+	glow(node, Vector3(0.62, pole_height - 0.2, 0), Vector3(0.3, 0.08, 0.26), Color("ffe6a0"), 1.0, "night_lamps")
+	glow(node, Vector3(0.62, 0.05 - pos.y, 0), Vector3(4.4, 0.02, 4.4), Color("ffd98a"), 0.14, "night_lamps")
 	return node
 
 static func fence(parent: Node3D, pos: Vector3, length: float, angle: float = 0) -> void:

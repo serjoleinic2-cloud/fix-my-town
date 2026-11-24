@@ -5312,21 +5312,20 @@ func step_logistics_backoff(vehicle: Dictionary, delta: float, traffic_controlle
 const AMBULANCE_SPEED := 7.0
 const AMBULANCE_TREAT_SECONDS := 5.0
 
-func hospital_world_position() -> Vector3:
-	for entry: Dictionary in game.territory.buildings:
-		if str(entry.get("type_id", "")) == "hospital":
-			return game.territory.building_center(entry)
-	return Vector3.INF
+func hospital_world_position(target: Vector3 = Vector3.ZERO) -> Vector3:
+	return game.nearest_station_center(["hospital"], target)
 
 # The ambulance drives from the hospital to the sick home; treatment starts on
 # arrival and the problem is resolved only after it, then the crew drives back.
 func start_ambulance(problem_id: String) -> bool:
 	var incident: Dictionary = game.incidents.get(problem_id, {})
-	var station := hospital_world_position()
-	if incident.is_empty() or station == Vector3.INF:
+	if incident.is_empty():
 		return false
 	var home_id := str(incident.get("target_id", ""))
 	var home_position: Vector3 = game.building_world_for_id(home_id)
+	var station := hospital_world_position(home_position)
+	if station == Vector3.INF:
+		return false
 	var path: Array[Vector2i] = game.territory.road_path(game.territory.nearest_road(station), game.territory.nearest_road(home_position))
 	if path.is_empty():
 		return false
@@ -5429,12 +5428,8 @@ func backoff_state_key() -> String:
 		jam = "1" if road_jam_here(selected_vehicle_world_position()) else "0"
 	return manual_backoff_reason(selected_vehicle_id) + "|" + jam + "|" + str(road_police.is_empty())
 
-func road_police_station_position() -> Vector3:
-	for type_id in ["police_station", "depot"]:
-		for entry: Dictionary in game.territory.buildings:
-			if entry.type_id == type_id:
-				return game.territory.building_center(entry)
-	return Vector3.INF
+func road_police_station_position(target: Vector3 = Vector3.ZERO) -> Vector3:
+	return game.nearest_station_center(["police_station", "depot"], target)
 
 func add_road_police_action() -> void:
 	var center := selected_vehicle_world_position()
@@ -5476,7 +5471,7 @@ func road_police_route(from_world: Vector3, to_world: Vector3) -> Array:
 func begin_road_police_return() -> bool:
 	if road_police.is_empty():
 		return false
-	var station := road_police_station_position()
+	var station := road_police_station_position(road_police.position)
 	if station == Vector3.INF:
 		return false
 	var route := road_police_route(road_police.position, station)
@@ -5488,7 +5483,7 @@ func begin_road_police_return() -> bool:
 	return true
 
 func start_road_police(target: Vector3) -> bool:
-	var station := road_police_station_position()
+	var station := road_police_station_position(target)
 	if station == Vector3.INF:
 		return false
 	var route := road_police_route(station, target)

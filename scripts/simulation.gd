@@ -2331,9 +2331,8 @@ func dispatch_fire(identifier: String = "") -> bool:
 	var selected_station: Dictionary = {}
 	var engine_id := ""
 	var selected_slot := 0
-	for station in territory.buildings:
-		if station.type_id != "fire_station":
-			continue
+	# The closest station with a free engine answers the call.
+	for station in stations_by_distance("fire_station", building_world_for_id(identifier)):
 		for slot in range(2):
 			var candidate_id := "%s_engine_%d" % [station.instance_id, slot + 1]
 			if not used.has(candidate_id):
@@ -2480,25 +2479,36 @@ func begin_secondary_fire_return(identifier: String) -> void:
 	assignment.phase = "return"
 	fire_jobs[identifier] = assignment
 
+# Service buildings of one type, closest to `point` first.
+func stations_by_distance(type_id: String, point: Vector3) -> Array:
+	var result: Array = []
+	for entry: Dictionary in territory.buildings:
+		if str(entry.get("type_id", "")) == type_id:
+			result.append(entry)
+	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return territory.building_center(a).distance_squared_to(point) < territory.building_center(b).distance_squared_to(point))
+	return result
+
+func nearest_station_center(types: Array, point: Vector3) -> Vector3:
+	for type_id: String in types:
+		var ordered := stations_by_distance(type_id, point)
+		if not ordered.is_empty():
+			return territory.building_center(ordered[0])
+	return Vector3.INF
+
 func dispatch_police(incident_id: String) -> bool:
 	var is_riot := incidents.has(incident_id) and str(incidents[incident_id].get("type", "")) == "strike" and str(incidents[incident_id].get("state", "new")) != "resolved"
 	if (not is_riot and (not jam_cleared.has(incident_id) or bool(jam_cleared[incident_id]))) or not police_job.is_empty():
 		return false
+	var target := building_world_for_id(str(incidents[incident_id].get("target_id", ""))) if is_riot else building_world_for_id(incident_id)
 	var station: Dictionary = {}
-	for entry: Dictionary in territory.buildings:
-		if entry.type_id == "police_station":
-			station = entry.duplicate(true)
-			station.position = territory.building_center(entry)
+	for type_id in ["police_station", "depot"]:
+		var ordered := stations_by_distance(type_id, target)
+		if not ordered.is_empty():
+			station = ordered[0].duplicate(true)
+			station.position = territory.building_center(station)
 			break
 	if station.is_empty():
-		for entry: Dictionary in territory.buildings:
-			if entry.type_id == "depot":
-				station = entry.duplicate(true)
-				station.position = territory.building_center(entry)
-				break
-	if station.is_empty():
 		return false
-	var target := building_world_for_id(str(incidents[incident_id].get("target_id", ""))) if is_riot else building_world_for_id(incident_id)
 	var planned := fire_route_from_station(station.position, target)
 	if planned.is_empty():
 		return false

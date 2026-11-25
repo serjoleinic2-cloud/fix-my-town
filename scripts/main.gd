@@ -2056,6 +2056,22 @@ func select_territory_cell(cell: Vector2i) -> void:
 	territory_cell = cell
 	refresh()
 	log_territory_probe()
+	reveal_cell_above_sheet(cell, placement_type)
+
+# The placement card covers the lower part of the screen. If the chosen lot ends
+# up underneath it, slide the camera until the whole lot is visible above it.
+func reveal_cell_above_sheet(cell: Vector2i, type_id: String) -> void:
+	await get_tree().process_frame
+	if selection_kind != "territory" or sheet == null or not sheet.visible or territory_cell != cell:
+		return
+	var footprint := Vector2i.ONE if type_id in ["clear", "road", ""] else Catalog.footprint_cells(type_id)
+	var limit: float = sheet.position.y - 70.0
+	for step in range(14):
+		var corner: Vector3 = game.territory.cell_world(cell.x + footprint.x, cell.y + footprint.y)
+		var ui_point: Vector2 = camera.unproject_position(corner) * viewport_container.stretch_shrink / render_scale
+		if ui_point.y <= limit:
+			return
+		set_camera_focus(focus_point + Vector3(1, 0, 1).normalized() * 3.0)
 
 func snap_placement_anchor(cell: Vector2i, type_id: String) -> Vector2i:
 	var footprint := Catalog.footprint_cells(type_id)

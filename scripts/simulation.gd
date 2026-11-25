@@ -1948,9 +1948,42 @@ func demolish_grid_building(identifier: String) -> bool:
 				territory.cells[entry.row + dy][entry.col + dx] = "free"
 	territory.buildings.erase(entry)
 	territory.invalidate_routing_cache()
+	reclaim_unused_roads(entry)
 	housing_neglect.erase(identifier)
 	save_game()
 	return true
+
+# Every building is built with a one-cell road ring. When the building is
+# demolished, ring cells that nothing else needs are returned to free ground so
+# the freed plot can take any building again instead of staying cut up by
+# leftover asphalt. Roads that still serve a neighbour, a bus stop or a moving
+# vehicle stay.
+func reclaim_unused_roads(entry: Dictionary) -> int:
+	var removed := 0
+	if not territory.strict_building_frontier:
+		return 0
+	for row in range(int(entry.row) - 1, int(entry.row) + int(entry.height) + 1):
+		for col in range(int(entry.col) - 1, int(entry.col) + int(entry.width) + 1):
+			if not territory.in_bounds(col, row) or territory.state_at(col, row) != "road":
+				continue
+			if road_cell_serves_building(col, row):
+				continue
+			if not can_demolish_road(col, row):
+				continue
+			if territory.road_removal_blocker(col, row, transit).is_empty():
+				territory.cells[row][col] = "free"
+				removed += 1
+	if removed > 0:
+		territory.invalidate_routing_cache()
+	return removed
+
+func road_cell_serves_building(col: int, row: int) -> bool:
+	for other: Dictionary in territory.buildings:
+		if other.type_id in ["lawn", "flower_bed", "street_tree", "bush", "street_lamp"]:
+			continue
+		if col >= int(other.col) - 1 and col <= int(other.col) + int(other.width) and row >= int(other.row) - 1 and row <= int(other.row) + int(other.height):
+			return true
+	return false
 
 func can_demolish_road(col: int, row: int) -> bool:
 	if not territory.can_remove_road(col, row, transit):

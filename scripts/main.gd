@@ -3016,6 +3016,45 @@ func campaign_stage_upgrade_text(stage: int) -> String:
 		return tr_text("Открываются следующие уровни улучшения существующих зданий.", "The next upgrade levels for existing buildings become available.")
 	return tr_text("Базовое развитие жилых и городских объектов.", "Basic residential and civic development.")
 
+func stage_new_buildings(stage: int) -> Array:
+	var result: Array = []
+	if stage < 2:
+		return result
+	for type_id in Catalog.UNLOCK_LEVELS.keys():
+		if int(Catalog.UNLOCK_LEVELS[type_id]) == stage and type_id not in ["lawn", "flower_bed", "street_tree", "bush"]:
+			result.append(str(type_id))
+	return result
+
+# One card per newly unlocked building: picture, what it does and what it costs.
+func add_new_building_cards(content: VBoxContainer, types: Array) -> void:
+	var banner := PanelContainer.new()
+	banner.name = "NewBuildingsBanner"
+	banner.add_theme_stylebox_override("panel", style(Color("f2b84b"), 12))
+	content.add_child(banner)
+	var banner_label := label(22, banner, tr_text("✨ НОВОЕ В ГОРОДЕ!", "✨ NEW IN TOWN!"), true)
+	banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner_label.add_theme_color_override("font_color", Color("4a2f05"))
+	for type_id in types:
+		var tile := card(content, Color("eef6ee"))
+		tile.name = "NewBuilding_" + str(type_id)
+		tile.add_theme_stylebox_override("panel", style(Color("eef6ee"), 12, Color("9cc7a5")))
+		var row := hbox(tile)
+		var picture := TextureRect.new()
+		picture.texture = load(catalog_icon(str(type_id)))
+		picture.custom_minimum_size = Vector2(64, 64)
+		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(picture)
+		var text_column := VBoxContainer.new()
+		text_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(text_column)
+		label(21, text_column, "%s · %d" % [t(str(type_id)), catalog_cost(str(type_id))], true)
+		var explain: Dictionary = BUILDING_EXPLAIN.get(str(type_id), {})
+		var does: Array = explain.get("does", [])
+		if does.size() == 2:
+			var line := label(16, text_column, tr_text(str(does[0]), str(does[1])))
+			line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
 func close_campaign_intro() -> void:
 	game.acknowledge_campaign_intro()
 	if campaign_intro_dialog != null and is_instance_valid(campaign_intro_dialog):
@@ -3056,10 +3095,12 @@ func update_campaign_intro() -> void:
 	panel.add_child(content)
 	var heading := label(27, content, tr_text("Этап %d · %s", "Stage %d · %s") % [game.campaign_stage, game.campaign_stage_title()], true)
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var unlocks := label(19, content, tr_text("Откроется: %s", "Unlocks: %s") % campaign_stage_unlock_text(game.campaign_stage), true)
-	unlocks.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var buildings_text := label(18, content, tr_text("Доступные здания: %s", "Available buildings: %s") % campaign_stage_unlock_text(game.campaign_stage))
-	buildings_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var fresh := stage_new_buildings(game.campaign_stage)
+	if fresh.is_empty():
+		var unlocks := label(19, content, tr_text("Откроется: %s", "Unlocks: %s") % campaign_stage_unlock_text(game.campaign_stage), true)
+		unlocks.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	else:
+		add_new_building_cards(content, fresh)
 	var upgrades := label(17, content, campaign_stage_upgrade_text(game.campaign_stage))
 	upgrades.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var goal := label(20, content, tr_text("Главная цель: %s", "Main goal: %s") % campaign_goal_text(game.campaign_stage), true)
@@ -3067,6 +3108,15 @@ func update_campaign_intro() -> void:
 	var start := flat_button(content, tr_text("Начать развитие", "Start development"), close_campaign_intro, true)
 	start.name = "StartCampaignStage"
 	start.custom_minimum_size.y = 68
+	# Pop-in: the announcement should feel like an event, not a dialog.
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.86, 0.86)
+	panel.resized.connect(func(): panel.pivot_offset = panel.size * 0.5)
+	var pop := create_tween().set_parallel(true)
+	pop.tween_property(panel, "modulate:a", 1.0, 0.25)
+	pop.tween_property(panel, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if audio != null:
+		audio.play_ui("success")
 
 func format_duration(seconds: float) -> String:
 	var whole := maxi(0, floori(seconds))

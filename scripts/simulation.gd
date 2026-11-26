@@ -186,6 +186,10 @@ func start_empty_city() -> void:
 	market_order_reward = 0
 	market_order_days_left = 0
 	market_order_fresh = false
+	market_order_id = ""
+	market_order_serial = 0
+	market_order_history.clear()
+	notification_history.clear()
 	day_time = 0.35
 	power_ratio = 1.0
 	battery_charge = 0.0
@@ -802,17 +806,69 @@ var market_order_amount: int = 0
 var market_order_reward: int = 0
 var market_order_days_left: int = 0
 var market_order_fresh: bool = false
+var market_order_id: String = ""
+var market_order_serial: int = 0
+var market_order_history: Array[Dictionary] = []
+var notification_history: Array[Dictionary] = []
+
+func _trim_history(entries: Array[Dictionary], limit: int = 10) -> void:
+	# Keep unread entries even when the visible history is full. This prevents a
+	# notification from disappearing before the player has had a chance to read it.
+	while entries.size() > limit:
+		var removable := -1
+		for i in range(entries.size()):
+			if bool(entries[i].get("read", false)):
+				removable = i
+				break
+		if removable < 0:
+			break
+		entries.remove_at(removable)
+
+func record_notification(kind: String, title: String, message: String, metadata: Dictionary = {}) -> void:
+	notification_history.append({"id": "notice_%d" % Time.get_ticks_usec(), "kind": kind, "title": title, "message": message, "read": false, "metadata": metadata.duplicate(true)})
+	_trim_history(notification_history)
+
+func unread_order_count() -> int:
+	var count := 0
+	for entry: Dictionary in market_order_history:
+		if not bool(entry.get("read", false)):
+			count += 1
+	for entry: Dictionary in notification_history:
+		if not bool(entry.get("read", false)):
+			count += 1
+	return count
+
+func mark_order_read(identifier: String) -> void:
+	for entry: Dictionary in market_order_history:
+		if str(entry.get("id", "")) == identifier:
+			entry["read"] = true
+	for entry: Dictionary in notification_history:
+		if str(entry.get("id", "")) == identifier:
+			entry["read"] = true
+
+func _set_market_order_status(status: String) -> void:
+	for entry: Dictionary in market_order_history:
+		if str(entry.get("id", "")) == market_order_id:
+			entry["status"] = status
+			entry["days_left"] = market_order_days_left
+			return
 
 func new_day_market() -> void:
 	if market_order_amount > 0:
 		market_order_days_left -= 1
 		if market_order_days_left <= 0:
+			_set_market_order_status("expired")
 			market_order_amount = 0
 			market_order_reward = 0
+			market_order_id = ""
 	if market_order_amount == 0 and farm_storage_capacity() > 0.0:
 		market_order_amount = maxi(10, int(round(farm_storage_capacity() * 0.3 / 5.0)) * 5)
 		market_order_reward = market_order_amount * MARKET_ORDER_REWARD_PER_UNIT
 		market_order_days_left = MARKET_ORDER_DAYS
+		market_order_serial += 1
+		market_order_id = "order_%d" % market_order_serial
+		market_order_history.append({"id": market_order_id, "status": "active", "amount": market_order_amount, "reward": market_order_reward, "days_left": market_order_days_left, "read": false})
+		_trim_history(market_order_history)
 		market_order_fresh = true
 
 func market_order_ready() -> bool:
@@ -821,11 +877,14 @@ func market_order_ready() -> bool:
 func market_order_fulfill() -> bool:
 	if not market_order_ready():
 		return false
+	var paid := market_order_reward
 	farm_stock -= float(market_order_amount)
-	budget += market_order_reward
+	budget += paid
+	_set_market_order_status("completed")
 	market_order_amount = 0
 	market_order_reward = 0
 	market_order_days_left = 0
+	market_order_id = ""
 	return true
 var power_ratio: float = 1.0
 var battery_charge: float = 0.0
@@ -1083,6 +1142,7 @@ func farm_collect_all() -> Dictionary:
 	var total := 0.0
 	var count := 0
 	var bonus := 0.0
+	var by_resource: Dictionary = {}
 	# Fields first so the mill gets grain, mills last so flour is collected too.
 	for pass_index in range(3):
 		for entry: Dictionary in territory.buildings:
@@ -1095,7 +1155,9 @@ func farm_collect_all() -> Dictionary:
 				total += float(result.amount)
 				bonus += float(result.bonus)
 				count += 1
-	return {"amount": total, "bonus": bonus, "count": count}
+				var resource := str(result.get("kind", entry_type))
+				by_resource[resource] = float(by_resource.get(resource, 0.0)) + float(result.amount)
+	return {"amount": total, "bonus": bonus, "count": count, "by_resource": by_resource}
 
 func farm_ready_count() -> int:
 	var count := 0
@@ -1941,14 +2003,28 @@ func demolish_grid_building(identifier: String) -> bool:
 		renewal_credits += 1
 	budget += Catalog.cost(entry.type_id) / 4
 	if Catalog.is_farm(str(entry.type_id)):
+		for planned: Dictionary in farm_blueprint.duplicate():
+			if str(planned.get("col", -999)) == str(entry.col) and str(planned.get("row", -999)) == str(entry.row):
+				farm_blueprint.erase(planned)
 		farm_blueprint.append({"type_id": str(entry.type_id), "col": int(entry.col), "row": int(entry.row)})
+	# A completed field must never leave a hidden work item or stale target that
+	# reserves its cells after demolition.
+	if not construction_job.is_empty() and str(construction_job.get("target_instance_id", "")) == identifier:
+		construction_job.clear()
+	for pending: Dictionary in parallel_construction_jobs.duplicate():
+		if str(pending.get("target_instance_id", "")) == identifier:
+			parallel_construction_jobs.erase(pending)
 	for dy in range(entry.height):
 		for dx in range(entry.width):
 			if territory.cells[entry.row + dy][entry.col + dx] == "occupied":
 				territory.cells[entry.row + dy][entry.col + dx] = "free"
 	territory.buildings.erase(entry)
 	territory.invalidate_routing_cache()
-	reclaim_unused_roads(entry)
+	# Farm parcels do not own the surrounding road ring. Keep neighbouring
+	# streets and bridge approaches intact so the freed footprint can be reused
+	# by another farm or any other permitted 2x2 building.
+	if not Catalog.is_farm(str(entry.type_id)):
+		reclaim_unused_roads(entry)
 	housing_neglect.erase(identifier)
 	save_game()
 	return true
@@ -3220,7 +3296,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint, "market_order_amount": market_order_amount, "market_order_reward": market_order_reward, "market_order_days_left": market_order_days_left,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint, "market_order_amount": market_order_amount, "market_order_reward": market_order_reward, "market_order_days_left": market_order_days_left, "market_order_fresh": market_order_fresh, "market_order_id": market_order_id, "market_order_serial": market_order_serial, "market_order_history": market_order_history, "notification_history": notification_history,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3661,6 +3737,23 @@ func load_game() -> bool:
 	market_order_amount = clampi(int(data.get("market_order_amount", 0)), 0, 100000)
 	market_order_reward = clampi(int(data.get("market_order_reward", 0)), 0, 1000000)
 	market_order_days_left = clampi(int(data.get("market_order_days_left", 0)), 0, 10)
+	market_order_fresh = bool(data.get("market_order_fresh", false))
+	market_order_id = str(data.get("market_order_id", ""))
+	market_order_serial = maxi(0, int(data.get("market_order_serial", 0)))
+	market_order_history.clear()
+	var raw_order_history: Variant = data.get("market_order_history", [])
+	if raw_order_history is Array:
+		for item in raw_order_history:
+			if item is Dictionary and str(item.get("id", "")) != "":
+				market_order_history.append(item.duplicate(true))
+	_trim_history(market_order_history)
+	notification_history.clear()
+	var raw_notification_history: Variant = data.get("notification_history", [])
+	if raw_notification_history is Array:
+		for item in raw_notification_history:
+			if item is Dictionary and str(item.get("id", "")) != "":
+				notification_history.append(item.duplicate(true))
+	_trim_history(notification_history)
 	if market_order_amount == 0:
 		market_order_reward = 0
 		market_order_days_left = 0

@@ -27,6 +27,10 @@ func run() -> void:
 	check(game.farm_storage_capacity() > 0.0, "A barn gives storage")
 	game.new_day_market()
 	check(game.market_order_amount >= 10 and game.market_order_fresh, "A new day brings an order")
+	check(game.market_order_history.size() == 1 and game.unread_order_count() == 1, "The order is retained as an unread history entry")
+	var first_order_id := str(game.market_order_history[0].get("id", ""))
+	game.mark_order_read(first_order_id)
+	check(game.unread_order_count() == 0, "Viewing an order clears its unread badge")
 	check(game.market_order_reward == game.market_order_amount * Simulation.MARKET_ORDER_REWARD_PER_UNIT, "Reward scales with amount")
 	check(not game.market_order_fulfill(), "Cannot fulfil without stock")
 	var amount := game.market_order_amount
@@ -34,6 +38,7 @@ func run() -> void:
 	game.farm_stock = float(amount) + 5.0
 	var budget_before: int = game.budget
 	check(game.market_order_fulfill(), "Fulfils with enough stock")
+	check(str(game.market_order_history[0].get("status", "")) == "completed", "Completed order remains in history")
 	check(game.budget == budget_before + reward and absf(game.farm_stock - 5.0) < 0.01, "Pays the reward and takes the goods")
 	check(game.market_order_amount == 0, "Order cleared")
 	game.new_day_market()
@@ -47,6 +52,9 @@ func run() -> void:
 	loaded.save_path = game.save_path
 	check(loaded.load_game(), "Save loads")
 	check(loaded.market_order_amount == pending and loaded.market_order_days_left == days_left, "Order survives save/load")
+	check(loaded.market_order_history.size() >= 2, "Order history survives save/load")
+	loaded.record_notification("harvest", "Harvest", "Collected: grain +40")
+	check(loaded.notification_history.size() == 1, "Harvest notification is retained")
 	print("MARKET ORDER CHECKS: ", "PASS" if failures.is_empty() else "FAIL")
 	for f in failures:
 		print(f)

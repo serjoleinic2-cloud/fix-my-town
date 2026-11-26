@@ -41,7 +41,9 @@ var harvest_all_button: Button
 var harvest_ready_count: int = 0
 var world_environment: WorldEnvironment
 var day_clock_label: Label
-var day_panel: PanelContainer
+var day_panel: HBoxContainer
+var energy_panel: PanelContainer
+var top_status_embedded: bool = false
 var energy_icon: TextureRect
 var energy_label: Label
 var day_visual_clock: float = 0.0
@@ -56,7 +58,9 @@ var leak_effect: Node3D
 var sunlight: DirectionalLight3D
 var viewport_container: SubViewportContainer
 var screen: Control
-var hud: MarginContainer
+var hud: PanelContainer
+var hud_toggle_button: Button
+var hud_collapsed: bool = false
 var navbar: PanelContainer
 var sheet: PanelContainer
 var sheet_scroll: ScrollContainer
@@ -75,6 +79,7 @@ var rating_label: Label
 var district_label: Label
 var language_button: Button
 var audio_button: Button
+var orders_button: Button
 var reset_button: Button
 var signal_button: Button
 var leak_button: Button
@@ -477,17 +482,29 @@ func build_ui() -> void:
 	mode_switcher = HBoxContainer.new()
 	mode_switcher.add_theme_constant_override("separation", 8)
 	screen.add_child(mode_switcher)
-	hud = MarginContainer.new()
+	hud = PanelContainer.new()
+	hud.name = "CompactHud"
+	hud.add_theme_stylebox_override("panel", style(Color(0.97, 0.96, 0.92, 0.92), 14, Color(0.82, 0.84, 0.82, 0.8)))
 	screen.add_child(hud)
-	var top_row := hbox(hud, 4)
+	var hud_column := VBoxContainer.new()
+	hud_column.add_theme_constant_override("separation", 4)
+	hud.add_child(hud_column)
+	var top_row := hbox(hud_column, 4)
+	top_row.custom_minimum_size.y = 64
 	var name_card := card(top_row)
-	name_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_card.visible = false
+	name_card.custom_minimum_size.x = 0
+	name_card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	name_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	district_label = label(20, name_card, "", true)
 	district_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	district_label.clip_text = false
+	district_label.visible = false
 	var budget_card := card(top_row)
+	budget_card.name = "BudgetCard"
 	budget_card.custom_minimum_size.x = 120
+	budget_card.custom_minimum_size.y = 64
+	budget_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	budget_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	var budget_row := hbox(budget_card, 5)
 	icon(budget_row, "coin", 25)
@@ -496,11 +513,18 @@ func build_ui() -> void:
 	budget_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	budget_label.clip_text = true
 	var rating_card := card(top_row)
+	rating_card.name = "RatingCard"
 	rating_card.custom_minimum_size.x = 132
+	rating_card.custom_minimum_size.y = 64
+	rating_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	rating_card.add_theme_stylebox_override("panel", style(PAPER, 12))
 	var rating_row := hbox(rating_card, 5)
+	rating_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon(rating_row, "star", 26)
 	rating_label = label(18, rating_row, "", true)
+	rating_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rating_card.mouse_filter = Control.MOUSE_FILTER_STOP
+	rating_card.gui_input.connect(_on_rating_card_input)
 	var tools := VBoxContainer.new()
 	tools.name = "MapTools"
 	tools.add_theme_constant_override("separation", 4)
@@ -513,6 +537,9 @@ func build_ui() -> void:
 	language_button.hide()
 	audio_button = button(controls_row, "☷", open_settings)
 	state_button = button(controls_row, "", toggle_quality)
+	orders_button = button(controls_row, "▤", open_orders_sheet)
+	orders_button.name = "OrdersButton"
+	orders_button.tooltip_text = tr_text("Заказы города", "City orders")
 	state_button.add_theme_font_size_override("font_size", 18)
 	mode_switcher.hide()
 	quality_legend = card(screen)
@@ -526,7 +553,7 @@ func build_ui() -> void:
 	button(tools, "+", change_zoom.bind(-7.0)).hide()
 	button(tools, "−", change_zoom.bind(7.0)).hide()
 	button(tools, "⌖", focus_problem).hide()
-	for map_button in [audio_button, state_button]:
+	for map_button in [audio_button, state_button, orders_button]:
 		map_button.custom_minimum_size = Vector2(68, 62)
 		map_button.add_theme_font_size_override("font_size", 17)
 		map_button.add_theme_stylebox_override("normal", style(Color(0.98, 0.97, 0.94, 0.93), 14))
@@ -561,19 +588,41 @@ func build_ui() -> void:
 	harvest_all_button.custom_minimum_size.y = 64
 	harvest_all_button.add_theme_font_size_override("font_size", 22)
 	harvest_all_button.hide()
-	day_panel = PanelContainer.new()
+	day_panel = HBoxContainer.new()
 	day_panel.name = "DayPanel"
-	day_panel.add_theme_stylebox_override("panel", style(Color(0.09, 0.12, 0.16, 0.82), 12))
+	day_panel.add_theme_constant_override("separation", 4)
+	day_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	day_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(day_panel)
-	var day_row := HBoxContainer.new()
-	day_row.add_theme_constant_override("separation", 8)
-	day_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	day_panel.add_child(day_row)
-	day_clock_label = label(18, day_row, "")
+	var time_card := PanelContainer.new()
+	time_card.name = "TimeCard"
+	time_card.add_theme_stylebox_override("panel", style(PAPER, 12))
+	time_card.custom_minimum_size = Vector2(205, 64)
+	time_card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	day_panel.add_child(time_card)
+	var time_column := VBoxContainer.new()
+	time_column.alignment = BoxContainer.ALIGNMENT_CENTER
+	time_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	time_card.add_child(time_column)
+	day_clock_label = label(18, time_column, "")
 	day_clock_label.name = "DayClock"
-	day_clock_label.add_theme_color_override("font_color", Color("f2f4f5"))
+	day_clock_label.add_theme_color_override("font_color", INK)
 	day_clock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	energy_panel = PanelContainer.new()
+	energy_panel.name = "EnergyCard"
+	energy_panel.add_theme_stylebox_override("panel", style(PAPER, 12))
+	energy_panel.custom_minimum_size = Vector2(244, 64)
+	var energy_bottom_row := HBoxContainer.new()
+	energy_bottom_row.add_theme_constant_override("separation", 4)
+	hud_column.add_child(energy_bottom_row)
+	energy_bottom_row.add_child(energy_panel)
+	var energy_row := HBoxContainer.new()
+	energy_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	energy_row.add_theme_constant_override("separation", 6)
+	energy_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	energy_panel.add_child(energy_row)
+	energy_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	energy_panel.gui_input.connect(_on_energy_card_input)
 	energy_icon = TextureRect.new()
 	energy_icon.name = "EnergyIcon"
 	energy_icon.texture = load("res://assets/icons/ui_energy.svg")
@@ -581,10 +630,52 @@ func build_ui() -> void:
 	energy_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	energy_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	energy_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	day_row.add_child(energy_icon)
-	energy_label = label(18, day_row, "")
+	energy_row.add_child(energy_icon)
+	energy_label = label(16, energy_row, "")
 	energy_label.name = "EnergyLabel"
+	energy_label.custom_minimum_size.x = 0
+	energy_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	energy_label.clip_text = true
+	energy_label.add_theme_font_size_override("font_size", 18)
 	energy_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var status_column := VBoxContainer.new()
+	status_column.name = "StatusColumn"
+	status_column.add_theme_constant_override("separation", 4)
+	status_column.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	top_row.add_child(status_column)
+	day_panel.reparent(status_column)
+	energy_bottom_row.reparent(status_column)
+	top_row.move_child(status_column, 0)
+	top_status_embedded = true
+	# Final compact HUD grid: time, budget, rating, menu / energy, state,
+	# orders. Keep the old containers hidden so their layout cannot add gaps.
+	var hud_grid := GridContainer.new()
+	hud_grid.name = "HudGrid"
+	hud_grid.columns = 4
+	hud_grid.add_theme_constant_override("h_separation", 4)
+	hud_grid.add_theme_constant_override("v_separation", 4)
+	hud_column.add_child(hud_grid)
+	day_panel.reparent(hud_grid)
+	budget_card.reparent(hud_grid)
+	rating_card.reparent(hud_grid)
+	audio_button.reparent(hud_grid)
+	energy_panel.reparent(hud_grid)
+	state_button.reparent(hud_grid)
+	orders_button.reparent(hud_grid)
+	top_row.hide()
+	energy_bottom_row.hide()
+	status_column.hide()
+	controls_row.hide()
+	top_status_embedded = true
+	hud_toggle_button = button(screen, "›", toggle_hud, true)
+	hud_toggle_button.name = "HudToggleButton"
+	hud_toggle_button.custom_minimum_size = Vector2(68, 62)
+	hud_toggle_button.add_theme_font_size_override("font_size", 30)
+	hud_toggle_button.add_theme_color_override("font_color", Color("2f8fca"))
+	hud_toggle_button.add_theme_color_override("font_hover_color", Color("2377ad"))
+	hud_toggle_button.add_theme_stylebox_override("normal", style(Color("d6eafa"), 14, Color("6daed1")))
+	hud_toggle_button.add_theme_stylebox_override("hover", style(Color("c4e2f4"), 14, Color("4d96bd")))
+	hud_toggle_button.add_theme_stylebox_override("pressed", style(Color("acd5ee"), 14, Color("347da8")))
 	sheet = card(screen)
 	sheet.resized.connect(func():
 		if not updating_layout:
@@ -647,13 +738,43 @@ func update_layout() -> void:
 			safe_left = maxf(safe_left, safe.position.x * ratio + 8)
 			safe_right = maxf(safe_right, (physical.x - safe.end.x) * ratio + 8)
 	hud.position = Vector2(safe_left, safe_top + 10)
-	hud.size = Vector2(size_value.x - safe_left - safe_right, 56)
+	hud.size = Vector2(minf(size_value.x - safe_left - safe_right, 500.0), 132)
+	# Compact cards stay close to their content while the time/energy pair gets
+	# the remaining width on wider portrait screens.
+	var compact_width := hud.size.x
+	var time_width := clampf(compact_width * 0.35, 168.0, 184.0)
+	var budget_width := clampf(compact_width * 0.21, 96.0, 104.0)
+	var rating_width := clampf(compact_width * 0.19, 88.0, 96.0)
+	# The collapse button sits directly below the menu cell while remaining
+	# outside the panel so it survives a collapsed HUD. Its final position is
+	# aligned from the laid-out menu rectangle below.
+	hud_toggle_button.size = Vector2(68, 62)
+	hud_toggle_button.text = "‹" if hud_collapsed else "›"
+	call_deferred("align_hud_toggle")
+	var budget_card := hud.find_child("BudgetCard", true, false)
+	var rating_card := hud.find_child("RatingCard", true, false)
+	if budget_card != null:
+		budget_card.custom_minimum_size.x = budget_width
+	if rating_card != null:
+		rating_card.custom_minimum_size.x = rating_width
+	day_panel.custom_minimum_size.x = time_width
+	day_panel.get_node("TimeCard").custom_minimum_size.x = time_width
+	energy_panel.custom_minimum_size.x = time_width
+	var status_column := hud.find_child("StatusColumn", true, false)
+	if status_column != null:
+		status_column.custom_minimum_size.x = time_width
+		status_column.size.x = time_width
+	# HBoxContainer may retain a previous expanded width after a resize; pin
+	# the paired cards to the calculated compact width for this layout pass.
+	day_panel.size.x = time_width
+	day_panel.get_node("TimeCard").size.x = time_width
+	energy_panel.size.x = time_width
 	var tools := screen.get_node("MapTools") as Control
-	var tools_width := maxf(220, tools.get_combined_minimum_size().x)
-	tools.position = Vector2(size_value.x - safe_right - tools_width, safe_top + 84)
-	tools.custom_minimum_size.x = 220
+	var tools_width := 220.0
+	tools.position = Vector2(safe_left, hud.position.y + hud.size.y + 8)
+	tools.custom_minimum_size.x = tools_width
 	tools.size.x = tools_width
-	quality_legend.position = Vector2(safe_left, safe_top + 84)
+	quality_legend.position = Vector2(safe_left, tools.position.y + 76)
 	quality_legend.size = Vector2(size_value.x - safe_left - safe_right - tools_width - 16, 150)
 	navbar.position = Vector2(0, size_value.y - safe_bottom - 114)
 	navbar.size = Vector2(size_value.x, 114 + safe_bottom)
@@ -669,8 +790,9 @@ func update_layout() -> void:
 		mission.size.y = 110
 	fire_notice.position = Vector2(safe_left, tools.position.y + tools.size.y + 8)
 	fire_notice.size = Vector2(size_value.x - safe_left - safe_right, 72)
-	day_panel.position = Vector2(safe_left + 8, safe_top + 60)
-	day_panel.size = Vector2(10, 10)
+	if not top_status_embedded:
+		day_panel.position = Vector2(safe_left + 8, safe_top + 60)
+		day_panel.size = Vector2(10, 10)
 	harvest_all_button.position = Vector2(safe_left + 12, mission.position.y - 76)
 	harvest_all_button.size = Vector2(minf(360.0, size_value.x * 0.7), 64)
 	# A fire card must not lock the player out of normal navigation. The player
@@ -680,8 +802,11 @@ func update_layout() -> void:
 	navbar.visible = not service_mode
 	harvest_all_button.set_meta("menu_hidden", fullscreen_menu or service_mode)
 	update_harvest_button()
-	hud.visible = not fullscreen_menu
-	tools.visible = not fullscreen_menu
+	hud.visible = not fullscreen_menu and not hud_collapsed
+	hud_toggle_button.visible = not fullscreen_menu
+	# Menu/state/orders now live inside the HUD grid; the old floating tools
+	# container remains only as an internal anchor for legacy overlays.
+	tools.visible = false
 	if fullscreen_menu:
 		sheet.position = Vector2.ZERO
 		sheet.size = size_value
@@ -1963,6 +2088,20 @@ func select_tab(key: String) -> void:
 		selected = -1
 	refresh()
 
+func update_orders_badge() -> void:
+	if orders_button == null:
+		return
+	var unread := game.unread_order_count()
+	orders_button.text = "▤" if unread <= 0 else "▤ %d" % unread
+	orders_button.add_theme_color_override("font_color", Color("c84c43") if unread > 0 else INK)
+	orders_button.tooltip_text = tr_text("Заказы города · непрочитанных: %d", "City orders · unread: %d") % unread
+
+func open_orders_sheet() -> void:
+	active_tab = "district"
+	selection_kind = "orders"
+	selected = -1
+	refresh()
+
 func open_catalog(target_plot: int = -1) -> void:
 	active_tab = "build_tab"
 	catalog_target_plot = target_plot if target_plot >= 0 and target_plot < game.buildings.size() and game.buildings[target_plot] == "empty" else -1
@@ -2846,6 +2985,7 @@ func refresh() -> void:
 	last_quality = current_quality
 	state_button.text = tr_text("Состояние", "Condition")
 	state_button.add_theme_stylebox_override("normal", style(Color("d6eafa") if quality_mode else PAPER))
+	update_orders_badge()
 	quality_legend.visible = quality_mode
 	for i in range(5):
 		quality_legend.find_child("Band%d" % i, true, false).text = "● " + QUALITY_NAMES[0 if game.language == "ru" else 1][i]
@@ -2853,7 +2993,9 @@ func refresh() -> void:
 	stats.text = t("stats") % [format_budget_display(game.budget), game.population(), game.happiness(), format_budget_display(game.net_income())]
 	district_label.text = t("district_name")
 	budget_label.text = format_budget_display(game.budget)
-	rating_label.text = t("rating") % game.happiness()
+	# Keep the compact top card readable on S21+; the full rating label remains
+	# available in the District sheet.
+	rating_label.text = "%d" % game.happiness()
 	language_button.text = "EN" if game.language == "ru" else "RU"
 	for key in nav_buttons:
 		var item: Button = nav_buttons[key]
@@ -3199,6 +3341,7 @@ func header(title_value: String, icon_key: String = "") -> void:
 	var title := label(26 if screen.size.x < 420 else 30, row, title_value, true)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.custom_minimum_size.x = 0
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.clip_text = true
 	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var close := button(row, "×", close_sheet)
@@ -3223,6 +3366,8 @@ func build_sheet() -> void:
 		build_upgrade_sheet()
 	elif selection_kind == "district_status":
 		build_district_sheet()
+	elif selection_kind == "orders":
+		build_orders_sheet()
 	elif selection_kind == "catalog":
 		build_catalog_sheet()
 	elif selection_kind == "catalog_detail":
@@ -4441,6 +4586,72 @@ func toggle_quality() -> void:
 	close_sheet()
 	quality_mode = not quality_mode
 	refresh()
+
+func toggle_hud() -> void:
+	hud_collapsed = not hud_collapsed
+	if audio != null:
+		audio.play_ui("tap")
+	update_layout()
+
+func align_hud_toggle() -> void:
+	if hud_toggle_button == null or audio_button == null or not is_instance_valid(audio_button):
+		return
+	var menu_rect := audio_button.get_global_rect()
+	hud_toggle_button.position = Vector2(menu_rect.position.x, menu_rect.end.y + 4.0)
+
+func order_status_text(status: String) -> String:
+	match status:
+		"active": return tr_text("Активный", "Active")
+		"completed": return tr_text("Выполнен", "Completed")
+		"expired": return tr_text("Просрочен", "Expired")
+	return status
+
+func build_orders_sheet() -> void:
+	action_height = 520
+	header(tr_text("▤ Заказы города", "▤ City orders"))
+	var unread := game.unread_order_count()
+	var intro := label(18, sheet_column, tr_text("История последних заказов и уведомлений · непрочитанных: %d", "Recent orders and notices · unread: %d") % unread, true)
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var history: Array[Dictionary] = game.market_order_history.duplicate(true)
+	history.reverse()
+	if history.is_empty():
+		label(19, sheet_column, tr_text("Заказов пока нет.", "No orders yet."))
+	for entry: Dictionary in history:
+		var order_id := str(entry.get("id", ""))
+		var status := str(entry.get("status", "active"))
+		var read := bool(entry.get("read", false))
+		var line := button(sheet_column, ("● " if not read else "") + "%s · %s" % [order_status_text(status), tr_text("%d продукции · награда %d", "%d goods · reward %d") % [int(entry.get("amount", 0)), int(entry.get("reward", 0))]], func():
+			game.mark_order_read(order_id)
+			refresh()
+		)
+		line.name = "Order_%s" % order_id
+		line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		line.custom_minimum_size.x = 0
+		line.clip_text = true
+		line.add_theme_font_size_override("font_size", 19)
+		if status == "expired":
+			line.add_theme_color_override("font_color", Color("9b6259"))
+		elif status == "completed":
+			line.add_theme_color_override("font_color", Color("337b52"))
+		else:
+			line.add_theme_color_override("font_color", Color("b36b49") if not read else INK)
+		var detail := label(16, sheet_column, tr_text("Требование: %d продукции · осталось дней: %d", "Requirement: %d goods · days left: %d") % [int(entry.get("amount", 0)), int(entry.get("days_left", 0))])
+		detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var notices: Array[Dictionary] = game.notification_history.duplicate(true)
+	if not notices.is_empty():
+		label(21, sheet_column, tr_text("Уведомления", "Notifications"), true)
+		notices.reverse()
+		for notice: Dictionary in notices:
+			var notice_id := str(notice.get("id", ""))
+			var notice_button := button(sheet_column, ("● " if not bool(notice.get("read", false)) else "") + str(notice.get("message", "")), func():
+				game.mark_order_read(notice_id)
+				refresh()
+			)
+			notice_button.add_theme_font_size_override("font_size", 18)
+			notice_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			notice_button.custom_minimum_size.x = 0
+			notice_button.clip_text = true
+	button(sheet_column, t("cancel"), close_sheet)
 
 func build_district_sheet() -> void:
 	action_height = 420
@@ -5918,13 +6129,20 @@ func apply_day_night() -> void:
 	text_value += (tr_text(" · ночь", " · night") if game.is_night() else tr_text(" · день", " · day"))
 	day_clock_label.text = text_value
 	var has_power: bool = game.power_enabled()
-	energy_icon.visible = has_power
-	energy_label.visible = has_power
+	energy_icon.visible = true
+	energy_label.visible = true
 	if has_power:
-		energy_label.text = "%d%%" % roundi(game.power_ratio * 100.0)
+		energy_label.text = "%d%% · %d/%d" % [roundi(game.power_ratio * 100.0), roundi(game.battery_charge), roundi(game.battery_capacity())]
+		energy_label.tooltip_text = tr_text("Энергия · запас %d из %d", "Energy · reserve %d of %d") % [roundi(game.battery_charge), roundi(game.battery_capacity())]
 		var tint := Color("8be28b") if game.power_ratio >= 0.85 else (Color("f4c430") if game.power_ratio >= 0.6 else Color("ff6a5c"))
 		energy_label.add_theme_color_override("font_color", tint)
-	day_panel.visible = not bool(harvest_all_button.get_meta("menu_hidden", false))
+	else:
+		energy_label.text = "— · 0/0"
+		energy_label.tooltip_text = tr_text("Энергия отключена · запас 0 из 0", "Power offline · reserve 0 of 0")
+		energy_label.add_theme_color_override("font_color", Color("89949b"))
+	var status_visible := not bool(harvest_all_button.get_meta("menu_hidden", false))
+	day_panel.visible = status_visible
+	energy_panel.visible = status_visible
 
 func farm_effect_text(kind: String, level_value: int) -> String:
 	var mult := float(clampi(level_value, 1, 3))
@@ -5946,6 +6164,13 @@ func farm_issue_text(issue: String) -> String:
 		"storage_full": return tr_text("Склад фермы полон: постройте амбар или улучшите склад.", "Farm storage is full: build a barn or upgrade the storage.")
 	return ""
 
+func farm_resource_text(kind: String) -> String:
+	match kind:
+		"field": return tr_text("🌾 зерно", "🌾 grain")
+		"mill": return tr_text("🥣 мука", "🥣 flour")
+		"bakery": return tr_text("🍞 хлеб", "🍞 bread")
+	return tr_text("📦 продукция", "📦 goods")
+
 func add_farm_status(entry: Dictionary) -> void:
 	var type_id := str(entry.type_id)
 	var storage := label(18, sheet_column, tr_text("Склад фермы: %d из %d · зерно для мельницы: %d · мука для пекарни: %d", "Farm storage: %d of %d · grain for the mill: %d · flour for the bakery: %d") % [roundi(game.farm_stock), roundi(game.farm_storage_capacity()), roundi(game.farm_grain), roundi(game.farm_flour)])
@@ -5960,7 +6185,9 @@ func add_farm_status(entry: Dictionary) -> void:
 			var paid: int = game.market_order_reward
 			if game.market_order_fulfill():
 				audio.play_ui("success")
-				show_short_notice(tr_text("Заказ выполнен · +%d монет", "Order fulfilled · +%d coins") % paid, 3.0)
+				var fulfilled_text := tr_text("Заказ выполнен · +%d монет", "Order fulfilled · +%d coins") % paid
+				show_short_notice(fulfilled_text, 3.0)
+				game.record_notification("order", tr_text("Заказ выполнен", "Order completed"), fulfilled_text, {"reward": paid})
 				close_sheet()
 		, true)
 		deliver.name = "MarketOrderButton"
@@ -6018,6 +6245,46 @@ func show_short_notice(text_value: String, seconds: float = 3.0) -> void:
 	fire_notice_label.text = text_value
 	fire_notice.show()
 
+func _on_energy_card_input(event: InputEvent) -> void:
+	var tapped := false
+	if event is InputEventMouseButton:
+		tapped = event.button_index == MOUSE_BUTTON_LEFT and event.pressed
+	elif event is InputEventScreenTouch:
+		tapped = event.pressed
+	if not tapped:
+		return
+	var supply := game.power_supply()
+	var demand := game.power_demand()
+	var text_value: String
+	if not game.power_enabled():
+		text_value = tr_text("Энергия 0% · нет активного источника. Постройте электростанцию или подключите её к сети.", "Energy 0% · no active source. Build a power plant or connect it to the grid.")
+	elif demand <= 0.0:
+		text_value = tr_text("Энергия 0% · потребителей пока нет. Постройте здания с подключением к сети.", "Energy 0% · there are no consumers yet. Build buildings connected to the grid.")
+	elif supply < demand and game.battery_charge <= 0.0:
+		text_value = tr_text("Энергии не хватает: производство %.0f из спроса %.0f. Постройте или улучшите электростанцию.", "Power is short: production %.0f versus demand %.0f. Build or upgrade a power plant.") % [supply, demand]
+	else:
+		text_value = tr_text("Энергия %.0f%% · запас %.0f из %.0f. Ночью расход выше.", "Energy %.0f%% · reserve %.0f of %.0f. Demand is higher at night.") % [game.power_ratio * 100.0, game.battery_charge, game.battery_capacity()]
+	show_short_notice(text_value, 6.0)
+
+func _on_rating_card_input(event: InputEvent) -> void:
+	var tapped := false
+	if event is InputEventMouseButton:
+		tapped = event.button_index == MOUSE_BUTTON_LEFT and event.pressed
+	elif event is InputEventScreenTouch:
+		tapped = event.pressed
+	if not tapped:
+		return
+	var report := game.district_happiness_report()
+	var score := int(report.get("score", game.happiness()))
+	var reasons: Array = report.get("reasons", [])
+	var reason_text := tr_text("Причины пока не выявлены.", "No major causes detected yet.")
+	if not reasons.is_empty():
+		var labels: Array[String] = []
+		for reason in reasons:
+			labels.append(game.happiness_label(str(reason)))
+		reason_text = tr_text("Главные причины: %s.", "Main causes: %s.") % ", ".join(labels)
+	show_short_notice(tr_text("Рейтинг района: %d/100. %s", "District rating: %d/100. %s") % [score, reason_text], 6.0)
+
 func collect_farm_building(identifier: String) -> void:
 	var result: Dictionary = game.farm_collect(identifier)
 	if result.is_empty():
@@ -6026,10 +6293,11 @@ func collect_farm_building(identifier: String) -> void:
 		show_short_notice(farm_issue_text(issue) if issue != "" else tr_text("Пока нечего собирать.", "Nothing to collect yet."))
 		audio.play_ui("deny")
 	else:
-		var text_value := tr_text("Собрано: +%d", "Collected: +%d") % roundi(float(result.amount))
+		var text_value := tr_text("Собрано: %s +%d", "Collected: %s +%d") % [farm_resource_text(str(result.get("kind", ""))), roundi(float(result.amount))]
 		if float(result.bonus) >= 1.0:
 			text_value += tr_text(" · бонус за вовремя +%d", " · on-time bonus +%d") % roundi(float(result.bonus))
 		show_short_notice(text_value)
+		game.record_notification("harvest", tr_text("Сбор урожая", "Harvest"), text_value, {"kind": str(result.get("kind", "")), "amount": float(result.amount)})
 		audio.play_ui("success")
 		game.save_game()
 	sync_building_status_indicators()
@@ -6042,10 +6310,14 @@ func collect_all_farm() -> void:
 		show_short_notice(tr_text("Пока нечего собирать.", "Nothing to collect yet."))
 		audio.play_ui("deny")
 	else:
-		var text_value := tr_text("Собрано с %d зданий: +%d", "Collected from %d buildings: +%d") % [int(result.count), roundi(float(result.amount))]
+		var totals: Array[String] = []
+		for resource_kind in result.get("by_resource", {}):
+			totals.append("%s +%d" % [farm_resource_text(str(resource_kind)), roundi(float(result.by_resource[resource_kind]))])
+		var text_value := tr_text("Собрано с %d зданий: %s", "Collected from %d buildings: %s") % [int(result.count), ", ".join(totals)]
 		if float(result.bonus) >= 1.0:
 			text_value += tr_text(" · бонус +%d", " · bonus +%d") % roundi(float(result.bonus))
 		show_short_notice(text_value)
+		game.record_notification("harvest", tr_text("Сбор урожая", "Harvest"), text_value, {"by_resource": result.get("by_resource", {})})
 		audio.play_ui("success")
 		game.save_game()
 	sync_building_status_indicators()

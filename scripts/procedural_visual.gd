@@ -48,7 +48,7 @@ func _ready() -> void:
 	elif visual_type == "street_lamp":
 		Art.box(self, Vector3(0, 0.06, 0), Vector3(2.0, 0.12, 2.0), Color("879d66"))
 		Art.lamp(self, Vector3.ZERO, 5.4, 0.0, "night_lamps")
-	elif visual_type in ["wind_turbine", "solar_panel", "power_plant", "battery", "fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"]:
+	elif visual_type in ["wind_turbine", "solar_panel", "power_plant", "heat_plant", "battery", "fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"]:
 		energy_leisure_building(visual_type)
 	elif visual_type == "city_hall":
 		city_hall()
@@ -1249,6 +1249,16 @@ func energy_leisure_building(kind: String) -> void:
 			Art.cylinder(self, Vector3(2.6, 4.6, -1.8), 0.9, 9.0, Color("8a8d90"), 0.8)
 			Art.cylinder(self, Vector3(2.6, 9.4, -1.8), 0.95, 0.5, Color("b64b3b"))
 			Art.box(self, Vector3(-1.2, 4.3, 1.2), Vector3(5.9, 0.4, 4.7), Color("5c5651"))
+		"heat_plant":
+			Art.box(self, Vector3(-1.0, 1.9, 1.0), Vector3(6.2, 3.4, 4.6), Color("b0795b"))
+			Art.box(self, Vector3(-1.0, 3.8, 1.0), Vector3(6.5, 0.4, 4.9), Color("5c4b44"))
+			Art.box(self, Vector3(-1.0, 1.3, 3.34), Vector3(2.0, 2.2, 0.12), Color("4a3a33"))
+			for x in [2.4, 4.0]:
+				Art.cylinder(self, Vector3(x, 4.2, -2.0), 0.7, 8.2, Color("c9c1b8"), 0.8)
+				Art.cylinder(self, Vector3(x, 8.4, -2.0), 0.78, 0.5, Color("c4572f"))
+				var steam := Art.glow(self, Vector3(x, 9.2, -2.0), Vector3(0.9, 0.5, 0.9), Color("ffb36b"), 0.55)
+			Art.glow(self, Vector3(-1.0, 1.7, 3.36), Vector3(1.4, 0.9, 0.05), Color("ff9a4a"), 0.9)
+			Art.night_windows(self, [{"center": Vector3(-1.0, 1.9, 1.0), "size": Vector3(6.2, 3.4, 4.6), "floors": 1}], 3, 61, 0.7)
 		"battery":
 			for x in [-2.4, 0.0, 2.4]:
 				Art.cylinder(self, Vector3(x, 1.9, 0), 1.0, 3.4, Color("5f8f6d"))

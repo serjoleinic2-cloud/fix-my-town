@@ -7,7 +7,7 @@ var territory = TerritoryGrid.new()
 const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
 const MAX_SAVED_BUDGET: int = 1000000000
-const MAX_CAMPAIGN_STAGE: int = 19
+const MAX_CAMPAIGN_STAGE: int = 20
 
 const Catalog = preload("res://scripts/asset_catalog.gd")
 const DistrictWorld = preload("res://scripts/district_world.gd")
@@ -186,6 +186,8 @@ func start_empty_city() -> void:
 	market_order_reward = 0
 	market_order_days_left = 0
 	market_order_fresh = false
+	season_days = 0
+	season_notice = ""
 	day_time = 0.35
 	power_ratio = 1.0
 	battery_charge = 0.0
@@ -429,8 +431,8 @@ func campaign_level_count(type_id: String, minimum_level: int) -> int:
 
 func campaign_stage_title(stage: int = -1) -> String:
 	var value := campaign_stage if stage < 0 else stage
-	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой", "Первые фермы", "Зерно и пастбища", "Животноводство", "Фермерская логистика", "Вечерний город", "Досуг и аппетит", "Большая сцена", "Курорт"]
-	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river", "First farms", "Grain and pastures", "Livestock", "Farm logistics", "Evening city", "Leisure and appetite", "The big stage", "Resort"]
+	var titles_ru := ["", "Первый квартал", "Живой район", "Городские службы", "Элитная застройка", "Деловой центр", "Растущий горизонт", "Новый центр", "Большой город", "Мегаполис", "Город будущего", "За рекой", "Первые фермы", "Зерно и пастбища", "Животноводство", "Фермерская логистика", "Вечерний город", "Досуг и аппетит", "Большая сцена", "Курорт", "Зима близко"]
+	var titles_en := ["", "First neighborhood", "A living district", "City services", "Elite development", "Business center", "Growing skyline", "New center", "Big city", "Metropolis", "City of tomorrow", "Across the river", "First farms", "Grain and pastures", "Livestock", "Farm logistics", "Evening city", "Leisure and appetite", "The big stage", "Resort", "Winter is coming"]
 	var index := clampi(value, 1, titles_ru.size() - 1)
 	return titles_ru[index] if language == "ru" else titles_en[index]
 
@@ -456,6 +458,7 @@ func campaign_stage_goal_met(stage: int = -1) -> bool:
 		17: return campaign_population_count("fitness_club") >= 1 and campaign_population_count("pizzeria") >= 1
 		18: return campaign_population_count("theatre") >= 1 and campaign_population_count("battery") >= 1
 		19: return campaign_population_count("aquapark") >= 1 and campaign_population_count("amusement_park") >= 1
+		20: return campaign_population_count("heat_plant") >= 1 and happiness() >= 60
 		_: return false
 
 func campaign_stage_progress() -> float:
@@ -478,6 +481,7 @@ func campaign_stage_progress() -> float:
 		17: return minf(1.0, float(mini(1, campaign_population_count("fitness_club")) + mini(1, campaign_population_count("pizzeria"))) / 2.0)
 		18: return minf(1.0, float(mini(1, campaign_population_count("theatre")) + mini(1, campaign_population_count("battery"))) / 2.0)
 		19: return minf(1.0, float(mini(1, campaign_population_count("aquapark")) + mini(1, campaign_population_count("amusement_park"))) / 2.0)
+		20: return minf(1.0, float(mini(1, campaign_population_count("heat_plant"))) * 0.7 + minf(1.0, float(happiness()) / 60.0) * 0.3)
 		_:
 			var tower_goal := 3 if campaign_stage == 7 else (4 if campaign_stage == 8 else (6 if campaign_stage == 9 else 8))
 			var mood_goal := 65 if campaign_stage == 7 else (72 if campaign_stage == 8 else (78 if campaign_stage == 9 else 85))
@@ -508,6 +512,7 @@ func campaign_stage_reward(stage: int = -1) -> int:
 		17: return 3200
 		18: return 3600
 		19: return 4200
+		20: return 4800
 		_: return 1200 + maxi(0, value - 7) * 200
 
 func grant_campaign_stage_reward(stage: int) -> int:
@@ -791,9 +796,61 @@ const NIGHT_DARKNESS_BELOW := 0.15
 const LAMP_RADIUS_CELLS := 5.0
 const BATTERY_CAPACITY := 6000.0
 const POWER_SUPPLY := {"wind_turbine": 60.0, "solar_panel": 45.0, "power_plant": 180.0}
-const POWER_DEMAND := {"house": 3.0, "elite_residence": 8.0, "business_tower": 14.0, "cafe": 5.0, "supermarket": 9.0, "fire_station": 6.0, "police_station": 6.0, "hospital": 12.0, "depot": 4.0, "logistics_center": 10.0, "warehouse": 4.0, "mill": 6.0, "bakery": 8.0, "livestock_yard": 4.0, "farm_warehouse": 3.0, "fitness_club": 8.0, "pizzeria": 8.0, "theatre": 18.0, "aquapark": 30.0, "amusement_park": 40.0, "street_lamp": 1.0}
+const POWER_DEMAND := {"house": 3.0, "elite_residence": 8.0, "business_tower": 14.0, "cafe": 5.0, "supermarket": 9.0, "fire_station": 6.0, "police_station": 6.0, "hospital": 12.0, "depot": 4.0, "logistics_center": 10.0, "warehouse": 4.0, "mill": 6.0, "bakery": 8.0, "livestock_yard": 4.0, "farm_warehouse": 3.0, "fitness_club": 8.0, "pizzeria": 8.0, "theatre": 18.0, "aquapark": 30.0, "amusement_park": 40.0, "street_lamp": 1.0, "heat_plant": 20.0}
 const LEISURE_ENVIRONMENT := {"fitness_club": 4, "pizzeria": 2, "theatre": 6, "aquapark": 7, "amusement_park": 8}
 var day_time: float = 0.35
+
+# Seasons (from stage 20): three days each, starting in autumn so the first winter
+# is a visible deadline. Winter needs heat: homes lose happiness when it is short.
+const SEASON_DAYS := 3
+const HEAT_SUPPLY_PER_PLANT := 80.0
+const HEAT_DEMAND := {"house": 5.0, "elite_residence": 10.0, "business_tower": 14.0, "cafe": 4.0, "supermarket": 4.0, "hospital": 8.0}
+var season_days: int = 0
+var season_notice: String = ""
+
+func seasons_enabled() -> bool:
+	return empty_city_mode and campaign_stage >= 20
+
+# 0 spring, 1 summer, 2 autumn, 3 winter
+func season_index() -> int:
+	return (int(season_days / SEASON_DAYS) + 2) % 4
+
+func is_winter() -> bool:
+	return seasons_enabled() and season_index() == 3
+
+func season_key() -> String:
+	return ["spring", "summer", "autumn", "winter"][season_index()]
+
+func heat_demand() -> float:
+	var total := 0.0
+	for entry: Dictionary in territory.buildings:
+		if bool(entry.get("shanty", false)):
+			continue
+		total += float(HEAT_DEMAND.get(str(entry.get("type_id", "")), 0.0))
+	return total
+
+func heat_supply() -> float:
+	var plants := farm_type_count("heat_plant")
+	if plants <= 0:
+		return 0.0
+	# A heat plant runs on electricity: a blackout cools the city too.
+	var powered := 1.0 if not power_enabled() else clampf(power_ratio / 0.6, 0.0, 1.0)
+	return HEAT_SUPPLY_PER_PLANT * float(plants) * powered
+
+func heat_ratio() -> float:
+	var demand := heat_demand()
+	return 1.0 if demand <= 0.0 else clampf(heat_supply() / demand, 0.0, 1.0)
+
+func advance_season_day() -> void:
+	if not seasons_enabled():
+		return
+	var before := season_index()
+	season_days += 1
+	var after := season_index()
+	if after != before:
+		season_notice = season_key()
+	elif after == 2 and int(season_days % SEASON_DAYS) == SEASON_DAYS - 1 and heat_ratio() < 1.0:
+		season_notice = "winter_soon"
 
 # Daily market order: the city asks for farm goods; delivering in time pays a premium.
 const MARKET_ORDER_REWARD_PER_UNIT := 3
@@ -804,6 +861,7 @@ var market_order_days_left: int = 0
 var market_order_fresh: bool = false
 
 func new_day_market() -> void:
+	advance_season_day()
 	if market_order_amount > 0:
 		market_order_days_left -= 1
 		if market_order_days_left <= 0:
@@ -1352,6 +1410,7 @@ const HAPPINESS_LABELS := {
 	"fire": ["Недавний пожар", "A recent fire"],
 	"supply": ["Перебои со снабжением", "Supply interruptions"],
 	"blackout": ["Не хватает электричества: постройте станции", "Not enough electricity: build power stations"],
+	"cold": ["Зимой холодно: нужна теплостанция", "Cold winter: a heat plant is needed"],
 	"dark": ["Тёмная улица ночью: нужен фонарь рядом", "A dark street at night: a lamp is needed nearby"],
 }
 const HAPPINESS_JOB_TYPES := ["supermarket", "cafe", "warehouse", "logistics_center", "business_tower", "depot", "fire_station", "police_station", "hospital"]
@@ -1410,6 +1469,12 @@ func house_happiness(entry: Dictionary) -> Dictionary:
 			penalties.blackout = 6
 		elif is_night() and not home_has_street_light(point):
 			penalties.dark = 4
+	if seasons_enabled() and is_winter() and entry.has("col"):
+		var warmth := heat_ratio()
+		if warmth < 0.5:
+			penalties.cold = 8
+		elif warmth < 0.85:
+			penalties.cold = 4
 	var total := 0
 	for key: String in parts:
 		total += int(parts[key])
@@ -3220,7 +3285,7 @@ func save_game() -> void:
 		"repair_left": repair_left, "job_problem_id": job_problem_id, "income_clock": income_clock, "service_neglect_clock": service_neglect_clock, "housing_neglect_clock": housing_neglect_clock, "housing_neglect": housing_neglect, "public_discontent_clock": public_discontent_clock, "transit": transit.data(), "fire_triggered": fire_triggered, "fires": active_fires, "fire_damage": fire_damage,
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
-		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint, "market_order_amount": market_order_amount, "market_order_reward": market_order_reward, "market_order_days_left": market_order_days_left,
+		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint, "season_days": season_days, "market_order_amount": market_order_amount, "market_order_reward": market_order_reward, "market_order_days_left": market_order_days_left,
 		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
@@ -3658,6 +3723,7 @@ func load_game() -> bool:
 	farm_stock = clampf(float(data.get("farm_stock", 0.0)), 0.0, 100000.0) if (data.get("farm_stock", 0.0) is int or data.get("farm_stock", 0.0) is float) and is_finite(float(data.get("farm_stock", 0.0))) else 0.0
 	farm_grain = clampf(float(data.get("farm_grain", 0.0)), 0.0, 100000.0) if (data.get("farm_grain", 0.0) is int or data.get("farm_grain", 0.0) is float) and is_finite(float(data.get("farm_grain", 0.0))) else 0.0
 	farm_flour = clampf(float(data.get("farm_flour", 0.0)), 0.0, 100000.0) if (data.get("farm_flour", 0.0) is int or data.get("farm_flour", 0.0) is float) and is_finite(float(data.get("farm_flour", 0.0))) else 0.0
+	season_days = clampi(int(data.get("season_days", 0)), 0, 1000000)
 	market_order_amount = clampi(int(data.get("market_order_amount", 0)), 0, 100000)
 	market_order_reward = clampi(int(data.get("market_order_reward", 0)), 0, 1000000)
 	market_order_days_left = clampi(int(data.get("market_order_days_left", 0)), 0, 10)

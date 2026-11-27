@@ -184,7 +184,7 @@ const CATALOG_ITEMS := {
 	"services": ["fire_station", "police_station", "hospital", "depot"],
 	"agriculture": ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"],
 	"leisure": ["fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"],
-	"energy": ["street_lamp", "wind_turbine", "solar_panel", "power_plant", "battery"],
+	"energy": ["street_lamp", "wind_turbine", "solar_panel", "power_plant", "battery", "heat_plant"],
 	"landscaping": ["lawn", "flower_bed", "street_tree", "bush"]
 }
 const TEXT = {
@@ -208,7 +208,7 @@ const TEXT = {
 	"field": ["Поле", "Field"], "barn": ["Амбар", "Barn"], "mill": ["Мельница", "Mill"], "bakery": ["Пекарня", "Bakery"],
 	"pasture": ["Пастбище", "Pasture"], "livestock_yard": ["Животноводческий двор", "Livestock yard"],
 	"farm_warehouse": ["Фермерский склад", "Farm warehouse"],
-	"street_lamp": ["Фонарь", "Street lamp"], "wind_turbine": ["Ветряк", "Wind turbine"], "solar_panel": ["Солнечные панели", "Solar panels"], "power_plant": ["Электростанция", "Power plant"], "battery": ["Накопитель энергии", "Battery storage"],
+	"street_lamp": ["Фонарь", "Street lamp"], "wind_turbine": ["Ветряк", "Wind turbine"], "solar_panel": ["Солнечные панели", "Solar panels"], "power_plant": ["Электростанция", "Power plant"], "battery": ["Накопитель энергии", "Battery storage"], "heat_plant": ["Теплостанция", "Heat plant"],
 	"fitness_club": ["Фитнес-клуб", "Fitness club"], "pizzeria": ["Пиццерия", "Pizzeria"], "theatre": ["Театр", "Theatre"], "aquapark": ["Аквапарк", "Water park"], "amusement_park": ["Парк развлечений", "Amusement park"],
 	"elite_residence": ["Элитная резиденция", "Elite residence"], "business_tower": ["Деловая башня", "Business tower"],
 	"repair_van": ["Ремонтная машина", "Repair van"], "fire_engine": ["Пожарная машина", "Fire engine"],
@@ -2994,6 +2994,7 @@ func campaign_goal_text(stage: int) -> String:
 		17: return tr_text("фитнес-клуб и пиццерия (ей нужен хлеб с фермы)", "a fitness club and a pizzeria (it needs farm bread)")
 		18: return tr_text("театр и накопитель энергии", "a theatre and a battery storage")
 		19: return tr_text("аквапарк и парк развлечений", "a water park and an amusement park")
+		20: return tr_text("теплостанция и времена года", "a heat plant and the seasons")
 		_: return ""
 
 func campaign_stage_unlock_text(stage: int) -> String:
@@ -3007,6 +3008,7 @@ func campaign_stage_unlock_text(stage: int) -> String:
 		17: return tr_text("Фитнес, пиццерия и электростанция", "Fitness, pizzeria and a power plant")
 		18: return tr_text("Театр и накопитель энергии", "Theatre and battery storage")
 		19: return tr_text("Аквапарк и парк развлечений", "Water park and amusement park")
+		20: return tr_text("Теплостанция и времена года: зимой нужно отопление", "Heat plant and seasons: winter needs heating")
 		_: return tr_text("Новые участки и развитие города", "New lots and city development")
 
 func campaign_stage_upgrade_text(stage: int) -> String:
@@ -3031,7 +3033,7 @@ func add_new_building_cards(content: VBoxContainer, types: Array) -> void:
 	banner.name = "NewBuildingsBanner"
 	banner.add_theme_stylebox_override("panel", style(Color("f2b84b"), 12))
 	content.add_child(banner)
-	var banner_label := label(22, banner, tr_text("✨ НОВОЕ В ГОРОДЕ!", "✨ NEW IN TOWN!"), true)
+	var banner_label := label(22, banner, tr_text("★ НОВОЕ В ГОРОДЕ! ★", "★ NEW IN TOWN! ★"), true)
 	banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner_label.add_theme_color_override("font_color", Color("4a2f05"))
 	for type_id in types:
@@ -3968,6 +3970,7 @@ func _process(delta: float) -> void:
 		fire_notice_left = maxf(0, fire_notice_left - delta)
 		fire_notice.visible = fire_notice_left > 0
 	announce_repair_phase()
+	announce_season()
 	if game.market_order_fresh:
 		game.market_order_fresh = false
 		show_short_notice(tr_text("Новый заказ города: нужно %d продукции, награда %d монет.", "New city order: %d goods needed, reward %d coins.") % [game.market_order_amount, game.market_order_reward], 5.0)
@@ -4478,6 +4481,12 @@ func build_district_sheet() -> void:
 		var power_line := label(19, sheet_column, tr_text("Энергия: даёт %d · нужно %d · накопитель %d из %d", "Power: supply %d · demand %d · battery %d of %d") % [roundi(game.power_supply()), roundi(game.power_demand()), roundi(game.battery_charge), roundi(game.battery_capacity())])
 		power_line.name = "PowerLine"
 		power_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if game.seasons_enabled():
+		var heat_line := label(19, sheet_column, tr_text("Сезон: %s · тепло: даёт %d · нужно %d", "Season: %s · heat: supply %d · demand %d") % [season_label(game.season_key()), roundi(game.heat_supply()), roundi(game.heat_demand())])
+		heat_line.name = "HeatLine"
+		heat_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		if game.is_winter() and game.heat_ratio() < 0.85:
+			heat_line.add_theme_color_override("font_color", Color("b3402f"))
 		if game.power_ratio < 0.6:
 			power_line.add_theme_color_override("font_color", Color("b36b49"))
 	var task_done := game.district_task_progress()
@@ -5819,6 +5828,7 @@ const BUILDING_EXPLAIN := {
 	"wind_turbine": {"does": ["Даёт электричество от ветра, 60 в пике.", "Makes electricity from wind, up to 60."], "needs": ["Ничего, но сила ветра меняется в течение суток.", "Nothing, but wind strength changes through the day."], "gives": ["Питание города. Дёшев, но нестабилен.", "City power. Cheap but unreliable."]},
 	"solar_panel": {"does": ["Даёт электричество днём, до 45.", "Makes electricity in daytime, up to 45."], "needs": ["Солнце: ночью не работает.", "Sunlight: idle at night."], "gives": ["Дневная энергия. Излишек заряжает накопитель.", "Daytime power. Surplus charges the battery."]},
 	"power_plant": {"does": ["Даёт стабильные 180 в любое время суток.", "Makes a steady 180 at any time."], "needs": ["Большой бюджет.", "A large budget."], "gives": ["Основа ночного питания большого города.", "The backbone of night power for a big city."]},
+	"heat_plant": {"does": ["Греет жилые дома зимой: 80 тепла на станцию.", "Heats homes in winter: 80 heat per plant."], "needs": ["Электричество: при блэкауте станция остывает. Одной станции хватает примерно на 16 домов.", "Electricity: a blackout cools it down. One plant covers about 16 homes."], "gives": ["Без тепла зимой жители теряют счастье.", "Without heat residents lose happiness in winter."]},
 	"battery": {"does": ["Запасает излишки энергии на ночь.", "Stores surplus power for the night."], "needs": ["Станции, дающие больше, чем нужно днём.", "Stations producing more than needed by day."], "gives": ["Отдаёт запас, когда не хватает света и ветра.", "Releases stored power when sun and wind are short."]},
 	"fitness_club": {"does": ["Спортзал для жителей района.", "A gym for the district."], "needs": ["Дорога и электричество.", "A road and electricity."], "gives": ["Радость и меньше болезней рядом.", "Happiness and fewer illnesses nearby."]},
 	"pizzeria": {"does": ["Печёт пиццу из товаров фермы, 2 в минуту.", "Bakes pizza from farm goods, 2 per minute."], "needs": ["Запас на складе фермы (хлеб, мука).", "Stock in the farm storage (bread, flour)."], "gives": ["Радость жителей рядом и доход. Без запаса почти не действует.", "Resident happiness nearby and income. Barely works without stock."]},
@@ -5916,6 +5926,8 @@ func apply_day_night() -> void:
 	var hour: float = game.game_hour()
 	var text_value := "%02d:%02d" % [int(hour), int((hour - floorf(hour)) * 60.0)]
 	text_value += (tr_text(" · ночь", " · night") if game.is_night() else tr_text(" · день", " · day"))
+	if game.seasons_enabled():
+		text_value += " · " + season_label(game.season_key())
 	day_clock_label.text = text_value
 	var has_power: bool = game.power_enabled()
 	energy_icon.visible = has_power
@@ -5993,6 +6005,31 @@ func add_farm_status(entry: Dictionary) -> void:
 		var collect := button(sheet_column, caption, collect_farm_building.bind(str(entry.instance_id)), true)
 		collect.name = "CollectFarmButton"
 		collect.disabled = issue == "damaged" or issue == "storage_full"
+
+func season_label(key: String) -> String:
+	match key:
+		"spring": return tr_text("весна", "spring")
+		"summer": return tr_text("лето", "summer")
+		"autumn": return tr_text("осень", "autumn")
+		"winter": return tr_text("зима", "winter")
+	return ""
+
+func announce_season() -> void:
+	if game.season_notice == "":
+		return
+	var key: String = game.season_notice
+	game.season_notice = ""
+	match key:
+		"winter_soon":
+			show_short_notice(tr_text("Скоро зима, а тепла не хватает. Постройте теплостанцию!", "Winter is near and heat is short. Build a heat plant!"), 6.0)
+		"winter":
+			show_short_notice(tr_text("Пришла зима. Жителям нужно тепло: следите за теплостанцией.", "Winter has come. Residents need heat: watch your heat plant."), 6.0)
+		"spring":
+			show_short_notice(tr_text("Весна. Зима позади, дома согрелись.", "Spring. Winter is over."), 4.0)
+		"summer":
+			show_short_notice(tr_text("Лето. Дни длиннее, энергии от солнца больше.", "Summer. Long days and more solar power."), 4.0)
+		"autumn":
+			show_short_notice(tr_text("Осень. Готовьтесь к зиме.", "Autumn. Prepare for winter."), 4.0)
 
 func announce_repair_phase() -> void:
 	# Repair crews get the same dispatch banners as fire engines: on the way, working, finished.

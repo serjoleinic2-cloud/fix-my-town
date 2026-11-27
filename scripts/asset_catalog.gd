@@ -33,6 +33,7 @@ const TYPES = {
 	"wind_turbine": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/wind_turbine.tscn", "cost": 400, "income": 0, "footprint": Vector2(9.6, 9.6)},
 	"solar_panel": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/solar_panel.tscn", "cost": 520, "income": 0, "footprint": Vector2(9.6, 9.6)},
 	"power_plant": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/power_plant.tscn", "cost": 1500, "income": 0, "footprint": Vector2(9.6, 9.6)},
+	"heat_plant": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/heat_plant.tscn", "cost": 1400, "income": 0, "footprint": Vector2(9.6, 9.6)},
 	"battery": {"icon": "res://assets/icons/depot.svg", "scene": "res://scenes/visuals/battery.tscn", "cost": 700, "income": 0, "footprint": Vector2(9.6, 9.6)},
 	"fitness_club": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/fitness_club.tscn", "cost": 260, "income": 14, "footprint": Vector2(9.6, 9.6)},
 	"pizzeria": {"icon": "res://assets/icons/cafe.svg", "scene": "res://scenes/visuals/pizzeria.tscn", "cost": 300, "income": 18, "footprint": Vector2(9.6, 9.6)},
@@ -119,11 +120,11 @@ const UNLOCK_LEVELS = {
 	"bridge": 11, "field": 12, "barn": 12, "mill": 13, "pasture": 13, "livestock_yard": 14, "farm_warehouse": 15, "bakery": 15,
 	"police_station": 2, "hospital": 3,
 	"lawn": 1, "flower_bed": 1, "street_tree": 1, "bush": 1,
-	"street_lamp": 16, "wind_turbine": 16, "solar_panel": 16, "fitness_club": 17, "pizzeria": 17, "power_plant": 17, "theatre": 18, "battery": 18, "aquapark": 19, "amusement_park": 19
+	"street_lamp": 16, "wind_turbine": 16, "solar_panel": 16, "fitness_club": 17, "pizzeria": 17, "power_plant": 17, "theatre": 18, "battery": 18, "aquapark": 19, "amusement_park": 19, "heat_plant": 20
 }
 const LANDSCAPING_TYPES = ["lawn", "flower_bed", "street_tree", "bush", "street_lamp"]
 const LEISURE_TYPES = ["fitness_club", "pizzeria", "theatre", "aquapark", "amusement_park"]
-const ENERGY_TYPES = ["street_lamp", "wind_turbine", "solar_panel", "power_plant", "battery"]
+const ENERGY_TYPES = ["street_lamp", "wind_turbine", "solar_panel", "power_plant", "battery", "heat_plant"]
 const SERVICE_TYPES = ["fire_station", "police_station", "hospital", "depot"]
 const FARM_TYPES = ["field", "barn", "mill", "bakery", "pasture", "livestock_yard", "farm_warehouse"]
 

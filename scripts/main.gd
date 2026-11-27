@@ -983,13 +983,14 @@ func build_external_location_placeholders() -> void:
 		root.name = {"energy_complex": "regional_energy", "rail_depot": "regional_rail", "airport": "regional_airport"}.get(location_id, "regional_%s" % location_id)
 		# Regional landmarks are passive edge scenery. Keep them above the fog
 		# overlay so the overview can actually show their silhouettes/details.
-		root.position = definition.position + Vector3(0, 6.45, 0)
+		root.position = definition.position + Vector3(0, 0.25, 0)
 		external_location_visuals.add_child(root)
 		var catalog_scene: String = Catalog.scene_path(location_id) if Catalog.TYPES.has(location_id) else "procedural://" + location_id
 		# A low, desaturated base keeps the future site readable without looking
 		# like an available construction plot.
-		Art.box(root, Vector3(0, 0.08, 0), Vector3(13.0, 0.18, 9.0), muted)
-		Art.box(root, Vector3(0, 0.2, 0), Vector3(11.2, 0.10, 7.2), Color("778b83"))
+		var campus_color: Color = {"airport": Color("1f78c8"), "rail_depot": Color("d8a51e"), "energy_complex": Color("4caa62")}.get(location_id, muted)
+		Art.box(root, Vector3(0, 0.08, 0), Vector3(13.0, 0.18, 9.0), campus_color)
+		Art.box(root, Vector3(0, 0.2, 0), Vector3(11.2, 0.10, 7.2), campus_color.lightened(0.18))
 		match location_id:
 			"energy_complex":
 				Art.box(root, Vector3(-3.1, 3.0, 0), Vector3(2.8, 5.8, 2.8), accent)
@@ -1067,10 +1068,17 @@ func build_external_location_placeholders() -> void:
 				baggage_tug.position = Vector3(1.8, 0.38, -2.4)
 				root.add_child(baggage_tug)
 				Art.box(baggage_tug, Vector3(0, 0, 0), Vector3(0.8, 0.45, 0.5), Color("807b69"))
+		# The first two meshes are the flat campus foundation. Lift only the
+		# procedural equipment above the terrain so it cannot be z-clipped.
+		var campus_children := root.get_children()
+		for child_index in range(2, campus_children.size()):
+			var campus_child := campus_children[child_index] as Node3D
+			if campus_child != null:
+				campus_child.position.y += 2.0
 		for mesh in root.find_children("*", "GeometryInstance3D", true, false):
 			var landmark_material := StandardMaterial3D.new()
 			landmark_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			var mesh_color := Color(0.46, 0.54, 0.56, 0.9)
+			var mesh_color: Color = {"airport": Color(0.10, 0.42, 0.78, 0.98), "rail_depot": Color(0.82, 0.58, 0.08, 0.98), "energy_complex": Color(0.18, 0.62, 0.30, 0.98)}.get(location_id, Color(0.46, 0.54, 0.56, 0.9))
 			if location_id == "airport":
 				var parent_name := str(mesh.get_parent().name)
 				mesh_color = Color(0.36, 0.52, 0.62, 0.95) if parent_name == "ParkedPlaneBlue" else (Color(0.64, 0.40, 0.42, 0.95) if parent_name == "TaxiPlaneRed" else mesh_color)
@@ -1085,8 +1093,8 @@ func build_external_location_placeholders() -> void:
 		var procedural_visual := Node3D.new()
 		procedural_visual.name = "ProceduralVisual"
 		root.add_child(procedural_visual)
-		print("FMT_REGION root=", root.name, " children=", root.get_child_count(), " visual_root=ProceduralVisual scene=", catalog_scene)
-		print("FMT_REGION meshes=", root.name, " count=", root.find_children("*", "MeshInstance3D", true, false).size())
+		print("FMT_REGION root=", root.name, " children=", root.get_child_count(), " visual_root=ProceduralVisual scene=", catalog_scene, " global_position=", root.global_position, " global_scale=", root.global_scale, " visible=", root.visible)
+		print("FMT_REGION meshes_after_ready=", root.name, " count=", root.find_children("*", "MeshInstance3D", true, false).size())
 	print("FMT_REGION total_children=", external_location_visuals.get_child_count())
 
 
@@ -1729,11 +1737,15 @@ func toggle_region_overview() -> void:
 		region_overview_previous_size = camera.size
 		region_overview_previous_focus = focus_point
 		region_overview_active = true
+		if fog_visuals != null:
+			fog_visuals.visible = false
 		camera.size = maxf(camera.size, 172.0)
 		set_camera_focus(Vector3(0, 0, 14))
 		region_overview_button.text = tr_text("Вернуть масштаб", "Return zoom")
 	else:
 		region_overview_active = false
+		if fog_visuals != null:
+			fog_visuals.visible = true
 		camera.size = clampf(region_overview_previous_size, 45.0, 190.0)
 		set_camera_focus(region_overview_previous_focus)
 		region_overview_button.text = tr_text("Обзор региона", "Region overview")

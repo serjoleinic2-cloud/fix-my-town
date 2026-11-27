@@ -86,8 +86,9 @@ func load_data(raw: Variant) -> void:
 		target.visual_level = clampi(int(stored.get("visual_level", 0)), 0, 3)
 		target.animation_enabled = bool(stored.get("animation_enabled", false)) and target.state == "active"
 		for key in ["energy_factor", "materials_factor", "orders_factor", "rating_factor", "failure_clock"]:
-			if stored.get(key, 0.0) is int or stored.get(key, 0.0) is float:
-				target[key] = maxf(0.0, float(stored[key]))
+			var value: Variant = stored.get(key, 0.0)
+			if value is int or value is float:
+				target[key] = maxf(0.0, float(value))
 
 func is_visible(location_id: String) -> bool:
 	return DEFINITIONS.has(location_id)

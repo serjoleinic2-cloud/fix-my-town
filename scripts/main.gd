@@ -10,6 +10,7 @@ const TerritoryGrid = preload("res://scripts/territory_grid.gd")
 const GroundRoadVisuals = preload("res://scripts/ground_road_visuals.gd")
 const CitizenPool = preload("res://scripts/citizen_pool.gd")
 const WorldStatusIndicators = preload("res://scripts/world_status_indicators.gd")
+const ExternalLocations = preload("res://scripts/external_locations.gd")
 const INK = Color("252c38")
 const BLUE = Color("258ed2")
 const PAPER = Color("fbf9f4")
@@ -21,6 +22,8 @@ var world: Node3D
 var scenery: Node3D
 var plots: Node3D
 var territory_visuals: Node3D
+var external_location_visuals: Node3D
+var external_location_elapsed: float = 0.0
 var clean_start_visual: bool = false
 var fog_visuals: MultiMeshInstance3D
 var car: Node3D
@@ -61,6 +64,10 @@ var screen: Control
 var hud: PanelContainer
 var hud_toggle_button: Button
 var hud_collapsed: bool = false
+var region_overview_button: Button
+var region_overview_active: bool = false
+var region_overview_previous_size: float = 76.0
+var region_overview_previous_focus := Vector3.ZERO
 var navbar: PanelContainer
 var sheet: PanelContainer
 var sheet_scroll: ScrollContainer
@@ -676,6 +683,11 @@ func build_ui() -> void:
 	hud_toggle_button.add_theme_stylebox_override("normal", style(Color("d6eafa"), 14, Color("6daed1")))
 	hud_toggle_button.add_theme_stylebox_override("hover", style(Color("c4e2f4"), 14, Color("4d96bd")))
 	hud_toggle_button.add_theme_stylebox_override("pressed", style(Color("acd5ee"), 14, Color("347da8")))
+	region_overview_button = button(screen, "Обзор региона", toggle_region_overview, true)
+	region_overview_button.name = "RegionOverviewButton"
+	region_overview_button.custom_minimum_size = Vector2(190, 62)
+	region_overview_button.add_theme_font_size_override("font_size", 16)
+	region_overview_button.tooltip_text = tr_text("Показать город и внешние локации", "Show the city and regional landmarks")
 	sheet = card(screen)
 	sheet.resized.connect(func():
 		if not updating_layout:
@@ -751,6 +763,7 @@ func update_layout() -> void:
 	hud_toggle_button.size = Vector2(68, 62)
 	hud_toggle_button.text = "‹" if hud_collapsed else "›"
 	call_deferred("align_hud_toggle")
+	region_overview_button.position = Vector2(safe_left, hud.position.y + hud.size.y + 8)
 	var budget_card := hud.find_child("BudgetCard", true, false)
 	var rating_card := hud.find_child("RatingCard", true, false)
 	if budget_card != null:
@@ -799,6 +812,7 @@ func update_layout() -> void:
 	# may inspect or build elsewhere while firefighters handle the call.
 	var service_mode: bool = selection_kind in ["signal", "leak"]
 	var fullscreen_menu: bool = selection_kind in ["catalog", "catalog_detail", "catalog_legacy_placement", "land_cell", "grid_house", "grid_upgrade", "grid_road", "district_status"]
+	region_overview_button.visible = not fullscreen_menu
 	navbar.visible = not service_mode
 	harvest_all_button.set_meta("menu_hidden", fullscreen_menu or service_mode)
 	update_harvest_button()
@@ -912,7 +926,13 @@ func build_world() -> void:
 	territory_visuals = Node3D.new()
 	territory_visuals.name = "ExpansionTerritory"
 	world.add_child(territory_visuals)
+	external_location_visuals = Node3D.new()
+	external_location_visuals.name = "RegionalLandmarks"
+	world.add_child(external_location_visuals)
 	build_fog_overlay()
+	# Edge landmarks stay visible above the fog as muted silhouettes, while
+	# remaining non-interactive until their campaign levels are activated.
+	build_external_location_placeholders()
 	if game.empty_city_mode and not game.has_city_hall():
 		create_city_hall_site_guide()
 	construction_root = Node3D.new()
@@ -946,6 +966,119 @@ func build_world() -> void:
 	citizen_pool.name = "CitizenPool"
 	world.add_child(citizen_pool)
 	citizen_pool.setup(game, quality, Callable(self, "map_position"), scenery.traffic_controller)
+
+func build_external_location_placeholders() -> void:
+	# These are deliberately passive silhouettes: they reserve no territory,
+	# have no colliders and never activate a service on a new or old save.
+	if external_location_visuals == null:
+		return
+	for child in external_location_visuals.get_children():
+		child.queue_free()
+	var muted := Color("68777b")
+	var accent := Color("809095")
+	for location_id: String in ExternalLocations.DEFINITIONS:
+		var definition: Dictionary = ExternalLocations.DEFINITIONS[location_id]
+		var root := Node3D.new()
+		root.name = {"energy_complex": "regional_energy", "rail_depot": "regional_rail", "airport": "regional_airport"}.get(location_id, "regional_%s" % location_id)
+		root.position = definition.position + Vector3(0, 0.45, 0)
+		external_location_visuals.add_child(root)
+		# A low, desaturated base keeps the future site readable without looking
+		# like an available construction plot.
+		Art.box(root, Vector3(0, 0.08, 0), Vector3(13.0, 0.18, 9.0), muted)
+		Art.box(root, Vector3(0, 0.2, 0), Vector3(11.2, 0.10, 7.2), Color("778b83"))
+		match location_id:
+			"energy_complex":
+				Art.box(root, Vector3(-3.1, 3.0, 0), Vector3(2.8, 5.8, 2.8), accent)
+				var solar := Node3D.new()
+				solar.name = "SolarStage1"
+				root.add_child(solar)
+				for panel_x in [-2.8, -1.0, 0.8, 2.6]:
+					Art.box(solar, Vector3(panel_x, 0.7, 0), Vector3(1.2, 0.08, 2.2), Color("667f82"))
+				var wind := Node3D.new()
+				wind.name = "WindStage2"
+				root.add_child(wind)
+				Art.cylinder(wind, Vector3(2.7, 2.2, 0), 1.5, 4.2, accent, 0.82, 12)
+				var rotor := Node3D.new()
+				rotor.name = "WindRotor"
+				rotor.position = Vector3(2.7, 4.1, 0)
+				wind.add_child(rotor)
+				for blade_angle in [0.0, 2.094, 4.188]:
+					var blade := Art.box(rotor, Vector3(cos(blade_angle) * 1.15, sin(blade_angle) * 1.15, 0), Vector3(0.12, 2.2, 0.12), Color("829195"))
+					blade.rotation.z = -blade_angle
+				var cooling := Node3D.new()
+				cooling.name = "PowerStage3"
+				root.add_child(cooling)
+				Art.cylinder(cooling, Vector3(-0.4, 1.1, 2.1), 1.15, 2.1, Color("748588"), 0.7, 12)
+				Art.cylinder(cooling, Vector3(2.1, 1.0, 2.1), 0.9, 1.9, Color("748588"), 0.7, 12)
+				Art.box(root, Vector3(0, 0.8, 0), Vector3(7.0, 0.9, 3.4), muted)
+			"rail_depot":
+				Art.box(root, Vector3(0, 1.5, 0), Vector3(8.2, 2.8, 4.2), accent)
+				# Three parallel tracks, platforms and a short branch make the
+				# future depot readable at the regional overview scale.
+				for rail_x in [-3.0, 0.0, 3.0]:
+					Art.box(root, Vector3(rail_x, 0.32, 0), Vector3(0.16, 0.08, 8.0), Color("526466"))
+					for sleeper_z in range(-3, 4):
+						Art.box(root, Vector3(rail_x, 0.25, sleeper_z * 1.05), Vector3(1.55, 0.06, 0.12), Color("68716f"))
+				Art.box(root, Vector3(-1.5, 0.52, -0.1), Vector3(1.0, 0.22, 7.0), Color("b9b4a1"))
+				Art.box(root, Vector3(1.5, 0.52, -0.1), Vector3(1.0, 0.22, 7.0), Color("b9b4a1"))
+				var branch := Art.box(root, Vector3(4.5, 0.32, 4.0), Vector3(0.16, 0.08, 4.0), Color("526466"))
+				branch.rotation.y = -0.35
+				Art.box(root, Vector3(0, 3.0, 0), Vector3(9.2, 0.16, 4.8), muted)
+				var train := Node3D.new()
+				train.name = "RegionalTrain"
+				train.position = Vector3(3.0, 0.85, -2.7)
+				root.add_child(train)
+				Art.box(train, Vector3(0, 0, 0), Vector3(2.4, 0.75, 1.0), Color("657c83"))
+				Art.box(train, Vector3(-1.55, 0, 0), Vector3(0.5, 0.68, 0.9), Color("7b8e91"))
+			"airport":
+				Art.box(root, Vector3(0, 0.25, 0), Vector3(10.4, 0.14, 3.0), Color("596a6e"))
+				Art.box(root, Vector3(1.8, 1.3, 1.0), Vector3(4.4, 2.3, 2.2), accent)
+				# Apron parking bays and two jet bridges connect the terminal to
+				# the parked aircraft without adding gameplay colliders.
+				for bay_z in [-2.4, -1.3, 2.5]:
+					Art.box(root, Vector3(-1.8, 0.34, bay_z), Vector3(4.8, 0.08, 0.72), Color("647679"))
+				for bridge_z in [0.2, 1.5]:
+					var jet_bridge := Art.box(root, Vector3(-0.35, 1.0, bridge_z), Vector3(2.0, 0.32, 0.42), Color("9ca8a5"))
+					jet_bridge.rotation.y = 0.12
+				Art.cylinder(root, Vector3(-3.3, 2.2, 1.0), 0.65, 4.0, accent, 0.9, 10)
+				var parked_plane := Node3D.new()
+				parked_plane.name = "ParkedPlaneBlue"
+				parked_plane.position = Vector3(-2.8, 0.85, -1.3)
+				root.add_child(parked_plane)
+				Art.box(parked_plane, Vector3(0, 0, 0), Vector3(3.8, 0.22, 0.42), Color("71858d"))
+				Art.box(parked_plane, Vector3(0, 0.05, 0), Vector3(0.35, 0.18, 2.4), Color("71858d"))
+				var taxi_plane := Node3D.new()
+				taxi_plane.name = "TaxiPlaneRed"
+				taxi_plane.position = Vector3(2.2, 0.7, 1.2)
+				root.add_child(taxi_plane)
+				Art.box(taxi_plane, Vector3(0, 0, 0), Vector3(3.2, 0.2, 0.38), Color("8a7475"))
+				Art.box(taxi_plane, Vector3(0, 0.04, 0), Vector3(0.28, 0.16, 2.0), Color("8a7475"))
+				var apron_bus := Node3D.new()
+				apron_bus.name = "ApronBus"
+				apron_bus.position = Vector3(3.6, 0.45, -2.4)
+				root.add_child(apron_bus)
+				Art.box(apron_bus, Vector3(0, 0, 0), Vector3(1.8, 0.7, 0.65), Color("7c8784"))
+				var baggage_tug := Node3D.new()
+				baggage_tug.name = "BaggageTug"
+				baggage_tug.position = Vector3(1.8, 0.38, -2.4)
+				root.add_child(baggage_tug)
+				Art.box(baggage_tug, Vector3(0, 0, 0), Vector3(0.8, 0.45, 0.5), Color("807b69"))
+		for mesh in root.find_children("*", "GeometryInstance3D", true, false):
+			var landmark_material := StandardMaterial3D.new()
+			landmark_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			var mesh_color := Color(0.46, 0.54, 0.56, 0.9)
+			if location_id == "airport":
+				var parent_name := str(mesh.get_parent().name)
+				mesh_color = Color(0.36, 0.52, 0.62, 0.95) if parent_name == "ParkedPlaneBlue" else (Color(0.64, 0.40, 0.42, 0.95) if parent_name == "TaxiPlaneRed" else mesh_color)
+			landmark_material.albedo_color = mesh_color
+			landmark_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			# Future edge landmarks remain readable above the exploration fog;
+			# they are passive visuals with no gameplay or collision state.
+			landmark_material.no_depth_test = true
+			landmark_material.render_priority = 10
+			mesh.material_override = landmark_material
+			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
 
 func create_object(parent: Node3D, type_id: String, persistent_id: String, point: Vector3) -> Node3D:
 	var object := GameObjectScene.instantiate()
@@ -1254,12 +1387,18 @@ func road_cell_touches_river(col: int, row: int) -> bool:
 func draw_northern_boundary(parent: Node3D) -> void:
 	# Low-poly hills close the northern horizon without becoming buildable land.
 	# They live outside row zero and never enter territory placement or routing.
+	# A continuous dark foothill closes the gaps between the individual peaks.
+	var ridge_center: Vector3 = game.territory.cell_world(int(TerritoryGrid.WIDTH / 2), 0) + Vector3(0, 1.6, -7.2)
+	Art.box(parent, ridge_center, Vector3(TerritoryGrid.WIDTH * TerritoryGrid.CELL_SIZE, 3.2, 1.8), Color("536450"))
 	for col in range(0, TerritoryGrid.WIDTH, 4):
 		var seed: int = col * 37 + 11
 		var base: Vector3 = game.territory.cell_world(col, 0) + Vector3(0, 0, -6.5 - float(seed % 3))
 		var height: float = 9.0 + float(seed % 5)
 		Art.cylinder(parent, base + Vector3(0, height * 0.5 - 0.2, 0), 6.2 + float(seed % 4), height, Color("66785c"), 0.0, 7)
 		Art.cylinder(parent, base + Vector3(5.0, height * 0.38 - 0.3, -2.2), 4.8, height * 0.76, Color("778765"), 0.0, 7)
+	# Pale haze behind the ridge makes the world boundary read as fog rather
+	# than a hard edge when the regional overview is active.
+	Art.box(parent, ridge_center + Vector3(0, 5.0, -1.1), Vector3(TerritoryGrid.WIDTH * TerritoryGrid.CELL_SIZE, 6.0, 0.35), Color("aebbb4"))
 
 func draw_riverfront_cell(parent: Node3D, center: Vector3, col: int, row: int) -> void:
 	# Water is generated for every river-column cell, including below the bridge.
@@ -1569,9 +1708,25 @@ func focus_problem() -> void:
 	set_camera_focus(point + Vector3(5, 0, 5))
 
 func change_zoom(amount: float) -> void:
-	camera.size = clampf(camera.size + amount, 45, 110)
+	camera.size = clampf(camera.size + amount, 45, 190)
 	if placing_stop:
 		update_preview()
+
+func toggle_region_overview() -> void:
+	if camera == null:
+		return
+	if not region_overview_active:
+		region_overview_previous_size = camera.size
+		region_overview_previous_focus = focus_point
+		region_overview_active = true
+		camera.size = maxf(camera.size, 172.0)
+		set_camera_focus(Vector3(0, 0, 14))
+		region_overview_button.text = tr_text("Вернуть масштаб", "Return zoom")
+	else:
+		region_overview_active = false
+		camera.size = clampf(region_overview_previous_size, 45.0, 190.0)
+		set_camera_focus(region_overview_previous_focus)
+		region_overview_button.text = tr_text("Обзор региона", "Region overview")
 
 func handle_map_gesture(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -1611,7 +1766,7 @@ func handle_map_gesture(event: InputEvent) -> void:
 			touch_points[event.index] = event.position
 			var current_distance := _touch_distance()
 			if pinch_distance > 0.0 and current_distance > 1.0:
-				camera.size = clampf(camera.size * pinch_distance / current_distance, 45.0, 110.0)
+				camera.size = clampf(camera.size * pinch_distance / current_distance, 45.0, 190.0)
 			pinch_distance = current_distance
 			return
 		var motion := InputEventMouseMotion.new()
@@ -1656,7 +1811,7 @@ func _handle_mouse_gesture(event: InputEvent) -> void:
 				set_camera_focus(focus_point + previous - current)
 		drag_previous = event.position
 	elif event is InputEventMagnifyGesture:
-		camera.size = clampf(camera.size / event.factor, 45, 110)
+		camera.size = clampf(camera.size / event.factor, 45, 190)
 		if placing_stop:
 			update_preview()
 
@@ -4108,6 +4263,16 @@ func _process(delta: float) -> void:
 		return
 	ensure_legacy_visuals()
 	elapsed += delta
+	external_location_elapsed += delta
+	if external_location_visuals != null:
+		var energy_root := external_location_visuals.get_node_or_null("regional_energy")
+		var rotor := energy_root.get_node_or_null("WindStage2/WindRotor") if energy_root != null else null
+		if rotor != null:
+			rotor.rotation.z = fposmod(external_location_elapsed * 0.55, TAU)
+		var airport_root := external_location_visuals.get_node_or_null("regional_airport")
+		var taxi_plane := airport_root.get_node_or_null("TaxiPlaneRed") if airport_root != null else null
+		if taxi_plane != null:
+			taxi_plane.position.z = 1.2 + sin(external_location_elapsed * 0.18) * 1.0
 	completion_left = maxf(0, completion_left - delta)
 	if fire_notice_left > 0:
 		fire_notice_left = maxf(0, fire_notice_left - delta)

@@ -2,8 +2,10 @@ extends RefCounted
 
 const Transit = preload("res://scripts/transit.gd")
 const TerritoryGrid = preload("res://scripts/territory_grid.gd")
+const ExternalLocations = preload("res://scripts/external_locations.gd")
 var transit = Transit.new()
 var territory = TerritoryGrid.new()
+var external_locations = ExternalLocations.new()
 const WATER_AFFECTED_HOMES = [12, 16, 20]
 const AMENITY_RADIUS: float = 22.0
 const MAX_SAVED_BUDGET: int = 1000000000
@@ -190,6 +192,7 @@ func start_empty_city() -> void:
 	market_order_serial = 0
 	market_order_history.clear()
 	notification_history.clear()
+	external_locations.reset()
 	day_time = 0.35
 	power_ratio = 1.0
 	battery_charge = 0.0
@@ -3297,7 +3300,7 @@ func save_game() -> void:
 		"fire_ruins": fire_ruins, "fire_jobs": encoded_fire_jobs, "job_vehicle_id": job_vehicle_id, "jam_cleared": jam_cleared, "police_job": encoded_police_job, "construction_job": construction_job,
 		"incident_seed": incident_seed, "incident_rng_state": str(incident_rng.state), "incident_clock": incident_clock, "incidents": incidents,
 		"last_incident_type": last_incident_type, "incident_type_cooldowns": incident_type_cooldowns, "fire_cooldown_left": fire_cooldown_left, "farm_stock": farm_stock, "day_time": day_time, "battery_charge": battery_charge, "farm_grain": farm_grain, "farm_flour": farm_flour, "farm_blueprint": farm_blueprint, "market_order_amount": market_order_amount, "market_order_reward": market_order_reward, "market_order_days_left": market_order_days_left, "market_order_fresh": market_order_fresh, "market_order_id": market_order_id, "market_order_serial": market_order_serial, "market_order_history": market_order_history, "notification_history": notification_history,
-		"district_house_limit": district_house_limit, "district_tasks": district_tasks}
+		"district_house_limit": district_house_limit, "district_tasks": district_tasks, "external_locations": external_locations.data()}
 	var file := FileAccess.open(save_path + ".tmp", FileAccess.WRITE)
 	if file == null:
 		return
@@ -3754,6 +3757,7 @@ func load_game() -> bool:
 			if item is Dictionary and str(item.get("id", "")) != "":
 				notification_history.append(item.duplicate(true))
 	_trim_history(notification_history)
+	external_locations.load_data(data.get("external_locations", {}))
 	if market_order_amount == 0:
 		market_order_reward = 0
 		market_order_days_left = 0

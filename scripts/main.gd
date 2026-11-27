@@ -984,12 +984,14 @@ func build_external_location_placeholders() -> void:
 		# Regional landmarks are passive edge scenery. Keep them above the fog
 		# overlay so the overview can actually show their silhouettes/details.
 		root.top_level = true
-		root.position = definition.position + Vector3(0, 0.25, 0)
 		# The campus is authored in metres and must remain large enough to read
 		# as a real district. Camera zoom is never used to fake its scale.
 		root.scale = Vector3.ONE * {"airport": 4.2, "rail_depot": 4.0, "energy_complex": 4.0, "farm_campus": 3.8}.get(location_id, 1.0)
 		root.set_meta("regional_footprint", definition.get("footprint", Vector2.ZERO))
 		external_location_visuals.add_child(root)
+		# Assign the world anchor after parenting. This avoids inheriting any
+		# future transform of the city root and makes the placement unambiguous.
+		root.global_position = definition.position + Vector3(0, 0.25, 0)
 		var catalog_scene: String = Catalog.scene_path(location_id) if Catalog.TYPES.has(location_id) else "procedural://" + location_id
 		# A low, desaturated base keeps the future site readable without looking
 		# like an available construction plot.
@@ -1110,10 +1112,10 @@ func build_external_location_placeholders() -> void:
 				mesh_color = Color(0.36, 0.52, 0.62, 0.95) if parent_name == "ParkedPlaneBlue" else (Color(0.64, 0.40, 0.42, 0.95) if parent_name == "TaxiPlaneRed" else mesh_color)
 			landmark_material.albedo_color = mesh_color
 			landmark_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			# Future edge landmarks remain readable above the exploration fog;
-			# they are passive visuals with no gameplay or collision state.
-			landmark_material.no_depth_test = true
-			landmark_material.render_priority = 10
+			# Use normal depth testing. A distant campus must not draw over the city
+			# merely because it is a passive landmark.
+			landmark_material.no_depth_test = false
+			landmark_material.render_priority = 0
 			mesh.material_override = landmark_material
 			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var procedural_visual := Node3D.new()

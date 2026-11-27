@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Data-only foundation for the three future city-edge locations.  They are
+## Data-only foundation for the future regional campuses. They are
 ## deliberately inactive until their campaign level is enabled.
 class_name ExternalLocations
 
@@ -9,25 +9,37 @@ const DEFINITIONS := {
 		"title_ru": "Энергетический комплекс",
 		"title_en": "Energy complex",
 		"side": "top",
-		"activation_level": 20,
+		"activation_level": 7,
 		"modules": ["generation", "storage", "grid_control", "safety"],
-		"position": Vector3(0, 0, -24)
+		"position": Vector3(0, 0, -112),
+		"footprint": Vector2(43.2, 43.2)
 	},
 	"rail_depot": {
 		"title_ru": "Железнодорожное депо",
 		"title_en": "Rail depot",
 		"side": "right",
-		"activation_level": 21,
+		"activation_level": 9,
 		"modules": ["platform", "freight", "signals", "maintenance"],
-		"position": Vector3(24, 0, 8)
+		"position": Vector3(100, 0, -28),
+		"footprint": Vector2(43.2, 43.2)
 	},
 	"airport": {
 		"title_ru": "Аэропорт",
 		"title_en": "Airport",
 		"side": "left",
-		"activation_level": 22,
+		"activation_level": 10,
 		"modules": ["terminal", "runway", "cargo", "control_tower"],
-		"position": Vector3(-24, 0, 8)
+		"position": Vector3(-105, 0, 0),
+		"footprint": Vector2(57.6, 43.2)
+	},
+	"farm_campus": {
+		"title_ru": "Фермерский кампус",
+		"title_en": "Farm campus",
+		"side": "bottom",
+		"activation_level": 12,
+		"modules": ["fields", "storage", "animals", "processing"],
+		"position": Vector3(95, 0, 112),
+		"footprint": Vector2(57.6, 43.2)
 	}
 }
 

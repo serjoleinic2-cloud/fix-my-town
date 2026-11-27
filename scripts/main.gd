@@ -874,7 +874,7 @@ func map_position(point: Vector3) -> Vector3:
 func build_world() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 52 if game.empty_city_mode else 76
+	camera.size = 210.0 if region_overview_active else (52 if game.empty_city_mode else 76)
 	camera.far = 400
 	world.add_child(camera)
 	set_camera_focus(focus_point)
@@ -980,10 +980,15 @@ func build_external_location_placeholders() -> void:
 	for location_id: String in ExternalLocations.DEFINITIONS:
 		var definition: Dictionary = ExternalLocations.DEFINITIONS[location_id]
 		var root := Node3D.new()
-		root.name = {"energy_complex": "regional_energy", "rail_depot": "regional_rail", "airport": "regional_airport"}.get(location_id, "regional_%s" % location_id)
+		root.name = {"energy_complex": "regional_energy", "rail_depot": "regional_rail", "airport": "regional_airport", "farm_campus": "regional_farm"}.get(location_id, "regional_%s" % location_id)
 		# Regional landmarks are passive edge scenery. Keep them above the fog
 		# overlay so the overview can actually show their silhouettes/details.
+		root.top_level = true
 		root.position = definition.position + Vector3(0, 0.25, 0)
+		# The campus is authored in metres and must remain large enough to read
+		# as a real district. Camera zoom is never used to fake its scale.
+		root.scale = Vector3.ONE * {"airport": 4.2, "rail_depot": 4.0, "energy_complex": 4.0, "farm_campus": 3.8}.get(location_id, 1.0)
+		root.set_meta("regional_footprint", definition.get("footprint", Vector2.ZERO))
 		external_location_visuals.add_child(root)
 		var catalog_scene: String = Catalog.scene_path(location_id) if Catalog.TYPES.has(location_id) else "procedural://" + location_id
 		# A low, desaturated base keeps the future site readable without looking
@@ -1068,6 +1073,27 @@ func build_external_location_placeholders() -> void:
 				baggage_tug.position = Vector3(1.8, 0.38, -2.4)
 				root.add_child(baggage_tug)
 				Art.box(baggage_tug, Vector3(0, 0, 0), Vector3(0.8, 0.45, 0.5), Color("807b69"))
+			"farm_campus":
+				# A real regional campus: fields are separated from the service yard,
+				# so the farm can grow without being confused with the depot.
+				Art.box(root, Vector3(0, 0.42, 0), Vector3(13.2, 0.12, 8.8), Color("8f7245"))
+				for field_x in [-5.0, -1.8, 1.8, 5.0]:
+					Art.box(root, Vector3(field_x, 0.58, -2.35), Vector3(2.6, 0.10, 2.4), Color("b58a45"))
+					for furrow in range(-4, 5):
+						Art.box(root, Vector3(field_x + furrow * 0.22, 0.66, -2.35), Vector3(0.06, 0.03, 2.1), Color("6d542f"))
+				Art.box(root, Vector3(-3.9, 1.8, 2.3), Vector3(3.2, 2.4, 2.5), Color("9b6542"))
+				Art.box(root, Vector3(-3.9, 3.15, 2.3), Vector3(3.5, 0.18, 2.8), Color("6b4636"))
+				Art.box(root, Vector3(0.1, 1.15, 2.35), Vector3(1.5, 2.0, 1.5), Color("b5b0a0"))
+				Art.cylinder(root, Vector3(2.2, 1.45, 2.3), 0.75, 2.3, Color("9e9b84"), 0.72, 12)
+				Art.box(root, Vector3(4.75, 0.72, 2.25), Vector3(3.0, 0.10, 2.6), Color("6e8052"))
+				for fence_x in [3.25, 6.25]:
+					Art.box(root, Vector3(fence_x, 0.95, 2.25), Vector3(0.08, 0.65, 2.7), Color("564938"))
+				for fence_z in [0.95, 3.55]:
+					Art.box(root, Vector3(4.75, 0.95, fence_z), Vector3(3.0, 0.65, 0.08), Color("564938"))
+				Art.box(root, Vector3(4.2, 0.7, -0.15), Vector3(5.0, 0.10, 0.9), Color("8b8b7c"))
+				for tree_x in [-6.3, 6.4]:
+					Art.cylinder(root, Vector3(tree_x, 1.0, 3.7), 0.22, 1.4, Color("765239"), 0.8, 8)
+					Art.cylinder(root, Vector3(tree_x, 2.15, 3.7), 0.85, 1.7, Color("4f8a4d"), 0.8, 8)
 		# The first two meshes are the flat campus foundation. Lift only the
 		# procedural equipment above the terrain so it cannot be z-clipped.
 		var campus_children := root.get_children()
@@ -1078,7 +1104,7 @@ func build_external_location_placeholders() -> void:
 		for mesh in root.find_children("*", "GeometryInstance3D", true, false):
 			var landmark_material := StandardMaterial3D.new()
 			landmark_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			var mesh_color: Color = {"airport": Color(0.10, 0.42, 0.78, 0.98), "rail_depot": Color(0.82, 0.58, 0.08, 0.98), "energy_complex": Color(0.18, 0.62, 0.30, 0.98)}.get(location_id, Color(0.46, 0.54, 0.56, 0.9))
+			var mesh_color: Color = {"airport": Color(0.10, 0.42, 0.78, 0.98), "rail_depot": Color(0.82, 0.58, 0.08, 0.98), "energy_complex": Color(0.18, 0.62, 0.30, 0.98), "farm_campus": Color(0.62, 0.42, 0.22, 0.98)}.get(location_id, Color(0.46, 0.54, 0.56, 0.9))
 			if location_id == "airport":
 				var parent_name := str(mesh.get_parent().name)
 				mesh_color = Color(0.36, 0.52, 0.62, 0.95) if parent_name == "ParkedPlaneBlue" else (Color(0.64, 0.40, 0.42, 0.95) if parent_name == "TaxiPlaneRed" else mesh_color)
@@ -1716,7 +1742,10 @@ func farm_building_road_rotation(entry: Dictionary) -> float:
 	return 0.0
 
 func set_camera_focus(point: Vector3) -> void:
-	focus_point = Vector3(clampf(point.x, -55, 65), 0, clampf(point.z, -80, 105))
+	# Regional campuses live outside the 96x96 city grid; the camera must be
+	# allowed to reach their reserved zones instead of snapping them back over
+	# the city.
+	focus_point = Vector3(clampf(point.x, -145, 145), 0, clampf(point.z, -145, 145))
 	camera.position = focus_point + Vector3(70, 88, 70)
 	camera.look_at(focus_point)
 
@@ -1726,7 +1755,7 @@ func focus_problem() -> void:
 	set_camera_focus(point + Vector3(5, 0, 5))
 
 func change_zoom(amount: float) -> void:
-	camera.size = clampf(camera.size + amount, 45, 190)
+	camera.size = clampf(camera.size + amount, 45, 260)
 	if placing_stop:
 		update_preview()
 
@@ -1739,14 +1768,14 @@ func toggle_region_overview() -> void:
 		region_overview_active = true
 		if fog_visuals != null:
 			fog_visuals.visible = false
-		camera.size = maxf(camera.size, 172.0)
-		set_camera_focus(Vector3(0, 0, 14))
+		camera.size = maxf(camera.size, 240.0)
+		set_camera_focus(Vector3(0, 0, 0))
 		region_overview_button.text = tr_text("Вернуть масштаб", "Return zoom")
 	else:
 		region_overview_active = false
 		if fog_visuals != null:
 			fog_visuals.visible = true
-		camera.size = clampf(region_overview_previous_size, 45.0, 190.0)
+		camera.size = clampf(region_overview_previous_size, 45.0, 260.0)
 		set_camera_focus(region_overview_previous_focus)
 		region_overview_button.text = tr_text("Обзор региона", "Region overview")
 

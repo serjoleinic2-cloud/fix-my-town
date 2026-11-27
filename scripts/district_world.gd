@@ -26,7 +26,10 @@ static func logical_position(point: Vector3) -> Vector3:
 	return Vector3(x, point.y, point.z / 4.8)
 
 func build() -> void:
-	Art.box(self, Vector3(0, -0.5, 0), Vector3(150, 0.9, 170), Color("8eaa69"))
+	# The city grid remains compact, but the regional campuses are intentionally
+	# outside it. Keep one continuous terrain plane so they never appear as
+	# floating cards or as objects squeezed into the city.
+	Art.box(self, Vector3(0, -0.5, 0), Vector3(300, 0.9, 300), Color("8eaa69"))
 	# Р’РѕРґР° Рё РЅР°Р±РµСЂРµР¶РЅР°СЏ РЅР° РїСЂР°РІРѕР№ РіСЂР°РЅРёС†Рµ СЂР°Р№РѕРЅР°.
 	Art.box(self, Vector3(43, -0.8, 0), Vector3(17, 0.25, 160), Color("62a8c2"))
 	Art.box(self, Vector3(34.5, -0.1, 0), Vector3(1, 1.3, 152), Color("b8b7a6"))

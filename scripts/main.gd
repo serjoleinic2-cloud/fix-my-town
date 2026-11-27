@@ -717,7 +717,8 @@ func build_ui() -> void:
 		content.offset_bottom = -7
 		content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		item.add_child(content)
-		icon(content, {"district": "pin", "build_tab": "hammer", "services": "people"}[key], 32)
+		var nav_icon: String = str({"district": "district", "build_tab": "build", "services": "services"}[key])
+		icon(content, nav_icon, 32)
 		var caption := label(24, content, "", true)
 		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		caption.name = "Caption"

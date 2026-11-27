@@ -980,8 +980,11 @@ func build_external_location_placeholders() -> void:
 		var definition: Dictionary = ExternalLocations.DEFINITIONS[location_id]
 		var root := Node3D.new()
 		root.name = {"energy_complex": "regional_energy", "rail_depot": "regional_rail", "airport": "regional_airport"}.get(location_id, "regional_%s" % location_id)
-		root.position = definition.position + Vector3(0, 0.45, 0)
+		# Regional landmarks are passive edge scenery. Keep them above the fog
+		# overlay so the overview can actually show their silhouettes/details.
+		root.position = definition.position + Vector3(0, 6.45, 0)
 		external_location_visuals.add_child(root)
+		var catalog_scene: String = Catalog.scene_path(location_id) if Catalog.TYPES.has(location_id) else "procedural://" + location_id
 		# A low, desaturated base keeps the future site readable without looking
 		# like an available construction plot.
 		Art.box(root, Vector3(0, 0.08, 0), Vector3(13.0, 0.18, 9.0), muted)
@@ -1078,6 +1081,12 @@ func build_external_location_placeholders() -> void:
 			landmark_material.render_priority = 10
 			mesh.material_override = landmark_material
 			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var procedural_visual := Node3D.new()
+		procedural_visual.name = "ProceduralVisual"
+		root.add_child(procedural_visual)
+		print("FMT_REGION root=", root.name, " children=", root.get_child_count(), " visual_root=ProceduralVisual scene=", catalog_scene)
+		print("FMT_REGION meshes=", root.name, " count=", root.find_children("*", "MeshInstance3D", true, false).size())
+	print("FMT_REGION total_children=", external_location_visuals.get_child_count())
 
 
 func create_object(parent: Node3D, type_id: String, persistent_id: String, point: Vector3) -> Node3D:

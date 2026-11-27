@@ -931,6 +931,7 @@ func build_world() -> void:
 	external_location_visuals.name = "RegionalLandmarks"
 	world.add_child(external_location_visuals)
 	build_fog_overlay()
+	build_regional_horizon_fog()
 	# Edge landmarks stay visible above the fog as muted silhouettes, while
 	# remaining non-interactive until their campaign levels are activated.
 	build_external_location_placeholders()
@@ -996,8 +997,10 @@ func build_external_location_placeholders() -> void:
 		# A low, desaturated base keeps the future site readable without looking
 		# like an available construction plot.
 		var campus_color: Color = {"airport": Color("1f78c8"), "rail_depot": Color("d8a51e"), "energy_complex": Color("4caa62")}.get(location_id, muted)
-		Art.box(root, Vector3(0, 0.08, 0), Vector3(13.0, 0.18, 9.0), campus_color)
-		Art.box(root, Vector3(0, 0.2, 0), Vector3(11.2, 0.10, 7.2), campus_color.lightened(0.18))
+		var zone_ground := Art.box(root, Vector3(0, 0.08, 0), Vector3(14.4, 0.18, 11.0), Color("7f9b68"))
+		zone_ground.name = "ZoneGround"
+		var zone_pad := Art.box(root, Vector3(0, 0.2, 0), Vector3(13.2, 0.10, 9.8), Color("9caf78"))
+		zone_pad.name = "ZonePad"
 		match location_id:
 			"energy_complex":
 				Art.box(root, Vector3(-3.1, 3.0, 0), Vector3(2.8, 5.8, 2.8), accent)
@@ -1104,6 +1107,8 @@ func build_external_location_placeholders() -> void:
 			if campus_child != null:
 				campus_child.position.y += 2.0
 		for mesh in root.find_children("*", "GeometryInstance3D", true, false):
+			if mesh.name in ["ZoneGround", "ZonePad"]:
+				continue
 			var landmark_material := StandardMaterial3D.new()
 			landmark_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			var mesh_color: Color = {"airport": Color(0.10, 0.42, 0.78, 0.98), "rail_depot": Color(0.82, 0.58, 0.08, 0.98), "energy_complex": Color(0.18, 0.62, 0.30, 0.98), "farm_campus": Color(0.62, 0.42, 0.22, 0.98)}.get(location_id, Color(0.46, 0.54, 0.56, 0.9))
@@ -1124,6 +1129,28 @@ func build_external_location_placeholders() -> void:
 		print("FMT_REGION root=", root.name, " children=", root.get_child_count(), " visual_root=ProceduralVisual scene=", catalog_scene, " global_position=", root.global_position, " global_scale=", root.global_scale, " visible=", root.visible)
 		print("FMT_REGION meshes_after_ready=", root.name, " count=", root.find_children("*", "MeshInstance3D", true, false).size())
 	print("FMT_REGION total_children=", external_location_visuals.get_child_count())
+
+func build_regional_horizon_fog() -> void:
+	# Irregular translucent ground patches hide the unfinished world perimeter.
+	# They stay outside every reserved campus, leaving land visible beneath each.
+	var fog_root := Node3D.new()
+	fog_root.name = "RegionalHorizonFog"
+	world.add_child(fog_root)
+	var patches := [
+		[Vector3(0, 0.12, -143), Vector3(280, 0.12, 38), Color(0.68, 0.75, 0.76, 0.72)],
+		[Vector3(-143, 0.14, -68), Vector3(38, 0.14, 110), Color(0.72, 0.78, 0.77, 0.64)],
+		[Vector3(145, 0.13, -88), Vector3(32, 0.13, 74), Color(0.64, 0.72, 0.74, 0.68)],
+		[Vector3(-104, 0.16, 143), Vector3(92, 0.16, 34), Color(0.75, 0.79, 0.76, 0.62)],
+		[Vector3(36, 0.18, 145), Vector3(74, 0.18, 26), Color(0.66, 0.75, 0.76, 0.58)]
+	]
+	for patch_data: Array in patches:
+		var mist := Art.box(fog_root, patch_data[0], patch_data[1], patch_data[2])
+		var mist_material := StandardMaterial3D.new()
+		mist_material.albedo_color = patch_data[2]
+		mist_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mist_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mist.material_override = mist_material
+		mist.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func create_object(parent: Node3D, type_id: String, persistent_id: String, point: Vector3) -> Node3D:
@@ -1621,7 +1648,6 @@ func redraw_territory() -> void:
 		ground.material_override = ground_material
 		ground.position = TerritoryGrid.ORIGIN + Vector3((TerritoryGrid.WIDTH - 1) * TerritoryGrid.CELL_SIZE * 0.5, -0.015, (TerritoryGrid.HEIGHT - 1) * TerritoryGrid.CELL_SIZE * 0.5)
 		tile_visuals.add_child(ground)
-		draw_northern_boundary(tile_visuals)
 	# Старый квартал нарисован DistrictWorld исторически. Закрываем газоном удалённые сегменты, чтобы карта совпадала с сеткой.
 	var row_range := range(TerritoryGrid.HEIGHT) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_ROWS.x, TerritoryGrid.EXPANSION_ROWS.y + 1)
 	var col_range := range(TerritoryGrid.WIDTH) if game.empty_city_mode else range(TerritoryGrid.EXPANSION_COLS.x, TerritoryGrid.EXPANSION_COLS.y + 1)

@@ -31,12 +31,12 @@ func build() -> void:
 	# floating cards or as objects squeezed into the city.
 	Art.box(self, Vector3(0, -0.5, 0), Vector3(300, 0.9, 300), Color("8eaa69"))
 	# Р’РѕРґР° Рё РЅР°Р±РµСЂРµР¶РЅР°СЏ РЅР° РїСЂР°РІРѕР№ РіСЂР°РЅРёС†Рµ СЂР°Р№РѕРЅР°.
-	Art.box(self, Vector3(43, -0.8, 0), Vector3(17, 0.25, 160), Color("62a8c2"))
-	Art.box(self, Vector3(34.5, -0.1, 0), Vector3(1, 1.3, 152), Color("b8b7a6"))
-	Art.box(self, Vector3(33.2, 0.03, 0), Vector3(1.8, 0.15, 152), Color("d4cfb9"))
-	for z in range(-72, 73, 3):
+	Art.box(self, Vector3(43, -0.8, 0), Vector3(17, 0.25, 292), Color("62a8c2"))
+	Art.box(self, Vector3(34.5, -0.1, 0), Vector3(1, 1.3, 292), Color("b8b7a6"))
+	Art.box(self, Vector3(33.2, 0.03, 0), Vector3(1.8, 0.15, 292), Color("d4cfb9"))
+	for z in range(-144, 145, 3):
 		Art.box(self, Vector3(34, 0.8, z), Vector3(0.12, 1.3, 0.12), Color("687776"))
-	Art.box(self, Vector3(34, 1.3, 0), Vector3(0.09, 0.09, 148), Color("687776"))
+	Art.box(self, Vector3(34, 1.3, 0), Vector3(0.09, 0.09, 288), Color("687776"))
 	for z in [-43.2, -28.8, -14.4, 0, 14.4, 28.8, 43.2]:
 		# Keep the legacy district on the same compact profile as expansion
 		# streets: 2.8 m asphalt with two 0.9 m sidewalks.

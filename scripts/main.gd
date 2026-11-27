@@ -1026,6 +1026,14 @@ func build_external_location_placeholders() -> void:
 				Art.cylinder(cooling, Vector3(-0.4, 1.1, 2.1), 1.15, 2.1, Color("748588"), 0.7, 12)
 				Art.cylinder(cooling, Vector3(2.1, 1.0, 2.1), 0.9, 1.9, Color("748588"), 0.7, 12)
 				Art.box(root, Vector3(0, 0.8, 0), Vector3(7.0, 0.9, 3.4), muted)
+				for solar_row in [-3.2, -1.0, 1.2, 3.4]:
+					Art.box(root, Vector3(solar_row, 0.74, -3.0), Vector3(1.7, 0.10, 2.2), Color("315d78"))
+					Art.box(root, Vector3(solar_row, 0.86, -3.0), Vector3(1.55, 0.03, 2.0), Color("4d91b1"))
+				for turbine_x in [-5.4, 5.3]:
+					Art.cylinder(root, Vector3(turbine_x, 3.4, -2.7), 0.42, 6.5, Color("d4d7cc"), 0.8, 10)
+					Art.cylinder(root, Vector3(turbine_x, 6.7, -2.7), 0.68, 0.18, Color("e5e7df"), 0.9, 10)
+				Art.box(root, Vector3(3.8, 0.75, 0.0), Vector3(1.7, 1.4, 1.3), Color("748588"))
+				Art.box(root, Vector3(3.8, 1.55, 0.0), Vector3(0.9, 0.06, 0.7), Color("f0c64d"))
 			"rail_depot":
 				Art.box(root, Vector3(0, 1.5, 0), Vector3(8.2, 2.8, 4.2), accent)
 				# Three parallel tracks, platforms and a short branch make the
@@ -1045,6 +1053,13 @@ func build_external_location_placeholders() -> void:
 				root.add_child(train)
 				Art.box(train, Vector3(0, 0, 0), Vector3(2.4, 0.75, 1.0), Color("657c83"))
 				Art.box(train, Vector3(-1.55, 0, 0), Vector3(0.5, 0.68, 0.9), Color("7b8e91"))
+				Art.box(root, Vector3(0, 3.3, -2.9), Vector3(7.8, 0.14, 1.0), Color("b9b4a1"))
+				Art.box(root, Vector3(-4.0, 1.0, 2.6), Vector3(2.5, 1.8, 1.8), Color("8b6651"))
+				for signal_x in [-4.8, 0.0, 4.8]:
+					Art.cylinder(root, Vector3(signal_x, 1.45, -4.0), 0.08, 2.8, Color("4a5655"), 0.9, 8)
+					Art.box(root, Vector3(signal_x, 2.85, -4.0), Vector3(0.42, 0.42, 0.18), Color("c84d45"))
+				for container_x in [-4.9, -3.7, -2.5]:
+					Art.box(root, Vector3(container_x, 0.72, 4.0), Vector3(0.9, 0.9, 1.1), Color("b86d43"))
 			"airport":
 				Art.box(root, Vector3(0, 0.25, 0), Vector3(10.4, 0.14, 3.0), Color("596a6e"))
 				Art.box(root, Vector3(1.8, 1.3, 1.0), Vector3(4.4, 2.3, 2.2), accent)
@@ -1078,6 +1093,11 @@ func build_external_location_placeholders() -> void:
 				baggage_tug.position = Vector3(1.8, 0.38, -2.4)
 				root.add_child(baggage_tug)
 				Art.box(baggage_tug, Vector3(0, 0, 0), Vector3(0.8, 0.45, 0.5), Color("807b69"))
+				Art.box(root, Vector3(0.0, 0.28, 5.0), Vector3(12.0, 0.08, 1.1), Color("555f60"))
+				for runway_x in range(-5, 6):
+					Art.box(root, Vector3(float(runway_x), 0.34, 5.0), Vector3(0.22, 0.03, 0.22), Color("f4d76c"))
+				for window_x in [-0.3, 0.6, 1.5, 2.4, 3.3]:
+					Art.box(root, Vector3(window_x, 1.65, -0.13), Vector3(0.42, 0.42, 0.05), Color("74c5d6"))
 			"farm_campus":
 				# A real regional campus: fields are separated from the service yard,
 				# so the farm can grow without being confused with the depot.
@@ -1099,6 +1119,9 @@ func build_external_location_placeholders() -> void:
 				for tree_x in [-6.3, 6.4]:
 					Art.cylinder(root, Vector3(tree_x, 1.0, 3.7), 0.22, 1.4, Color("765239"), 0.8, 8)
 					Art.cylinder(root, Vector3(tree_x, 2.15, 3.7), 0.85, 1.7, Color("4f8a4d"), 0.8, 8)
+				Art.box(root, Vector3(0.0, 0.72, -4.0), Vector3(11.5, 0.10, 0.8), Color("6f6b54"))
+				for irrigation_x in [-5.2, -1.7, 1.7, 5.2]:
+					Art.cylinder(root, Vector3(irrigation_x, 0.75, -2.35), 0.06, 0.25, Color("6e9fb0"), 0.9, 8)
 		# The first two meshes are the flat campus foundation. Lift only the
 		# procedural equipment above the terrain so it cannot be z-clipped.
 		var campus_children := root.get_children()
@@ -1109,19 +1132,8 @@ func build_external_location_placeholders() -> void:
 		for mesh in root.find_children("*", "GeometryInstance3D", true, false):
 			if mesh.name in ["ZoneGround", "ZonePad"]:
 				continue
-			var landmark_material := StandardMaterial3D.new()
-			landmark_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			var mesh_color: Color = {"airport": Color(0.10, 0.42, 0.78, 0.98), "rail_depot": Color(0.82, 0.58, 0.08, 0.98), "energy_complex": Color(0.18, 0.62, 0.30, 0.98), "farm_campus": Color(0.62, 0.42, 0.22, 0.98)}.get(location_id, Color(0.46, 0.54, 0.56, 0.9))
-			if location_id == "airport":
-				var parent_name := str(mesh.get_parent().name)
-				mesh_color = Color(0.36, 0.52, 0.62, 0.95) if parent_name == "ParkedPlaneBlue" else (Color(0.64, 0.40, 0.42, 0.95) if parent_name == "TaxiPlaneRed" else mesh_color)
-			landmark_material.albedo_color = mesh_color
-			landmark_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			# Use normal depth testing. A distant campus must not draw over the city
-			# merely because it is a passive landmark.
-			landmark_material.no_depth_test = false
-			landmark_material.render_priority = 0
-			mesh.material_override = landmark_material
+			# Preserve each module's authored color so a campus reads as a place,
+			# not as one large marker. Depth testing remains normal.
 			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var procedural_visual := Node3D.new()
 		procedural_visual.name = "ProceduralVisual"
